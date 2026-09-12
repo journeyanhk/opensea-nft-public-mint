@@ -58,7 +58,22 @@ RPC_URL_ROBINHOOD=
 
 Bạn cũng có thể dán URL RPC hoặc Alchemy key trực tiếp khi chương trình hỏi.
 
-> **Không đặt private key hoặc seed phrase trong `.env`.**
+### Private key trong .env (tùy chọn)
+
+Dán key vào `.env` để dùng lại ở những lần chạy sau:
+
+```env
+PRIVATE_KEY=YOUR_PRIVATE_KEY
+# Hoặc nhiều ví:
+PRIVATE_KEYS=KEY_1,KEY_2
+```
+
+Khi chạy, chọn **Dùng key từ .env** ở menu nguồn private key. Nếu điền cả hai
+biến, chương trình nạp cả hai và bỏ qua ví trùng. Chỉ địa chỉ ví được hiển thị.
+Bạn vẫn có thể chọn **Dán key ẩn vào CLI** để chỉ giữ key trong RAM.
+
+Key trong `.env` là văn bản thuần; không chia sẻ file này. `.env` đã được bỏ qua
+trong Git. Không điền seed phrase vào các biến private key.
 
 ### OpenSea API key (chỉ khi dùng slug/link bộ sưu tập)
 
@@ -93,7 +108,7 @@ hãy dán trực tiếp địa chỉ contract `0x...`; quá trình mint không c
 
 Chương trình lần lượt hỏi:
 
-1. Private key — nhập được ẩn và chỉ giữ trong RAM.
+1. Private key — chọn dán ẩn (chỉ giữ trong RAM) hoặc nạp từ `.env`.
 2. Blockchain và số NFT muốn mint trên mỗi ví.
 3. Liên kết OpenSea, slug hoặc địa chỉ contract NFT.
 4. RPC, phí gas và thời điểm gửi.
@@ -112,7 +127,7 @@ hoạt động. Không có giao dịch nào được gửi trước khi bạn x�
 - Hỗ trợ public SeaDrop; không hỗ trợ allowlist `mintSigned()`.
 - Chi phí gas thực tế là base fee + tip; max fee chỉ là mức trần.
 - Chương trình kiểm tra chain ID, số dư, giới hạn mỗi ví và thời gian mở mint.
-- Private key không được ghi xuống ổ đĩa; RPC chỉ nhận raw transaction đã ký.
+- Key dán vào CLI không được ghi xuống ổ đĩa. Key tự lưu trong `.env` tồn tại dưới dạng văn bản thuần; RPC chỉ nhận raw transaction đã ký.
 
 ## Chain hỗ trợ
 

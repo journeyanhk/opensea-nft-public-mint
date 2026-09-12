@@ -4,9 +4,10 @@
 // recipient and per-wallet cap all come from the contract — so no OpenSea
 // account, token or API key is involved in the mint itself.
 //
-// Nothing is written to disk: pasted keys live in memory for the run only.
+// CLI-pasted keys live in memory; loading keys from .env is optional.
 
 import chalk from "chalk";
+import { walletKeysFromEnv } from "./wallet-keys";
 import { JsonRpcProvider, Wallet, formatEther, getAddress, isAddress } from "ethers";
 import { CHAINS, ChainProfile, resolveChain } from "./chains";
 import { parseNftLink } from "./nft-link";
@@ -21,7 +22,7 @@ import {
 import { parseRpcEndpoints } from "./rpc-blast";
 import { buildLocalMintPlan, LocalMintPlan } from "./seadrop-public";
 import { localPublicSnipe } from "./local-mint";
-import { istTimeToDate, toIST } from "./time-format";
+import { vnTimeToDate, toVNTime } from "./time-format";
 import { askChoice, askHidden, askNumber, askText, askYesNo, closePrompts } from "./prompt";
 
 export async function runWizard(): Promise<void> {
@@ -115,7 +116,7 @@ export async function runWizard(): Promise<void> {
   console.log(chalk.gray(`    Tối đa mỗi ví: ${drop.maxTotalMintableByWallet || "không giới hạn"}`));
   console.log(
     chalk.gray(
-      `    Thời gian:     ${toIST(startsAt)} → ${toIST(endsAt)} IST  ${live ? chalk.green("(đang mở)") : chalk.yellow(`(mở sau ${formatRemaining(startsAt.getTime() - Date.now())})`)}`
+      `    Thời gian:     ${toVNTime(startsAt)} → ${toVNTime(endsAt)} VN (UTC+7)  ${live ? chalk.green("(đang mở)") : chalk.yellow(`(mở sau ${formatRemaining(startsAt.getTime() - Date.now())})`)}`
     )
   );
 
@@ -250,6 +251,23 @@ export async function runWizard(): Promise<void> {
 
 async function promptKeys(): Promise<string[]> {
   console.log(chalk.bold.white("Private key"));
+  const source = await askChoice("Nguồn private key", [
+    { label: "Dán key ẩn vào CLI", value: "paste", hint: "chỉ giữ trong RAM" },
+    { label: "Dùng key từ .env", value: "env", hint: "PRIVATE_KEY hoặc PRIVATE_KEYS" },
+  ]);
+  if (source === "env") {
+    try {
+      const keys = walletKeysFromEnv();
+      if (keys.length > 0) {
+        keys.forEach((key, i) => console.log(chalk.green(`  ✓ [W${i}] ${new Wallet(key).address}`)));
+        console.log(chalk.gray(`  Đã nạp ${keys.length} ví từ .env.`));
+        return keys;
+      }
+      console.log(chalk.yellow("  .env chưa có PRIVATE_KEY hoặc PRIVATE_KEYS. Hãy dán key bên dưới."));
+    } catch (err) {
+      console.log(chalk.red(`  ✗ ${(err as Error).message} Hãy dán key bên dưới.`));
+    }
+  }
   console.log(chalk.gray("  Dán mỗi dòng một key — nội dung nhập sẽ được ẩn. Để trống khi hoàn tất."));
   console.log(chalk.gray("  Mỗi key được xác nhận bằng địa chỉ ví. Không có dữ liệu nào được lưu xuống ổ đĩa."));
 
@@ -430,27 +448,27 @@ async function promptTiming(
     choices.push({
       label: "Chờ đợt mint mở",
       value: "wait",
-      hint: `${toIST(at)} IST · còn ${formatRemaining(at.getTime() - Date.now())} · gửi tại T-0`,
+      hint: `${toVNTime(at)} VN (UTC+7) · còn ${formatRemaining(at.getTime() - Date.now())} · gửi tại T-0`,
     });
   } else {
     choices.push({ label: "Gửi ngay", value: "now", hint: "đợt mint đang mở" });
   }
-  choices.push({ label: "Thời gian tùy chỉnh", value: "custom", hint: "HH:MM, 24 giờ IST, hôm nay" });
+  choices.push({ label: "Thời gian tùy chỉnh", value: "custom", hint: "HH:MM, 24 giờ VN (UTC+7), hôm nay" });
 
   const pick = await askChoice("Khi nào gửi giao dịch?", choices, 0);
 
-  if (pick === "wait") return { targetStart: at, timingLabel: `chờ đợt mint — ${toIST(at)} IST` };
+  if (pick === "wait") return { targetStart: at, timingLabel: `chờ đợt mint — ${toVNTime(at)} VN (UTC+7)` };
   if (pick === "now") return { targetStart: null, timingLabel: "gửi ngay lập tức" };
 
   for (;;) {
-    const raw = await askText("Thời gian (HH:MM, 24 giờ, IST)");
+    const raw = await askText("Thời gian (HH:MM, 24 giờ, VN (UTC+7))");
     try {
-      const custom = istTimeToDate(raw);
+      const custom = vnTimeToDate(raw);
       if (custom.getTime() < startTime * 1000) {
-        console.log(chalk.bold.red(`  ✗ Thời điểm này trước khi đợt mint mở (${toIST(at)} IST) — giao dịch sẽ revert.`));
+        console.log(chalk.bold.red(`  ✗ Thời điểm này trước khi đợt mint mở (${toVNTime(at)} VN (UTC+7)) — giao dịch sẽ revert.`));
         if (!(await askYesNo("Vẫn sử dụng thời điểm này?", false))) continue;
       }
-      return { targetStart: custom, timingLabel: `tùy chỉnh — ${toIST(custom)} IST` };
+      return { targetStart: custom, timingLabel: `tùy chỉnh — ${toVNTime(custom)} VN (UTC+7)` };
     } catch (err: any) {
       console.log(chalk.red(`  ✗ ${err.message}`));
     }
