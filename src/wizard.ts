@@ -22,6 +22,7 @@ import {
 import { parseRpcEndpoints } from "./rpc-blast";
 import { buildLocalMintPlan, LocalMintPlan } from "./seadrop-public";
 import { localPublicSnipe } from "./local-mint";
+import { detectPresale, runAllowlistWizard } from "./allowlist";
 import { vnTimeToDate, toVNTime } from "./time-format";
 import { askChoice, askHidden, askNumber, askText, askYesNo, closePrompts } from "./prompt";
 
@@ -49,6 +50,20 @@ export async function runWizard(): Promise<void> {
   const nftContract = target.contract;
   chainKey = target.chainKey;
   const chainProfile = resolveChain(chainKey)!;
+
+  if (target.slug && process.env.OPENSEA_API_KEY?.trim()) {
+    console.log(chalk.gray("  Đang tự kiểm tra vòng mint đang mở trên OpenSea..."));
+    if (await detectPresale(target.slug, nftContract, chainKey)) {
+      console.log(chalk.green("  ✓ Có vòng Allowlist/WL FCFS hiện tại hoặc sắp mở — kiểm tra ví, tự chờ vòng kế tiếp nếu mint bị từ chối."));
+      for (const key of walletKeys) {
+        await runAllowlistWizard(false, { slug: target.slug, key, quantity });
+      }
+      return;
+    }
+    console.log(chalk.gray("  Không có vòng presale đang mở; đọc lịch Public on-chain."));
+  } else {
+    console.log(chalk.yellow("  Chỉ đọc Public on-chain. Tự nhận diện Allowlist cần link/slug collection và OPENSEA_API_KEY trong .env."));
+  }
 
   // ── 5. RPC endpoints ──────────────────────────────────────────────────
   const manualRpcs = await promptRpc(chainProfile);
@@ -317,7 +332,7 @@ async function promptQuantity(walletCount: number): Promise<number> {
 
 async function promptTarget(
   chainKey: string
-): Promise<{ contract: string; label: string; chainKey: string }> {
+): Promise<{ contract: string; label: string; chainKey: string; slug?: string }> {
   console.log(chalk.bold.white("\nNFT mục tiêu"));
   console.log(chalk.gray("  Dán liên kết OpenSea (bộ sưu tập hoặc NFT), slug hoặc địa chỉ contract."));
 
@@ -383,7 +398,7 @@ async function promptTarget(
           activeChain = resolveChain(info.chain)!.key;
         }
       }
-      return { contract: resolved.address, label: info.name || parsed.value, chainKey: activeChain };
+      return { contract: resolved.address, label: info.name || parsed.value, chainKey: activeChain, slug: parsed.value };
     } catch (err: any) {
       console.log(chalk.red(`  ✗ ${err.message}`));
       console.log(

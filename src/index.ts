@@ -8,16 +8,19 @@ dotenv.config({ path: path.resolve(process.cwd(), ".env") });
 
 import { runWizard } from "./wizard";
 import { closePrompts } from "./prompt";
+import { runAllowlistWizard } from "./allowlist";
 
 const HELP = `
 NFT Public Mint Sniper
 
-  Mint NFT trong các đợt public SeaDrop. Calldata được tạo từ dữ liệu on-chain,
-  không cần tài khoản hoặc access token OpenSea.
+  Tự nhận diện vòng Allowlist/WL FCFS đang mở khi nhập link/slug OpenSea
+  và có OPENSEA_API_KEY. Public sử dụng dữ liệu on-chain.
 
 Sử dụng
-  npm start              chạy trình hướng dẫn tương tác
+  npm start              tự nhận diện vòng mint trong trình hướng dẫn
   npm start -- --help    hiển thị trợ giúp này
+  npm start -- --check-allowlist  kiểm tra ví ở vòng Allowlist đang mở, không cần private key
+  npm start -- --allowlist        kiểm tra và mint Allowlist/WL FCFS đang mở
 
 Chương trình sẽ lần lượt hỏi private key, chain, số lượng, liên kết NFT, RPC,
 gas và thời điểm mint. Có thể đặt giá trị mặc định trong .env (xem .env.example).
@@ -31,7 +34,11 @@ async function main(): Promise<void> {
   }
 
   try {
-    await runWizard();
+    if (args.includes("--check-allowlist") || args.includes("--allowlist")) {
+      await runAllowlistWizard(args.includes("--check-allowlist"));
+    } else {
+      await runWizard();
+    }
     closePrompts();
     process.exit(0);
   } catch (err: any) {
