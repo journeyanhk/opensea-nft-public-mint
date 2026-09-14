@@ -1,27 +1,27 @@
-// Display and interpret mint times in Vietnam time (UTC+7).
+// Display and interpret mint times in UTC+8.
 
-const VN_OFFSET_MS = 7 * 60 * 60 * 1000;
+const UTC8_OFFSET_MS = 8 * 60 * 60 * 1000;
 
-export function toVNTime(date: Date): string {
-  const vn = new Date(date.getTime() + VN_OFFSET_MS);
-  const day = vn.getUTCDate();
-  const month = vn.getUTCMonth() + 1;
-  const year = vn.getUTCFullYear();
-  const hours = vn.getUTCHours();
-  const minutes = vn.getUTCMinutes().toString().padStart(2, "0");
-  const seconds = vn.getUTCSeconds().toString().padStart(2, "0");
+export function toUtc8Time(date: Date): string {
+  const utc8 = new Date(date.getTime() + UTC8_OFFSET_MS);
+  const day = utc8.getUTCDate();
+  const month = utc8.getUTCMonth() + 1;
+  const year = utc8.getUTCFullYear();
+  const hours = utc8.getUTCHours();
+  const minutes = utc8.getUTCMinutes().toString().padStart(2, "0");
+  const seconds = utc8.getUTCSeconds().toString().padStart(2, "0");
   return `${day}/${month}/${year}, ${hours.toString().padStart(2, "0")}:${minutes}:${seconds}`;
 }
 
-// "21:05" → today at 21:05 VN (UTC+7), expressed as a UTC Date.
-export function vnTimeToDate(hhmm: string): Date {
+// "21:05" → today at 21:05 UTC+8, expressed as a UTC Date.
+export function utc8TimeToDate(hhmm: string): Date {
   const match = /^(\d{1,2}):(\d{2})$/.exec(hhmm.trim());
-  if (!match) throw new Error(`时间 "${hhmm}" 无效 — 请使用 HH:MM（24 小时制，越南时间 UTC+7）`);
+  if (!match) throw new Error(`Invalid time "${hhmm}" — use HH:MM (24h, UTC+8)`);
   const hh = Number(match[1]);
   const mm = Number(match[2]);
-  if (hh > 23 || mm > 59) throw new Error(`时间 "${hhmm}" 无效 — 请使用 HH:MM（24 小时制，越南时间 UTC+7）`);
+  if (hh > 23 || mm > 59) throw new Error(`Invalid time "${hhmm}" — use HH:MM (24h, UTC+8)`);
 
-  const todayVN = new Date(Date.now() + VN_OFFSET_MS);
-  todayVN.setUTCHours(hh, mm, 0, 0);
-  return new Date(todayVN.getTime() - VN_OFFSET_MS);
+  const todayUtc8 = new Date(Date.now() + UTC8_OFFSET_MS);
+  todayUtc8.setUTCHours(hh, mm, 0, 0);
+  return new Date(todayUtc8.getTime() - UTC8_OFFSET_MS);
 }

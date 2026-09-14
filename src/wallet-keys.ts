@@ -11,7 +11,7 @@ export function walletKeysFromEnv(env: NodeJS.ProcessEnv = process.env): string[
       wallet = new Wallet(raw.startsWith("0x") ? raw : `0x${raw}`);
     } catch {
       // ethers errors may contain the supplied key: never forward them.
-      throw new Error(`.env 中的第 ${index + 1} 个私钥无效。`);
+      throw new Error(`Invalid private key #${index + 1} in .env.`);
     }
     if (!seen.has(wallet.address)) {
       seen.add(wallet.address);

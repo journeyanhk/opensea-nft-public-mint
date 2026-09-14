@@ -27,25 +27,25 @@ export async function resolveSlug(
     // needs a key, so the message has to cover both rather than guess.
     throw new Error(
       apiKey
-        ? `OpenSea 拒绝了 API key (${res.status}) — 请检查 OPENSEA_API_KEY。`
-        : `OpenSea 拒绝了查询 (${res.status}) — slug 可能有误或需要 API key。`
+        ? `OpenSea refused the API key (${res.status}) — check OPENSEA_API_KEY.`
+        : `OpenSea refused the lookup (${res.status}) — the slug may be wrong or needs an API key.`
     );
   }
   if (res.status === 404) {
-    throw new Error(`未找到 OpenSea 集合 "${slug}"。`);
+    throw new Error(`OpenSea collection "${slug}" not found.`);
   }
   if (res.status === 429) {
-    throw new Error("OpenSea 查询频率受限 — 请稍后重试。");
+    throw new Error("OpenSea rate limited the lookup — try again later.");
   }
   if (!res.ok) {
-    throw new Error(`无法解析 "${slug}": ${res.status} ${res.statusText}`);
+    throw new Error(`Could not resolve "${slug}": ${res.status} ${res.statusText}`);
   }
 
   const json = (await res.json()) as any;
 
   const contracts = json.contracts;
   if (!contracts || contracts.length === 0) {
-    throw new Error(`"${slug}" 没有列出任何合约。`);
+    throw new Error(`No contracts listed for "${slug}".`);
   }
 
   // Prefer the contract on the chain we're actually minting on, otherwise take

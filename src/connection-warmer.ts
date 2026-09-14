@@ -5,7 +5,7 @@ import chalk from "chalk";
 // methods, so we warm with eth_sendRawTransaction and ignore the error — the
 // handshake is the point, not the response.
 export async function warmConnections(rpcUrls: string[]): Promise<void> {
-  console.log(chalk.gray("  正在预热连接..."));
+  console.log(chalk.gray("  Warming connections..."));
 
   await Promise.all(
     rpcUrls.map((url) =>
@@ -24,5 +24,5 @@ export async function warmConnections(rpcUrls: string[]): Promise<void> {
     )
   );
 
-  console.log(chalk.green("  连接已就绪。"));
+  console.log(chalk.green("  Connections ready."));
 }

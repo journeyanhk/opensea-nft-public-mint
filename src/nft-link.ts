@@ -32,7 +32,7 @@ function isContractAddress(value: string): boolean {
 
 export function parseNftLink(input: string): LinkTarget {
   const raw = input.trim().replace(/\/+$/, "");
-  if (!raw) throw new Error("未输入 NFT 链接");
+  if (!raw) throw new Error("No NFT link entered");
 
   // Bare contract address
   if (isContractAddress(raw)) {
@@ -47,7 +47,7 @@ export function parseNftLink(input: string): LinkTarget {
   // Otherwise treat it as a collection slug
   if (!/^[a-zA-Z0-9._-]+$/.test(raw)) {
     throw new Error(
-      `无法将 "${input}" 识别为 OpenSea 链接、集合 slug 或合约地址`
+      `Could not read "${input}" as an OpenSea link, collection slug, or contract address`
     );
   }
   return { kind: "slug", value: raw.toLowerCase() };
@@ -63,7 +63,7 @@ function parseUrl(raw: string): LinkTarget {
       .map((s) => s.trim())
       .filter((s) => s.length > 0);
   } catch {
-    throw new Error(`无法将 "${raw}" 解析为 URL`);
+    throw new Error(`Could not parse "${raw}" as a URL`);
   }
 
   // /assets/<chain>/<address>/<tokenId>  and  /item/<chain>/<address>/<tokenId>
@@ -98,6 +98,6 @@ function parseUrl(raw: string): LinkTarget {
   if (looseAddr) return { kind: "address", value: looseAddr };
 
   throw new Error(
-    `在 "${raw}" 中找不到集合 slug 或合约地址 — 请粘贴 OpenSea 的集合或 NFT 链接`
+    `No collection slug or contract address found in "${raw}" — paste an OpenSea collection or NFT link`
   );
 }

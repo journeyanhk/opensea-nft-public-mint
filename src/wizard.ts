@@ -23,7 +23,7 @@ import { parseRpcEndpoints } from "./rpc-blast";
 import { buildLocalMintPlan, LocalMintPlan } from "./seadrop-public";
 import { localPublicSnipe } from "./local-mint";
 import { detectPresale, runAllowlistWizard } from "./allowlist";
-import { vnTimeToDate, toVNTime } from "./time-format";
+import { utc8TimeToDate, toUtc8Time } from "./time-format";
 import { askChoice, askHidden, askNumber, askText, askYesNo, closePrompts } from "./prompt";
 
 export async function runWizard(): Promise<void> {
@@ -34,7 +34,7 @@ export async function runWizard(): Promise<void> {
 
   // ── 2. Chain ──────────────────────────────────────────────────────────
   let chainKey = await askChoice<string>(
-    "选择区块链",
+    "Select blockchain",
     CHAINS.map((c) => ({ label: c.name, value: c.key, hint: `chain id ${c.chainId}` })),
     Math.max(
       0,
@@ -52,31 +52,31 @@ export async function runWizard(): Promise<void> {
   const chainProfile = resolveChain(chainKey)!;
 
   if (target.slug && process.env.OPENSEA_API_KEY?.trim()) {
-    console.log(chalk.gray("  正在自动检查 OpenSea 上正在进行的 mint 轮次..."));
+    console.log(chalk.gray("  Auto-checking OpenSea for a live mint stage..."));
     if (await detectPresale(target.slug, nftContract, chainKey)) {
-      console.log(chalk.green("  ✓ 存在当前或即将开始的 Allowlist/WL FCFS 轮次 — 将检查钱包，若 mint 被拒绝会自动等待下一轮。"));
+      console.log(chalk.green("  ✓ An Allowlist/WL FCFS stage is live or coming up — wallets will be checked, and the next stage will be awaited if mint is rejected."));
       for (const key of walletKeys) {
         await runAllowlistWizard(false, { slug: target.slug, key, quantity });
       }
       return;
     }
-    console.log(chalk.gray("  当前没有进行中的 presale 轮次；读取链上 Public 排期。"));
+    console.log(chalk.gray("  No presale stage is live; reading the on-chain Public schedule."));
   } else {
-    console.log(chalk.yellow("  仅读取链上 Public。自动识别 Allowlist 需要 collection 链接/slug 以及 .env 中的 OPENSEA_API_KEY。"));
+    console.log(chalk.yellow("  Reading on-chain Public only. Auto-detecting Allowlist requires a collection link/slug and OPENSEA_API_KEY in .env."));
   }
 
   // ── 5. RPC endpoints ──────────────────────────────────────────────────
   const manualRpcs = await promptRpc(chainProfile);
   const { urls: candidateRpcs, source } = resolveRpcsForChain(chainKey, manualRpcs);
-  console.log(chalk.gray(`  来源: ${source}`));
-  console.log(chalk.gray(`  正在检查 ${candidateRpcs.length} 个 endpoint...`));
+  console.log(chalk.gray(`  Source: ${source}`));
+  console.log(chalk.gray(`  Probing ${candidateRpcs.length} endpoint(s)...`));
 
   const plan = await planRpcs(candidateRpcs, chainProfile.chainId);
 
   for (const bad of plan.dropped) {
     const wrong = resolveChain(bad.chainId);
     console.log(
-      chalk.red(`    ✗ ${labelOf(bad.url)} 属于链 ${bad.chainId}${wrong ? ` (${wrong.name})` : ""} — 已剔除`)
+      chalk.red(`    ✗ ${labelOf(bad.url)} is on chain ${bad.chainId}${wrong ? ` (${wrong.name})` : ""} — dropped`)
     );
   }
   for (const ep of parseRpcEndpoints(plan.urls)) {
@@ -85,7 +85,7 @@ export async function runWizard(): Promise<void> {
       const benign = /not allowed|does not exist|not supported|method not found/i.test(failure.message);
       console.log(
         benign
-          ? chalk.gray(`    • ${ep.label}  (仅发送)`)
+          ? chalk.gray(`    • ${ep.label}  (send-only)`)
           : chalk.yellow(`    ⚠ ${ep.label}  ${failure.message.slice(0, 90)}`)
       );
     } else {
@@ -94,25 +94,25 @@ export async function runWizard(): Promise<void> {
   }
 
   if (plan.urls.length === 0) {
-    throw new Error(`没有可用于 ${chainProfile.name} 的 RPC endpoint`);
+    throw new Error(`No usable RPC endpoint for ${chainProfile.name}`);
   }
   if (!plan.verified) {
-    console.log(chalk.yellow(`  ⚠ 没有 endpoint 确认 chain ID ${chainProfile.chainId}。`));
-    if (!(await askYesNo("仍要继续吗？", false))) {
-      throw new Error("已取消 — 无法验证 RPC 所属链");
+    console.log(chalk.yellow(`  ⚠ No endpoint confirmed chain ID ${chainProfile.chainId}.`));
+    if (!(await askYesNo("Continue anyway?", false))) {
+      throw new Error("Cancelled — could not verify the RPC's chain");
     }
   } else {
-    console.log(chalk.green(`  ✓ 已确认 chain ID ${chainProfile.chainId} (${chainProfile.name})`));
+    console.log(chalk.green(`  ✓ Confirmed chain ID ${chainProfile.chainId} (${chainProfile.name})`));
   }
   const rpcUrls = plan.urls;
 
   // ── 6. Read the public drop from chain ────────────────────────────────
-  console.log(chalk.bold.white("\nmint 轮次"));
+  console.log(chalk.bold.white("\nMint stage"));
   const mintPlan = await buildLocalMintPlan(rpcUrls[0], nftContract, quantity);
   if (!mintPlan) {
     throw new Error(
-      `无法在 ${chainProfile.name} 上读取 ${nftContract} 的 SeaDrop public 轮次。\n` +
-        "  这可能不是 SeaDrop 集合，或配置保存在 token 合约自身。"
+      `Could not read a SeaDrop public stage for ${nftContract} on ${chainProfile.name}.\n` +
+        "  This may not be a SeaDrop collection, or the config lives on the token contract itself."
     );
   }
 
@@ -121,27 +121,27 @@ export async function runWizard(): Promise<void> {
   const endsAt = new Date(drop.endTime * 1000);
   const live = Date.now() >= startsAt.getTime() && Date.now() < endsAt.getTime();
 
-  console.log(chalk.green("  ✓ 已从链上 SeaDrop 生成 calldata — 无需 OpenSea token"));
-  console.log(chalk.gray(`    费用接收方: ${mintPlan.feeRecipient}`));
+  console.log(chalk.green("  ✓ Calldata built from on-chain SeaDrop — no OpenSea token needed"));
+  console.log(chalk.gray(`    Fee recipient: ${mintPlan.feeRecipient}`));
   console.log(
     chalk.gray(
-      `    价格:       ${formatEther(drop.mintPrice)} × ${quantity} = ${formatEther(mintPlan.value)} 每个钱包`
+      `    Price:         ${formatEther(drop.mintPrice)} × ${quantity} = ${formatEther(mintPlan.value)} per wallet`
     )
   );
-  console.log(chalk.gray(`    单钱包上限: ${drop.maxTotalMintableByWallet || "不限"}`));
+  console.log(chalk.gray(`    Per-wallet cap: ${drop.maxTotalMintableByWallet || "unlimited"}`));
   console.log(
     chalk.gray(
-      `    时间:       ${toVNTime(startsAt)} → ${toVNTime(endsAt)} 越南时间 (UTC+7)  ${live ? chalk.green("(进行中)") : chalk.yellow(`(距开始 ${formatRemaining(startsAt.getTime() - Date.now())})`)}`
+      `    Time:          ${toUtc8Time(startsAt)} → ${toUtc8Time(endsAt)} UTC+8  ${live ? chalk.green("(live)") : chalk.yellow(`(starts in ${formatRemaining(startsAt.getTime() - Date.now())})`)}`
     )
   );
 
   if (drop.maxTotalMintableByWallet > 0 && quantity > drop.maxTotalMintableByWallet) {
     console.log(
-      chalk.yellow(`  ⚠ 该轮次每个钱包最多只能 mint ${drop.maxTotalMintableByWallet} 个 NFT — 铸造 ${quantity} 个的交易将被 revert。`)
+      chalk.yellow(`  ⚠ This stage allows at most ${drop.maxTotalMintableByWallet} NFT(s) per wallet — minting ${quantity} will revert.`)
     );
   }
   if (Date.now() >= endsAt.getTime()) {
-    console.log(chalk.yellow("  ⚠ 该 public mint 轮次已在链上结束。"));
+    console.log(chalk.yellow("  ⚠ This public mint stage has already ended on-chain."));
   }
 
   // ── 7. Gas ────────────────────────────────────────────────────────────
@@ -149,7 +149,7 @@ export async function runWizard(): Promise<void> {
   console.log(chalk.bold.white("\nGas"));
   const baseFeeGwei = await currentBaseFeeGwei(provider);
   if (baseFeeGwei !== null) {
-    console.log(chalk.gray(`  当前网络 base fee: ${baseFeeGwei.toFixed(6)} gwei`));
+    console.log(chalk.gray(`  Current network base fee: ${baseFeeGwei.toFixed(6)} gwei`));
   }
 
   const envMaxFee = Number(process.env.MAX_FEE_PER_GAS || (chainKey === "ethereum" ? 80 : 2));
@@ -161,16 +161,16 @@ export async function runWizard(): Promise<void> {
   if (baseFeeGwei !== null) {
     const suggested = Math.ceil((baseFeeGwei * 2 + envPriority) * 1000) / 1000;
     if (envMaxFee < baseFeeGwei) defaultMaxFee = suggested;
-    console.log(chalk.gray(`  最低 ${baseFeeGwei.toFixed(6)} gwei；建议 ${suggested} 留有余量。`));
+    console.log(chalk.gray(`  Must be at least ${baseFeeGwei.toFixed(6)} gwei; ${suggested} leaves headroom.`));
   }
 
-  const maxFeeGwei = await askNumber("最大 gas 费 (gwei) — 上限", defaultMaxFee, {
+  const maxFeeGwei = await askNumber("Max gas fee (gwei) — ceiling", defaultMaxFee, {
     min: baseFeeGwei ?? 0,
   });
 
   // EIP-1559 caps the tip at the ceiling; ethers refuses to sign otherwise.
   const priorityDefault = Math.min(envPriority, maxFeeGwei);
-  const priorityGwei = await askNumber("优先费 / tip (gwei)", priorityDefault, {
+  const priorityGwei = await askNumber("Priority fee / tip (gwei)", priorityDefault, {
     min: 0,
     max: maxFeeGwei,
   });
@@ -183,7 +183,7 @@ export async function runWizard(): Promise<void> {
   const { targetStart, timingLabel } = await promptTiming(drop.startTime);
 
   // ── 9. Balances + affordability ───────────────────────────────────────
-  console.log(chalk.bold.white("\n钱包"));
+  console.log(chalk.bold.white("\nWallets"));
   const wallets = walletKeys.map((k) => new Wallet(k));
   const balances = await Promise.all(
     wallets.map((w) => provider.getBalance(w.address).catch(() => null))
@@ -196,17 +196,17 @@ export async function runWizard(): Promise<void> {
 
   wallets.forEach((w, i) => {
     const bal = balances[i];
-    const text = bal === null ? "无法读取余额" : `${Number(formatEther(bal)).toFixed(6)} ${symbol}`;
+    const text = bal === null ? "balance unreadable" : `${Number(formatEther(bal)).toFixed(6)} ${symbol}`;
     const short = bal !== null && bal < required;
     const line = `  [W${i}] ${w.address}  ${text}`;
-    console.log(short ? chalk.red(`${line}  ✗ 需要 ${formatEther(required)}`) : chalk.gray(line));
+    console.log(short ? chalk.red(`${line}  ✗ needs ${formatEther(required)}`) : chalk.gray(line));
   });
 
   const shortWallets = wallets.filter((_, i) => balances[i] !== null && (balances[i] as bigint) < required);
   if (shortWallets.length > 0) {
     console.log(
       chalk.gray(
-        `\n  节点要求每个钱包持有 gasLimit × maxFee${mintPlan.value > 0n ? " + mint 金额" : ""} = ${formatEther(required)} ${symbol}。`
+        `\n  Nodes require each wallet to hold gasLimit × maxFee${mintPlan.value > 0n ? " + mint amount" : ""} = ${formatEther(required)} ${symbol}.`
       )
     );
     const poorest = balances
@@ -215,33 +215,33 @@ export async function runWizard(): Promise<void> {
     const affordable = Number((poorest - mintPlan.value) / BigInt(gasLimit)) / 1e9;
     if (affordable > 0) {
       console.log(
-        chalk.yellow(`  请充值或重新运行，将最大费用设为不超过 ${affordable.toFixed(4)} gwei。`)
+        chalk.yellow(`  Top up or rerun with a max fee no higher than ${affordable.toFixed(4)} gwei.`)
       );
     }
     if (shortWallets.length === wallets.length) {
-      throw new Error("所有钱包余额不足 — 无法发送交易。");
+      throw new Error("All wallets are short of funds — no transactions can be sent.");
     }
-    console.log(chalk.yellow("  余额充足的钱包仍可发送交易。"));
+    console.log(chalk.yellow("  Wallets with sufficient balance can still send."));
   }
 
   // ── 10. Confirm ───────────────────────────────────────────────────────
-  console.log(chalk.bold.white("\n──────── 准备就绪 ────────"));
-  line("区块链", `${chainProfile.name} (${chainProfile.chainId})`);
-  line("RPC", `${labelOf(rpcUrls[0])} + 另外 ${rpcUrls.length - 1} 个`);
-  line("目标", target.label);
-  line("合约", nftContract);
-  line("钱包数", `${wallets.length}`);
-  line("数量", `${quantity} 每个钱包 → 共 ${quantity * wallets.length}`);
+  console.log(chalk.bold.white("\n──────── READY ────────"));
+  line("Chain", `${chainProfile.name} (${chainProfile.chainId})`);
+  line("RPC", `${labelOf(rpcUrls[0])} + ${rpcUrls.length - 1} more`);
+  line("Target", target.label);
+  line("Contract", nftContract);
+  line("Wallets", `${wallets.length}`);
+  line("Quantity", `${quantity} per wallet → ${quantity * wallets.length} total`);
   line(
-    "mint 金额",
-    `${formatEther(mintPlan.value)} 每个钱包 → 共 ${formatEther(mintPlan.value * BigInt(wallets.length))} (+ gas)`
+    "Mint value",
+    `${formatEther(mintPlan.value)} per wallet → ${formatEther(mintPlan.value * BigInt(wallets.length))} total (+ gas)`
   );
   line("Gas", `${maxFeeGwei} / ${priorityGwei} gwei · limit ${gasLimit}`);
-  line("时间", timingLabel);
+  line("Timing", timingLabel);
   console.log(chalk.bold.white("───────────────────────"));
 
-  if (!(await askYesNo(chalk.bold("发送交易？"), false))) {
-    console.log(chalk.yellow("\n  已取消 — 未发送任何交易。\n"));
+  if (!(await askYesNo(chalk.bold("Send transactions?"), false))) {
+    console.log(chalk.yellow("\n  Cancelled — nothing was sent.\n"));
     closePrompts();
     return;
   }
@@ -265,35 +265,35 @@ export async function runWizard(): Promise<void> {
 // ── Steps ───────────────────────────────────────────────────────────────
 
 async function promptKeys(): Promise<string[]> {
-  console.log(chalk.bold.white("私钥"));
-  const source = await askChoice("私钥来源", [
-    { label: "在 CLI 中隐藏粘贴", value: "paste", hint: "仅保存在内存中" },
-    { label: "使用 .env 中的私钥", value: "env", hint: "PRIVATE_KEY 或 PRIVATE_KEYS" },
+  console.log(chalk.bold.white("Private keys"));
+  const source = await askChoice("Private key source", [
+    { label: "Paste keys hidden in CLI", value: "paste", hint: "RAM only" },
+    { label: "Load keys from .env", value: "env", hint: "PRIVATE_KEY or PRIVATE_KEYS" },
   ]);
   if (source === "env") {
     try {
       const keys = walletKeysFromEnv();
       if (keys.length > 0) {
         keys.forEach((key, i) => console.log(chalk.green(`  ✓ [W${i}] ${new Wallet(key).address}`)));
-        console.log(chalk.gray(`  已从 .env 加载 ${keys.length} 个钱包。`));
+        console.log(chalk.gray(`  Loaded ${keys.length} wallet(s) from .env.`));
         return keys;
       }
-      console.log(chalk.yellow("  .env 中没有 PRIVATE_KEY 或 PRIVATE_KEYS。请在下方粘贴私钥。"));
+      console.log(chalk.yellow("  No PRIVATE_KEY or PRIVATE_KEYS in .env. Paste keys below."));
     } catch (err) {
-      console.log(chalk.red(`  ✗ ${(err as Error).message} 请在下方粘贴私钥。`));
+      console.log(chalk.red(`  ✗ ${(err as Error).message} Paste keys below.`));
     }
   }
-  console.log(chalk.gray("  每行粘贴一个私钥 — 输入内容会被隐藏。完成后留空回车。"));
-  console.log(chalk.gray("  每个私钥通过钱包地址确认。不会向磁盘写入任何数据。"));
+  console.log(chalk.gray("  Paste one key per line — input is hidden. Leave blank when done."));
+  console.log(chalk.gray("  Each key is confirmed by its wallet address. Nothing is written to disk."));
 
   const keys: string[] = [];
   const seen = new Set<string>();
 
   for (;;) {
-    const raw = await askHidden(chalk.gray(`  › 第 ${keys.length + 1} 个私钥: `));
+    const raw = await askHidden(chalk.gray(`  › key #${keys.length + 1}: `));
     if (!raw) {
       if (keys.length === 0) {
-        console.log(chalk.red("  ✗ 至少需要输入一个私钥。"));
+        console.log(chalk.red("  ✗ At least one key is required."));
         continue;
       }
       break;
@@ -304,12 +304,12 @@ async function promptKeys(): Promise<string[]> {
     try {
       wallet = new Wallet(normalized);
     } catch {
-      console.log(chalk.red("  ✗ 私钥无效 — 请重试。"));
+      console.log(chalk.red("  ✗ Invalid private key — try again."));
       continue;
     }
 
     if (seen.has(wallet.address.toLowerCase())) {
-      console.log(chalk.yellow(`  ⚠ 与 ${short(wallet.address)} 重复 — 已跳过。`));
+      console.log(chalk.yellow(`  ⚠ Duplicate of ${short(wallet.address)} — skipped.`));
       continue;
     }
     seen.add(wallet.address.toLowerCase());
@@ -317,15 +317,15 @@ async function promptKeys(): Promise<string[]> {
     console.log(chalk.green(`  ✓ [W${keys.length - 1}] ${wallet.address}`));
   }
 
-  console.log(chalk.gray(`  已加载 ${keys.length} 个钱包。`));
+  console.log(chalk.gray(`  Loaded ${keys.length} wallet(s).`));
   return keys;
 }
 
 async function promptQuantity(walletCount: number): Promise<number> {
-  console.log(chalk.bold.white("\n数量"));
-  const qty = await askNumber("每个钱包的 NFT 数量", 1, { min: 1, max: 100 });
+  console.log(chalk.bold.white("\nQuantity"));
+  const qty = await askNumber("NFTs per wallet", 1, { min: 1, max: 100 });
   if (walletCount > 1) {
-    console.log(chalk.gray(`  → ${qty} × ${walletCount} 个钱包 = 共 ${qty * walletCount}`));
+    console.log(chalk.gray(`  → ${qty} × ${walletCount} wallets = ${qty * walletCount} total`));
   }
   return Math.floor(qty);
 }
@@ -333,15 +333,15 @@ async function promptQuantity(walletCount: number): Promise<number> {
 async function promptTarget(
   chainKey: string
 ): Promise<{ contract: string; label: string; chainKey: string; slug?: string }> {
-  console.log(chalk.bold.white("\n目标 NFT"));
-  console.log(chalk.gray("  粘贴 OpenSea 链接（集合或 NFT）、slug 或合约地址。"));
+  console.log(chalk.bold.white("\nTarget NFT"));
+  console.log(chalk.gray("  Paste an OpenSea link (collection or NFT), a slug, or a contract address."));
 
   let activeChain = chainKey;
 
   for (;;) {
-    const raw = await askText("NFT 链接");
+    const raw = await askText("NFT link");
     if (!raw) {
-      console.log(chalk.red("  ✗ 请粘贴链接、slug 或地址。"));
+      console.log(chalk.red("  ✗ Paste a link, slug, or address."));
       continue;
     }
 
@@ -356,25 +356,25 @@ async function promptTarget(
     if (parsed.chainHint && parsed.chainHint !== activeChain && resolveChain(parsed.chainHint)) {
       const hinted = resolveChain(parsed.chainHint)!;
       console.log(
-        chalk.yellow(`  ⚠ 该链接属于 ${hinted.name}，但您选择的是 ${resolveChain(activeChain)!.name}。`)
+        chalk.yellow(`  ⚠ The link is on ${hinted.name}, but you selected ${resolveChain(activeChain)!.name}.`)
       );
-      if (await askYesNo(`切换到 ${hinted.name}？`, true)) {
+      if (await askYesNo(`Switch to ${hinted.name}?`, true)) {
         activeChain = hinted.key;
-        console.log(chalk.green(`  ✓ 已切换到 ${hinted.name}`));
+        console.log(chalk.green(`  ✓ Switched to ${hinted.name}`));
       }
     }
 
     if (parsed.kind === "address") {
       const normalized = normalizeAddress(parsed.value);
       if (!normalized) {
-        console.log(chalk.red(`  ✗ "${parsed.value}" 不是 20 字节地址。`));
+        console.log(chalk.red(`  ✗ "${parsed.value}" is not a 20-byte address.`));
         continue;
       }
       if (normalized.checksumWarning) {
-        console.log(chalk.yellow("  ⚠ 大小写地址的 EIP-55 校验和不匹配 — 可能输入有误。"));
-        if (!(await askYesNo("仍要使用该地址吗？", false))) continue;
+        console.log(chalk.yellow("  ⚠ Mixed-case address fails EIP-55 checksum — possible typo."));
+        if (!(await askYesNo("Use this address anyway?", false))) continue;
       }
-      console.log(chalk.green(`  ✓ 合约地址 ${normalized.address}`));
+      console.log(chalk.green(`  ✓ Contract address ${normalized.address}`));
       return { contract: normalized.address, label: short(normalized.address), chainKey: activeChain };
     }
 
@@ -384,17 +384,17 @@ async function promptTarget(
     const apiKey = (process.env.OPENSEA_API_KEY || "").trim();
 
     try {
-      console.log(chalk.gray(`  正在解析 slug "${parsed.value}"${apiKey ? "" : "（没有 API key — 可能被拒绝）"}...`));
+      console.log(chalk.gray(`  Resolving slug "${parsed.value}"${apiKey ? "" : " (no API key — may be refused)"}...`));
       const info = await resolveSlug(parsed.value, apiKey || undefined, activeChain);
       const resolved = normalizeAddress(info.contractAddress);
       if (!resolved) {
-        console.log(chalk.red(`  ✗ API 返回了无效地址: ${info.contractAddress}`));
+        console.log(chalk.red(`  ✗ API returned an invalid address: ${info.contractAddress}`));
         continue;
       }
       console.log(chalk.green(`  ✓ ${info.name} → ${resolved.address}`));
       if (info.chain && resolveChain(info.chain) && info.chain !== activeChain) {
-        console.log(chalk.yellow(`  ⚠ 该集合在 "${info.chain}" 上架，而不是 "${activeChain}"。`));
-        if (await askYesNo(`切换到 ${resolveChain(info.chain)!.name}？`, true)) {
+        console.log(chalk.yellow(`  ⚠ Listed on "${info.chain}", not "${activeChain}".`));
+        if (await askYesNo(`Switch to ${resolveChain(info.chain)!.name}?`, true)) {
           activeChain = resolveChain(info.chain)!.key;
         }
       }
@@ -402,10 +402,10 @@ async function promptTarget(
     } catch (err: any) {
       console.log(chalk.red(`  ✗ ${err.message}`));
       console.log(
-        chalk.gray("    请直接粘贴合约地址 (0x…) — 这种方式不需要 API key。")
+        chalk.gray("    Paste the contract address directly (0x…) — this needs no API key.")
       );
       console.log(
-        chalk.gray("    可以在集合详情或 NFT 的 URL 中找到地址。")
+        chalk.gray("    You can find it in the collection details or in an NFT's URL.")
       );
     }
   }
@@ -413,22 +413,22 @@ async function promptTarget(
 
 async function promptRpc(profile: ChainProfile): Promise<string[]> {
   console.log(chalk.bold.white("\nRPC endpoint"));
-  console.log(chalk.gray("  私有 RPC（Alchemy / QuickNode / Infura）能在竞争激烈的 mint 中提高成功率。"));
+  console.log(chalk.gray("  Private RPCs (Alchemy / QuickNode / Infura) improve your odds in a competitive mint."));
   if (profile.rpc.alchemyHost) {
-    console.log(chalk.gray(`  粘贴完整 URL 或仅 Alchemy key → https://${profile.rpc.alchemyHost}/v2/<key>`));
+    console.log(chalk.gray(`  Paste a full URL or just an Alchemy key → https://${profile.rpc.alchemyHost}/v2/<key>`));
   }
-  console.log(chalk.gray("  用逗号分隔多个 RPC，以便并发广播。"));
+  console.log(chalk.gray("  Separate multiple RPCs with commas to blast simultaneously."));
 
   const fromEnv = privateRpcsFromEnv(profile.key);
   if (fromEnv.length > 0) {
-    console.log(chalk.gray(`  .env 中已有: ${fromEnv.map(maskRpc).join(", ")}`));
-    console.log(chalk.gray("  留空 = 保留 .env 中的值。"));
+    console.log(chalk.gray(`  In .env: ${fromEnv.map(maskRpc).join(", ")}`));
+    console.log(chalk.gray("  Leave blank = keep the .env value."));
   } else {
-    console.log(chalk.yellow(`  .env 中没有 ${profile.name} 的 RPC。留空 = 仅使用公共节点。`));
+    console.log(chalk.yellow(`  No .env RPC for ${profile.name}. Leave blank = public nodes only.`));
   }
 
   for (;;) {
-    const raw = await askText(`${profile.name} 的 RPC`);
+    const raw = await askText(`RPC for ${profile.name}`);
     if (!raw) return fromEnv;
 
     const parts = raw.split(",").map((s) => s.trim()).filter(Boolean);
@@ -437,7 +437,7 @@ async function promptRpc(profile: ChainProfile): Promise<string[]> {
     for (const part of parts) {
       const url = toRpcUrl(part, profile.key);
       if (!url) {
-        console.log(chalk.red(`  ✗ "${part}" 不是有效的 URL 或 API key。`));
+        console.log(chalk.red(`  ✗ "${part}" is not a valid URL or API key.`));
         bad = true;
         break;
       }
@@ -461,29 +461,29 @@ async function promptTiming(
     // Firing before the on-chain start reverts with NotActive, so it isn't
     // offered at all once a future start time is known.
     choices.push({
-      label: "等待 mint 开始",
+      label: "Wait for the mint to open",
       value: "wait",
-      hint: `${toVNTime(at)} 越南时间 (UTC+7) · 还剩 ${formatRemaining(at.getTime() - Date.now())} · T-0 发送`,
+      hint: `${toUtc8Time(at)} UTC+8 · in ${formatRemaining(at.getTime() - Date.now())} · send at T-0`,
     });
   } else {
-    choices.push({ label: "立即发送", value: "now", hint: "mint 正在进行" });
+    choices.push({ label: "Send now", value: "now", hint: "stage is live" });
   }
-  choices.push({ label: "自定义时间", value: "custom", hint: "HH:MM，24 小时制，越南时间 (UTC+7)，今天" });
+  choices.push({ label: "Custom time", value: "custom", hint: "HH:MM, 24h, UTC+8, today" });
 
-  const pick = await askChoice("何时发送交易？", choices, 0);
+  const pick = await askChoice("When to send the transaction?", choices, 0);
 
-  if (pick === "wait") return { targetStart: at, timingLabel: `等待 mint 开始 — ${toVNTime(at)} 越南时间 (UTC+7)` };
-  if (pick === "now") return { targetStart: null, timingLabel: "立即发送" };
+  if (pick === "wait") return { targetStart: at, timingLabel: `wait for mint — ${toUtc8Time(at)} UTC+8` };
+  if (pick === "now") return { targetStart: null, timingLabel: "send immediately" };
 
   for (;;) {
-    const raw = await askText("时间 (HH:MM, 24 小时制, 越南时间 (UTC+7))");
+    const raw = await askText("Time (HH:MM, 24h, UTC+8)");
     try {
-      const custom = vnTimeToDate(raw);
+      const custom = utc8TimeToDate(raw);
       if (custom.getTime() < startTime * 1000) {
-        console.log(chalk.bold.red(`  ✗ 该时间早于 mint 开始时间 (${toVNTime(at)} 越南时间 (UTC+7)) — 交易将 revert。`));
-        if (!(await askYesNo("仍要使用该时间吗？", false))) continue;
+        console.log(chalk.bold.red(`  ✗ This is before the mint opens (${toUtc8Time(at)} UTC+8) — the transaction will revert.`));
+        if (!(await askYesNo("Use this time anyway?", false))) continue;
       }
-      return { targetStart: custom, timingLabel: `自定义 — ${toVNTime(custom)} 越南时间 (UTC+7)` };
+      return { targetStart: custom, timingLabel: `custom — ${toUtc8Time(custom)} UTC+8` };
     } catch (err: any) {
       console.log(chalk.red(`  ✗ ${err.message}`));
     }
@@ -549,5 +549,5 @@ function printBanner(): void {
 ║   On-chain calldata · no OpenSea      ║
 ╚═══════════════════════════════════════╝`)
   );
-  console.log(chalk.gray("  仅支持 SeaDrop public 轮次。随时按 Ctrl+C 退出。\n"));
+  console.log(chalk.gray("  SeaDrop public stages only. Press Ctrl+C to exit anytime.\n"));
 }

@@ -11,7 +11,7 @@
 ## 开发约定
 - **代码规范:** 严格模式 TS；无额外注释（按仓库现状）
 - **命名约定:** camelCase；链 key 为小写（ethereum/base/robinhood）
-- **时间约定:** 全部 UI 时间按越南时间 UTC+7 展示（`src/time-format.ts`），文案已中文化但时区语义保持 UTC+7
+- **时间约定:** 全部 UI 时间按 UTC+8 展示与输入（`src/time-format.ts`，符号 toUtc8Time/utc8TimeToDate）；CLI 文案为英语，文档为中文
 
 ---
 

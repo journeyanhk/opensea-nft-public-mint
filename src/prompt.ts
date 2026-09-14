@@ -44,7 +44,7 @@ function getRl(): readline.Interface {
     // pending question never resolves and the process just dies quietly.
     rl.on("close", () => {
       if (waiter && !shuttingDown) {
-        console.log(chalk.yellow("\n  输入已关闭 — 正在取消。未发送任何内容。\n"));
+        console.log(chalk.yellow("\n  Input closed — cancelling. Nothing was sent.\n"));
         process.exit(130);
       }
     });
@@ -123,7 +123,7 @@ export async function askChoice<T>(
 
   for (;;) {
     const raw = await ask(
-      chalk.gray(`  › 从 1-${choices.length} 中选择 [${defaultIndex + 1}]: `),
+      chalk.gray(`  › pick 1-${choices.length} [${defaultIndex + 1}]: `),
       String(defaultIndex + 1)
     );
     const idx = parseInt(raw, 10) - 1;
@@ -131,7 +131,7 @@ export async function askChoice<T>(
       console.log(chalk.green(`  ✓ ${choices[idx].label}`));
       return choices[idx].value;
     }
-    console.log(chalk.red(`  ✗ 请输入 1 到 ${choices.length} 之间的数字。`));
+    console.log(chalk.red(`  ✗ Enter a number from 1 to ${choices.length}.`));
   }
 }
 
@@ -150,7 +150,7 @@ export async function askNumber(
     if (Number.isFinite(n) && n >= min && n <= max) return n;
     console.log(
       chalk.red(
-        `  ✗ 请输入一个数字${min > -Infinity ? ` ≥ ${min}` : ""}${max < Infinity ? ` 且 ≤ ${max}` : ""}。`
+        `  ✗ Enter a number${min > -Infinity ? ` ≥ ${min}` : ""}${max < Infinity ? ` and ≤ ${max}` : ""}.`
       )
     );
   }
@@ -167,8 +167,8 @@ export async function askYesNo(question: string, defaultYes = false): Promise<bo
     const raw = (
       await ask(chalk.gray(`  › ${question} (${hint}): `), defaultYes ? "y" : "n")
     ).toLowerCase();
-    if (raw === "y" || raw === "yes" || raw === "是") return true;
-    if (raw === "n" || raw === "no" || raw === "否") return false;
-    console.log(chalk.red("  ✗ 请回答 y（是）或 n（否）。"));
+    if (raw === "y" || raw === "yes") return true;
+    if (raw === "n" || raw === "no") return false;
+    console.log(chalk.red("  ✗ Please answer y (yes) or n (no)."));
   }
 }

@@ -29,3 +29,4 @@ ChainProfile: `{ key, chainId, name, explorer, nativeSymbol, rpc: { alchemyHost,
 
 ## 变更历史
 - [202609141442_zh-cn-i18n](../../history/2026-09/202609141442_zh-cn-i18n/) - 越南语文案翻译为简体中文
+- [202609141521_cli-en](../../history/2026-09/202609141521_cli-en/) - CLI 文案英文化 + 时区切换为 UTC+8

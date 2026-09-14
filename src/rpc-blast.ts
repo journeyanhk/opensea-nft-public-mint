@@ -100,7 +100,7 @@ export function blastToAll(
           } else if (json.error) {
             const errMsg = json.error.message || JSON.stringify(json.error);
             if (errMsg.includes("already known") || errMsg.includes("already exists")) {
-              console.log(chalk.yellow(`  [${i}] ${ep.label}  错误: 交易已被记录`));
+              console.log(chalk.yellow(`  [${i}] ${ep.label}  NOTE: transaction already recorded`));
             } else {
               console.log(chalk.red(`  [${i}] ${ep.label}  ERR: ${errMsg}`));
             }
@@ -151,7 +151,7 @@ export async function waitForReceipt(
           block: parseInt(receipt.blockNumber, 16),
           position: parseInt(receipt.transactionIndex, 16),
           gasUsed: parseInt(receipt.gasUsed, 16),
-          status: receipt.status === "0x1" ? "成功" : "已回滚",
+          status: receipt.status === "0x1" ? "SUCCESS" : "REVERTED",
         };
       }
     } catch {}

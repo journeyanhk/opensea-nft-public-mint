@@ -35,4 +35,6 @@ sequenceDiagram
 
 | adr_id | title | date | status | affected_modules | details |
 |--------|-------|------|--------|------------------|---------|
-| ADR-1 | 文案中文化但不改时区语义（保留 UTC+7） | 2026-09-14 | ✅已采纳 | 全部模块 | [history/2026-09/202609141442_zh-cn-i18n/how.md](../history/2026-09/202609141442_zh-cn-i18n/how.md) |
+| ADR-1 | 文案中文化但不改时区语义（保留 UTC+7） | 2026-09-14 | ✅已采纳（后被 ADR-3 取代时区部分） | 全部模块 | [history/2026-09/202609141442_zh-cn-i18n/how.md](../history/2026-09/202609141442_zh-cn-i18n/how.md) |
+| ADR-2 | CLI 英文化、文档保持中文 | 2026-09-14 | ✅已采纳 | 全部模块 | [history/2026-09/202609141521_cli-en/how.md](../history/2026-09/202609141521_cli-en/how.md) |
+| ADR-3 | 时区由 UTC+7 切换为 UTC+8 | 2026-09-14 | ✅已采纳 | time-format/wizard/stage-wait | [history/2026-09/202609141521_cli-en/how.md](../history/2026-09/202609141521_cli-en/how.md) |

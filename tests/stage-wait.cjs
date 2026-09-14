@@ -26,7 +26,7 @@ test('API auth/rate limit and RPC failures never skip a stage', async () => {
   }
 });
 test('stops when no future stage exists', async () => {
-  await assert.rejects(waitForEligibleStage({check:async()=>{throw new MintApiError(422,'unavailable');},schedule:async()=>({stages:[]}),now:()=>0,sleep:async()=>{},log:()=>{}}),/没有下一个 mint 轮次/);
+  await assert.rejects(waitForEligibleStage({check:async()=>{throw new MintApiError(422,'unavailable');},schedule:async()=>({stages:[]}),now:()=>0,sleep:async()=>{},log:()=>{}}),/No next mint stage/);
 });
 test('follows a rescheduled opening', async () => {
   let now=2000, calls=0, attempts=0;

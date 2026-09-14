@@ -79,12 +79,12 @@ export function privateRpcsFromEnv(chainKey: string): string[] {
 // always trail as fallbacks so there is something to blast at either way.
 export function resolveRpcsForChain(chainKey: string, manual: string[] = []): ResolvedRpcs {
   const profile = resolveChain(chainKey);
-  if (!profile) throw new Error(`未知链: "${chainKey}"`);
+  if (!profile) throw new Error(`Unknown chain: "${chainKey}"`);
 
   if (manual.length > 0) {
     return {
       urls: dedupe([...manual, ...profile.rpc.public]),
-      source: "手动输入的 RPC + 公共 RPC 兜底",
+      source: "entered RPC + public RPC fallback",
     };
   }
 
@@ -92,13 +92,13 @@ export function resolveRpcsForChain(chainKey: string, manual: string[] = []): Re
   if (fromEnv.length > 0) {
     return {
       urls: dedupe([...fromEnv, ...profile.rpc.public]),
-      source: ".env + 公共 RPC 兜底",
+      source: ".env + public RPC fallback",
     };
   }
 
   return {
     urls: dedupe(profile.rpc.public),
-    source: "仅公共 RPC — FCFS 竞争时可能太慢",
+    source: "public RPC only — may be too slow under FCFS competition",
   };
 }
 

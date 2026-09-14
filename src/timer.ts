@@ -8,15 +8,15 @@ export async function waitForMintTime(mintTime: Date, earlyFireMs: number = 0): 
   const diff = fireTime.getTime() - now.getTime();
 
   if (diff <= 0) {
-    console.log(chalk.yellow("  发送时间已过 — 立即发送。"));
+    console.log(chalk.yellow("  Fire time has passed — sending now."));
     return;
   }
 
-  console.log(chalk.bold.white(`\n⏰ mint 时间: ${mintTime.toISOString()}`));
+  console.log(chalk.bold.white(`\n⏰ Mint time: ${mintTime.toISOString()}`));
   if (earlyFireMs > 0) {
-    console.log(chalk.bold.yellow(`  🔥 提前发送: 早于 mint 时间 ${earlyFireMs}ms → 发送于 ${fireTime.toISOString()}`));
+    console.log(chalk.bold.yellow(`  🔥 Early fire: ${earlyFireMs}ms before mint → sending at ${fireTime.toISOString()}`));
   }
-  console.log(chalk.gray(`  当前: ${now.toISOString()} | 等待 ${Math.ceil(diff / 1000)} 秒...\n`));
+  console.log(chalk.gray(`  Now: ${now.toISOString()} | waiting ${Math.ceil(diff / 1000)}s...\n`));
 
   // If more than 10 seconds away, show a countdown spinner
   if (diff > 10000) {
@@ -55,7 +55,7 @@ export async function waitForMintTime(mintTime: Date, earlyFireMs: number = 0): 
     }
   }
 
-  console.log(chalk.bold.green("  🟢 正在发送！\n"));
+  console.log(chalk.bold.green("  🟢 FIRING!\n"));
 }
 
 function formatCountdown(target: Date): string {
@@ -65,10 +65,10 @@ function formatCountdown(target: Date): string {
   const seconds = Math.floor((diff % 60000) / 1000);
 
   if (hours > 0) {
-    return `  等待中... 还剩 ${hours} 小时 ${minutes} 分 ${seconds} 秒`;
+    return `  Waiting... ${hours}h ${minutes}m ${seconds}s left`;
   }
   if (minutes > 0) {
-    return `  等待中... 还剩 ${minutes} 分 ${seconds} 秒`;
+    return `  Waiting... ${minutes}m ${seconds}s left`;
   }
-  return `  等待中... 还剩 ${seconds} 秒`;
+  return `  Waiting... ${seconds}s left`;
 }

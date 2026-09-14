@@ -3,10 +3,10 @@ export class MintApiError extends Error {
 }
 
 export function nextStage(drop: any, now: number) {
-  if (!Array.isArray(drop.stages)) throw new Error("缺少 mint 排期。");
+  if (!Array.isArray(drop.stages)) throw new Error("Missing mint schedule.");
   const stages = drop.stages.map((stage: any) => {
     const start = Date.parse(stage.start_time), end = Date.parse(stage.end_time);
-    if (!Number.isFinite(start) || !Number.isFinite(end) || end <= start) throw new Error("mint 排期无效。");
+    if (!Number.isFinite(start) || !Number.isFinite(end) || end <= start) throw new Error("Invalid mint schedule.");
     return { start, end, label: String(stage.label || stage.stage_type) };
   });
   return stages.filter((stage: any) => stage.start > now).sort((a: any, b: any) => a.start - b.start)[0] as
@@ -27,17 +27,17 @@ export async function waitForEligibleStage<T>(deps: {
       // 422 has multiple causes. Do not label it "not eligible".
       // Authentication, rate limits, RPC and malformed transaction errors stop.
       if (!(error instanceof MintApiError) || ![409, 422].includes(error.status)) throw error;
-      deps.log(`${error.message} 正在查找下一轮；尚未签名/发送交易。`);
+      deps.log(`${error.message} Looking for the next stage; nothing signed or sent.`);
       const boundary = deps.now();
       let next = nextStage(await deps.schedule(), boundary);
-      if (!next) throw new Error("排期中没有下一个 mint 轮次。未发送交易。");
-      deps.log(`等待 ${next.label}: ${new Date(next.start).toLocaleString("vi-VN", { timeZone: "Asia/Ho_Chi_Minh" })} GMT+7。按 Ctrl+C 取消。`);
+      if (!next) throw new Error("No next mint stage in the schedule. Nothing was sent.");
+      deps.log(`Waiting for ${next.label}: ${new Date(next.start).toLocaleString("en-US", { timeZone: "Asia/Shanghai" })} GMT+8. Ctrl+C to cancel.`);
       while (deps.now() < next.start) {
         await deps.sleep(Math.min(30_000, next.start - deps.now()));
         // Refresh while waiting to follow creator edits, including moved/removed stages.
         const schedule = await deps.schedule();
         next = nextStage(schedule, boundary);
-        if (!next) throw new Error("等待中的轮次已从排期移除。请重新检查 collection。");
+        if (!next) throw new Error("The awaited stage was removed from the schedule. Re-check the collection.");
       }
     }
   }
