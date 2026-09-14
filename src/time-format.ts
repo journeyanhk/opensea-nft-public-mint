@@ -16,10 +16,10 @@ export function toVNTime(date: Date): string {
 // "21:05" → today at 21:05 VN (UTC+7), expressed as a UTC Date.
 export function vnTimeToDate(hhmm: string): Date {
   const match = /^(\d{1,2}):(\d{2})$/.exec(hhmm.trim());
-  if (!match) throw new Error(`Thời gian "${hhmm}" không hợp lệ — dùng HH:MM (24 giờ, VN (UTC+7))`);
+  if (!match) throw new Error(`时间 "${hhmm}" 无效 — 请使用 HH:MM（24 小时制，越南时间 UTC+7）`);
   const hh = Number(match[1]);
   const mm = Number(match[2]);
-  if (hh > 23 || mm > 59) throw new Error(`Thời gian "${hhmm}" không hợp lệ — dùng HH:MM (24 giờ, VN (UTC+7))`);
+  if (hh > 23 || mm > 59) throw new Error(`时间 "${hhmm}" 无效 — 请使用 HH:MM（24 小时制，越南时间 UTC+7）`);
 
   const todayVN = new Date(Date.now() + VN_OFFSET_MS);
   todayVN.setUTCHours(hh, mm, 0, 0);

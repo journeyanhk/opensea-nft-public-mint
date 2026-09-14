@@ -1,43 +1,43 @@
 # NFT Public Mint Sniper
 
-- Source tham khảo từ: [morsyxbt](https://github.com/morsyxbt/nft-public-mint)
-- Công cụ CLI mint NFT qua SeaDrop trên Ethereum, Base và Robinhood Chain.
-- **Hỗ trợ các vòng mint: WL FCFS, Allowlist và Public.** Vòng WL FCFS/Allowlist yêu cầu ví đủ điều kiện.
-- Chạy `npm start` với link/slug collection và `OPENSEA_API_KEY` để tự nhận diện vòng mint. Khi vòng hiện tại chưa mở hoặc không đáp ứng điều kiện mint, tool tự chờ vòng kế tiếp trong lịch và kiểm tra lại khi mở; vẫn cần xác nhận chi phí trước khi gửi.
-- Public tạo giao dịch từ dữ liệu on-chain và hỗ trợ ký sẵn để gửi đúng giờ. WL FCFS/Allowlist lấy dữ liệu mint từ OpenSea API, kiểm tra và mô phỏng on-chain trước khi gửi.
+- 参考源码来自：[morsyxbt](https://github.com/morsyxbt/nft-public-mint)
+- 在 Ethereum、Base 和 Robinhood Chain 上通过 SeaDrop mint NFT 的 CLI 工具。
+- **支持 mint 轮次：WL FCFS、Allowlist 和 Public。** WL FCFS/Allowlist 轮次要求钱包具备资格。
+- 运行 `npm start` 并输入 collection 链接/slug 和 `OPENSEA_API_KEY` 可自动识别 mint 轮次。当前轮次未开放或不满足 mint 条件时，工具会自动等待排期中的下一轮并在开放时重新检查；发送前仍需要确认费用。
+- Public 使用链上数据构造交易，并支持预签名以准点发送。WL FCFS/Allowlist 从 OpenSea API 获取 mint 数据，发送前会校验并在链上模拟。
 
-> Chỉ nên dùng ví phụ và nạp đúng số tiền dự định mint.
+> 建议只使用小号钱包，并只充值准备 mint 的金额。
 
-## Video hướng dẫn
+## 视频教程
 
-- Xem hướng dẫn chi tiết: [Video trên X / Twitter](https://x.com/solotop999/status/2089201813983732190?s=20)
+- 查看详细教程：[X / Twitter 视频](https://x.com/solotop999/status/2089201813983732190?s=20)
 
-## Cài đặt và chạy
+## 安装与运行
 
-Yêu cầu: tự cài đặt [Git](https://git-scm.com/downloads).
+要求：自行安装 [Git](https://git-scm.com/downloads)。
 
-Script sẽ tự cài Node.js nếu cần, cài dependency, build, tạo `.env`, thử lấy
-OpenSea API key miễn phí rồi chạy chương trình.
+脚本会在需要时自动安装 Node.js、安装依赖、构建、创建 `.env`、尝试获取
+免费 OpenSea API key，然后启动程序。
 
-### Cài đặt cho Windows
-- Mở cmd lên và nhập:
+### Windows 安装
+- 打开 cmd 并输入：
 
 ```cmd
 git clone https://github.com/solotop999/opensea-nft-public-mint.git && cd opensea-nft-public-mint && install.cmd
 ```
 
-### Cài đặt cho Linux
+### Linux 安装
 
 ```bash
 git clone https://github.com/solotop999/opensea-nft-public-mint.git && cd opensea-nft-public-mint && chmod +x install.sh && ./install.sh
 ```
 
-## Link opensea test mint
-- Link để test, hết hạn 08/2027
+## OpenSea 测试 mint 链接
+- 测试链接，2027-08 过期
 - Robinhood Chain
 - https://opensea.io/collection/tadaaaaaa/overview
   
-## Những lần chạy sau
+## 后续运行
 
 ```bash
 cd opensea-nft-public-mint
@@ -45,12 +45,11 @@ npm start
 ```
 
 <details>
-<summary><strong>Cấu hình RPC riêng</strong></summary>
+<summary><strong>自定义 RPC 配置</strong></summary>
 
 <br>
 
-Không bắt buộc, nhưng RPC riêng thường nhanh hơn node công khai. Mở `.env` và
-điền RPC cho chain cần dùng:
+非必需，但私有 RPC 通常比公共节点更快。打开 `.env` 并填写所需链的 RPC：
 
 ```env
 RPC_URL_ETHEREUM=
@@ -58,87 +57,87 @@ RPC_URL_BASE=https://base-mainnet.g.alchemy.com/v2/YOUR_KEY
 RPC_URL_ROBINHOOD=
 ```
 
-Bạn cũng có thể dán URL RPC hoặc Alchemy key trực tiếp khi chương trình hỏi.
+也可以在程序询问时直接粘贴 RPC URL 或 Alchemy key。
 
-### Private key trong .env (tùy chọn)
+### .env 中的私钥（可选）
 
-Dán key vào `.env` để dùng lại ở những lần chạy sau:
+把私钥粘贴到 `.env` 中，方便后续运行复用：
 
 ```env
 PRIVATE_KEY=YOUR_PRIVATE_KEY
-# Hoặc nhiều ví:
+# 或者多个钱包：
 PRIVATE_KEYS=KEY_1,KEY_2
 ```
 
-Khi chạy, chọn **Dùng key từ .env** ở menu nguồn private key. Nếu điền cả hai
-biến, chương trình nạp cả hai và bỏ qua ví trùng. Chỉ địa chỉ ví được hiển thị.
-Bạn vẫn có thể chọn **Dán key ẩn vào CLI** để chỉ giữ key trong RAM.
+运行时在私钥来源菜单中选择 **使用 .env 中的私钥**。如果两个变量都填写，
+程序会全部加载并跳过重复钱包。只显示钱包地址。
+你仍可选择 **在 CLI 中隐藏粘贴**，让私钥仅保存在内存中。
 
-Key trong `.env` là văn bản thuần; không chia sẻ file này. `.env` đã được bỏ qua
-trong Git. Không điền seed phrase vào các biến private key.
+`.env` 中的私钥是明文；不要分享该文件。`.env` 已被 Git 忽略。
+不要把助记词填入私钥变量。
 
-### OpenSea API key (chỉ khi dùng slug/link bộ sưu tập)
+### OpenSea API key（仅在使用 collection slug/链接时需要）
 
-Installer tự thử tạo và lưu key vào `.env` trong lần chạy đầu. Nếu OpenSea báo
-giới hạn tạo key, hãy dùng key hiện có hoặc làm thủ công như dưới đây.
+安装器会在首次运行时尝试自动创建 key 并保存到 `.env`。如果 OpenSea 提示
+创建受限，请使用已有 key 或按下文手动操作。
 
-Cách nhanh nhất để lấy key miễn phí:
+获取免费 key 的最快方式：
 
 ```bash
 curl -X POST https://api.opensea.io/api/v2/auth/keys
 ```
 
-Sao chép giá trị `api_key` trong kết quả rồi điền vào `.env`:
+复制结果中的 `api_key` 值并填入 `.env`：
 
 ```env
-OPENSEA_API_KEY=KEY_VỪA_SAO_CHÉP
+OPENSEA_API_KEY=刚复制的KEY
 ```
 
-Key miễn phí có thời hạn ghi trong trường `expires_at` của kết quả. Khi hết hạn,
-tạo key mới và thay giá trị `OPENSEA_API_KEY` trong `.env`. Muốn dùng hạn mức
-cao hơn, đăng nhập OpenSea rồi vào **Settings → Developer → Get access → Create key**.
+免费 key 的有效期见结果中的 `expires_at` 字段。过期后，
+创建新 key 并替换 `.env` 中的 `OPENSEA_API_KEY`。如需更高额度，
+登录 OpenSea 后进入 **Settings → Developer → Get access → Create key**。
 
-API key chỉ dùng để đổi slug thành địa chỉ contract. Nếu không muốn lấy key,
-hãy dán trực tiếp địa chỉ contract `0x...`; quá trình mint không cần OpenSea API.
-
-</details>
-
-<details>
-<summary><strong>Cách sử dụng</strong></summary>
-
-<br>
-
-Chương trình lần lượt hỏi:
-
-1. Private key — chọn dán ẩn (chỉ giữ trong RAM) hoặc nạp từ `.env`.
-2. Blockchain và số NFT muốn mint trên mỗi ví.
-3. Liên kết OpenSea, slug hoặc địa chỉ contract NFT.
-4. RPC, phí gas và thời điểm gửi.
-5. Xác nhận cuối cùng trước khi phát giao dịch.
-
-Nếu đợt mint chưa mở, chọn **Chờ đợt mint mở** và giữ máy tính cùng terminal
-hoạt động. Không có giao dịch nào được gửi trước khi bạn xác nhận `y`.
+API key 仅用于将 slug 转换为合约地址。如果不想获取 key，
+可直接粘贴合约地址 `0x...`；mint 过程不需要 OpenSea API。
 
 </details>
 
 <details>
-<summary><strong>Lưu ý kỹ thuật và bảo mật</strong></summary>
+<summary><strong>使用方法</strong></summary>
 
 <br>
 
-- Chạy `npm start`: nhập link/slug collection, tool tự phát hiện vòng Allowlist/WL FCFS đang mở nếu có `OPENSEA_API_KEY`. Nếu không có presale đang mở, tiếp tục luồng Public on-chain và lịch chờ Public hiện có. Nhập contract trực tiếp hoặc thiếu API key chỉ hỗ trợ nhận diện Public và có thông báo rõ trong CLI.
-- Allowlist/WL FCFS hỗ trợ `mintSigned()` và `mintAllowList()` qua OpenSea Drops API; dùng lại ví và số lượng đã nhập, xác nhận chi phí từng ví trước khi gửi. Nếu API trả 409 (chưa mở/đã đóng) hoặc 422 (không đáp ứng điều kiện mint), tool tự chờ vòng tiếp theo, cập nhật lịch mỗi tối đa 30 giây và kiểm tra lại khi mở. Có thể tiếp tục đến Public. HTTP 422 cũng có thể do thiếu số dư/hết hạn mức; tool không khẳng định ví ngoài whitelist chỉ dựa vào mã này. Lỗi xác thực, giới hạn API, RPC hay dữ liệu không hợp lệ sẽ dừng.
-- Kiểm tra ví: `npm start -- --check-allowlist` (chỉ cần địa chỉ công khai, không ký/gửi giao dịch).
-- Mint Allowlist: `npm start -- --allowlist`. Nhập collection, địa chỉ ví, số lượng; sau khi kiểm tra thành công mới nhập private key ẩn và xác nhận tổng chi phí trước khi gửi.
-- Allowlist cần `OPENSEA_API_KEY`. API tự chọn vòng đủ điều kiện đang mở; chế độ kiểm tra `--check-allowlist` không chờ và từ chối Public. Luồng mint có thể chuyển sang Public sau khi kiểm tra dữ liệu on-chain. Chưa kiểm tra được eligibility của vòng tương lai trước giờ mở. Giữ terminal chạy để chờ, Ctrl+C để hủy. Các ví được xử lý tuần tự; vẫn cần xác nhận chi phí khi đã tìm được giao dịch hợp lệ.
-- Kết quả eligible chỉ xác nhận cho số lượng được yêu cầu tại thời điểm mô phỏng on-chain. Lỗi API/RPC không được coi là bằng chứng ví không thuộc whitelist.
-- Chi phí gas thực tế là base fee + tip; max fee chỉ là mức trần.
-- Chương trình kiểm tra chain ID, số dư, giới hạn mỗi ví và thời gian mở mint.
-- Key dán vào CLI không được ghi xuống ổ đĩa. Key tự lưu trong `.env` tồn tại dưới dạng văn bản thuần; RPC chỉ nhận raw transaction đã ký.
+程序会依次询问：
 
-## Chain hỗ trợ
+1. 私钥 — 选择隐藏粘贴（仅保存在内存）或从 `.env` 加载。
+2. 区块链和每个钱包要 mint 的 NFT 数量。
+3. OpenSea 链接、slug 或 NFT 合约地址。
+4. RPC、gas 费和发送时间。
+5. 广播交易前的最终确认。
 
-| Chain | ID | Explorer |
+如果 mint 轮次尚未开始，选择 **等待 mint 开始** 并保持电脑和终端运行。
+在你确认 `y` 之前不会发送任何交易。
+
+</details>
+
+<details>
+<summary><strong>技术与安全说明</strong></summary>
+
+<br>
+
+- 运行 `npm start`：输入 collection 链接/slug，配置了 `OPENSEA_API_KEY` 时工具会自动检测正在进行的 Allowlist/WL FCFS 轮次。如果没有进行中的 presale，则继续链上 Public 流程和现有的 Public 等待排期。直接输入合约地址或缺少 API key 时仅支持识别 Public，并在 CLI 中有明确提示。
+- Allowlist/WL FCFS 通过 OpenSea Drops API 支持 `mintSigned()` 和 `mintAllowList()`；复用已输入的钱包和数量，发送前逐个钱包确认费用。如果 API 返回 409（未开始/已关闭）或 422（不满足 mint 条件），工具会自动等待下一轮，最多每 30 秒刷新一次排期，并在开放时重新检查。可以继续到 Public。HTTP 422 也可能由余额不足/额度用尽引起；工具不会仅凭该状态码断定钱包不在白名单。认证错误、API 限流、RPC 或数据无效会停止。
+- 检查钱包：`npm start -- --check-allowlist`（只需公开地址，不签名/不发送交易）。
+- Mint Allowlist：`npm start -- --allowlist`。输入 collection、钱包地址、数量；检查成功后才会要求隐藏输入私钥，并在发送前确认总费用。
+- Allowlist 需要 `OPENSEA_API_KEY`。API 自动选择正在进行的合格轮次；`--check-allowlist` 检查模式不等待且拒绝 Public。mint 流程在链上数据校验后可以转入 Public。未来轮次的 eligibility 无法在开放前检查。保持终端运行以等待，Ctrl+C 取消。钱包按顺序处理；找到有效交易后仍需确认费用。
+- eligible 结果仅确认模拟时请求的数量。API/RPC 错误不能作为钱包不在白名单的证据。
+- 实际 gas 费用为 base fee + tip；max fee 只是上限。
+- 程序会检查 chain ID、余额、单钱包上限和 mint 开放时间。
+- 在 CLI 中粘贴的私钥不会写入磁盘。自动保存在 `.env` 中的私钥为明文；RPC 只会收到已签名的 raw transaction。
+
+## 支持的链
+
+| 链 | ID | 浏览器 |
 |---|---:|---|
 | Ethereum | 1 | etherscan.io |
 | Base | 8453 | basescan.org |
@@ -146,6 +145,6 @@ hoạt động. Không có giao dịch nào được gửi trước khi bạn x�
 
 </details>
 
-## Giấy phép
+## 许可证
 
 MIT

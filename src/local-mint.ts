@@ -37,16 +37,16 @@ export async function localPublicSnipe(opts: LocalSnipeOpts): Promise<void> {
   const endpoints = parseRpcEndpoints(rpcUrls);
   const wallets = walletKeys.map((k) => new Wallet(k, provider));
 
-  console.log(chalk.bold.magenta("\n── PUBLIC MINT CỤC BỘ (không dùng OpenSea) ──"));
+  console.log(chalk.bold.magenta("\n── 本地 PUBLIC MINT（不使用 OpenSea）──"));
   console.log(chalk.gray(`  SeaDrop:       ${plan.to}`));
   console.log(chalk.gray(`  NFT:           ${nftContract}`));
-  console.log(chalk.gray(`  Người nhận phí: ${plan.feeRecipient}`));
+  console.log(chalk.gray(`  费用接收方:    ${plan.feeRecipient}`));
   console.log(
     chalk.gray(
-      `  Giá:           ${formatEther(plan.drop.mintPrice)} × ${quantity} = ${formatEther(plan.value)} mỗi ví`
+      `  价格:          ${formatEther(plan.drop.mintPrice)} × ${quantity} = ${formatEther(plan.value)} 每个钱包`
     )
   );
-  console.log(chalk.gray(`  Calldata:      ${(plan.data.length - 2) / 2} byte (giống nhau cho mọi ví)`));
+  console.log(chalk.gray(`  Calldata:      ${(plan.data.length - 2) / 2} 字节（所有钱包相同）`));
 
   // ── Warm sockets and pre-fetch everything the signature depends on ──
   await warmConnections(rpcUrls);
@@ -79,7 +79,7 @@ export async function localPublicSnipe(opts: LocalSnipeOpts): Promise<void> {
 
   console.log(
     chalk.green(
-      `  ✓ Đã ký và tuần tự hóa ${prepared.length} giao dịch trong ${(performance.now() - signStart).toFixed(1)}ms — không còn phép tính nào khi đến giờ gửi`
+      `  ✓ 已在 ${(performance.now() - signStart).toFixed(1)}ms 内签名并序列化 ${prepared.length} 笔交易 — 到点发送时不再有任何计算`
     )
   );
 
@@ -87,7 +87,7 @@ export async function localPublicSnipe(opts: LocalSnipeOpts): Promise<void> {
   if (targetStart) {
     await waitForMintTime(targetStart, 0);
   } else {
-    console.log(chalk.bold.yellow("\n  🚀 Đang gửi ngay..."));
+    console.log(chalk.bold.yellow("\n  🚀 立即发送..."));
   }
 
   const stageStartMs = targetStart ? targetStart.getTime() : Date.now();
@@ -101,7 +101,7 @@ export async function localPublicSnipe(opts: LocalSnipeOpts): Promise<void> {
   const dispatchMs = (performance.now() - dispatchStart).toFixed(2);
   const sinceStage = Math.max(0, Date.now() - stageStartMs);
   console.log(
-    chalk.bold.green(`  ĐÃ GỬI ${fired.length} giao dịch (${dispatchMs}ms, +${sinceStage}ms sau khi đợt mint mở)`)
+    chalk.bold.green(`  已发送 ${fired.length} 笔交易 (${dispatchMs}ms, 开售后 +${sinceStage}ms)`)
   );
   for (const f of fired) {
     console.log(chalk.gray(`    [W${f.idx}] ${f.txHash}`));
@@ -120,34 +120,34 @@ export async function localPublicSnipe(opts: LocalSnipeOpts): Promise<void> {
 
   for (const { idx, results } of rejected) {
     const reasons = [...new Set(results.map((r) => r.error).filter(Boolean))];
-    console.log(chalk.bold.red(`\n  ✗ [W${idx}] Bị tất cả RPC từ chối — chưa được phát lên mạng.`));
+    console.log(chalk.bold.red(`\n  ✗ [W${idx}] 被所有 RPC 拒绝 — 未广播到网络。`));
     for (const reason of reasons) console.log(chalk.red(`      ${reason}`));
     if (reasons.some((r) => (r ?? "").includes("less than block base fee"))) {
-      console.log(chalk.yellow("      → Phí tối đa thấp hơn base fee của chain. Hãy tăng phí và chạy lại."));
+      console.log(chalk.yellow("      → 最大费用低于链的 base fee。请提高费用后重试。"));
     }
   }
 
   if (accepted.length === 0) {
-    console.log(chalk.bold.red("\n===== KHÔNG GIAO DỊCH NÀO ĐƯỢC PHÁT — KHÔNG CÓ RECEIPT ĐỂ CHỜ =====\n"));
+    console.log(chalk.bold.red("\n===== 没有交易被广播 — 无可等待的回执 =====\n"));
     return;
   }
 
   // ── Receipts (only for txs an endpoint actually accepted) ──
-  console.log(chalk.gray("\n  Đang chờ receipt..."));
+  console.log(chalk.gray("\n  正在等待 receipt..."));
   await Promise.all(
     accepted.map(async ({ idx, txHash }) => {
       const receipt = await waitForReceipt(txHash, rpcUrls[0], 60_000);
       if (!receipt) {
-        console.log(chalk.yellow(`  [W${idx}] HẾT THỜI GIAN CHỜ — kiểm tra: ${explorerTx(chainId, txHash)}`));
+        console.log(chalk.yellow(`  [W${idx}] 等待超时 — 请检查: ${explorerTx(chainId, txHash)}`));
         return;
       }
-      const color = receipt.status === "THÀNH CÔNG" ? chalk.bold.green : chalk.bold.red;
+      const color = receipt.status === "成功" ? chalk.bold.green : chalk.bold.red;
       console.log(
         color(`  [W${idx}] Block: ${receipt.block} | Pos: ${receipt.position} | ${receipt.status} | Gas: ${receipt.gasUsed}`)
       );
-      console.log(chalk.gray(`  [W${idx}] Theo dõi: ${explorerTx(chainId, txHash)}`));
+      console.log(chalk.gray(`  [W${idx}] 查看: ${explorerTx(chainId, txHash)}`));
     })
   );
 
-  console.log(chalk.bold.white("\n===== HOÀN TẤT PUBLIC MINT CỤC BỘ ====="));
+  console.log(chalk.bold.white("\n===== 本地 PUBLIC MINT 完成 ====="));
 }

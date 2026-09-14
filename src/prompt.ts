@@ -44,7 +44,7 @@ function getRl(): readline.Interface {
     // pending question never resolves and the process just dies quietly.
     rl.on("close", () => {
       if (waiter && !shuttingDown) {
-        console.log(chalk.yellow("\n  Đầu vào đã đóng — đang hủy. Chưa có gì được gửi.\n"));
+        console.log(chalk.yellow("\n  输入已关闭 — 正在取消。未发送任何内容。\n"));
         process.exit(130);
       }
     });
@@ -123,7 +123,7 @@ export async function askChoice<T>(
 
   for (;;) {
     const raw = await ask(
-      chalk.gray(`  › chọn từ 1-${choices.length} [${defaultIndex + 1}]: `),
+      chalk.gray(`  › 从 1-${choices.length} 中选择 [${defaultIndex + 1}]: `),
       String(defaultIndex + 1)
     );
     const idx = parseInt(raw, 10) - 1;
@@ -131,7 +131,7 @@ export async function askChoice<T>(
       console.log(chalk.green(`  ✓ ${choices[idx].label}`));
       return choices[idx].value;
     }
-    console.log(chalk.red(`  ✗ Hãy nhập một số từ 1 đến ${choices.length}.`));
+    console.log(chalk.red(`  ✗ 请输入 1 到 ${choices.length} 之间的数字。`));
   }
 }
 
@@ -150,7 +150,7 @@ export async function askNumber(
     if (Number.isFinite(n) && n >= min && n <= max) return n;
     console.log(
       chalk.red(
-        `  ✗ Hãy nhập một số${min > -Infinity ? ` ≥ ${min}` : ""}${max < Infinity ? ` và ≤ ${max}` : ""}.`
+        `  ✗ 请输入一个数字${min > -Infinity ? ` ≥ ${min}` : ""}${max < Infinity ? ` 且 ≤ ${max}` : ""}。`
       )
     );
   }
@@ -167,8 +167,8 @@ export async function askYesNo(question: string, defaultYes = false): Promise<bo
     const raw = (
       await ask(chalk.gray(`  › ${question} (${hint}): `), defaultYes ? "y" : "n")
     ).toLowerCase();
-    if (raw === "y" || raw === "yes" || raw === "có" || raw === "co") return true;
-    if (raw === "n" || raw === "no" || raw === "không" || raw === "khong") return false;
-    console.log(chalk.red("  ✗ Hãy trả lời y (có) hoặc n (không)."));
+    if (raw === "y" || raw === "yes" || raw === "是") return true;
+    if (raw === "n" || raw === "no" || raw === "否") return false;
+    console.log(chalk.red("  ✗ 请回答 y（是）或 n（否）。"));
   }
 }

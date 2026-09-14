@@ -54,5 +54,5 @@ if grep -q '^OPENSEA_API_KEY=[[:space:]]*$' .env; then
     fi
 fi
 
-echo "Cài đặt hoàn tất. Đang khởi động chương trình..."
+echo "安装完成，正在启动程序..."
 npm start

@@ -6,7 +6,7 @@ cd /d "%~dp0"
 
 where powershell.exe >nul 2>&1
 if errorlevel 1 (
-    echo [LOI] Khong tim thay Windows PowerShell.
+    echo [错误] 未找到 Windows PowerShell。
     exit /b 1
 )
 

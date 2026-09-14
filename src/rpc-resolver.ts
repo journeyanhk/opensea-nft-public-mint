@@ -79,12 +79,12 @@ export function privateRpcsFromEnv(chainKey: string): string[] {
 // always trail as fallbacks so there is something to blast at either way.
 export function resolveRpcsForChain(chainKey: string, manual: string[] = []): ResolvedRpcs {
   const profile = resolveChain(chainKey);
-  if (!profile) throw new Error(`Chain không xác định: "${chainKey}"`);
+  if (!profile) throw new Error(`未知链: "${chainKey}"`);
 
   if (manual.length > 0) {
     return {
       urls: dedupe([...manual, ...profile.rpc.public]),
-      source: "RPC vừa nhập + RPC công khai dự phòng",
+      source: "手动输入的 RPC + 公共 RPC 兜底",
     };
   }
 
@@ -92,13 +92,13 @@ export function resolveRpcsForChain(chainKey: string, manual: string[] = []): Re
   if (fromEnv.length > 0) {
     return {
       urls: dedupe([...fromEnv, ...profile.rpc.public]),
-      source: ".env + RPC công khai dự phòng",
+      source: ".env + 公共 RPC 兜底",
     };
   }
 
   return {
     urls: dedupe(profile.rpc.public),
-    source: "chỉ RPC công khai — có thể quá chậm khi FCFS cạnh tranh",
+    source: "仅公共 RPC — FCFS 竞争时可能太慢",
   };
 }
 

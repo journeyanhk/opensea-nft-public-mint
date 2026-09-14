@@ -13,17 +13,17 @@ import { runAllowlistWizard } from "./allowlist";
 const HELP = `
 NFT Public Mint Sniper
 
-  Tự nhận diện vòng Allowlist/WL FCFS đang mở khi nhập link/slug OpenSea
-  và có OPENSEA_API_KEY. Public sử dụng dữ liệu on-chain.
+  在输入 OpenSea 链接/slug 且配置了 OPENSEA_API_KEY 时，
+  自动识别正在进行的 Allowlist/WL FCFS 轮次。Public 使用链上数据。
 
-Sử dụng
-  npm start              tự nhận diện vòng mint trong trình hướng dẫn
-  npm start -- --help    hiển thị trợ giúp này
-  npm start -- --check-allowlist  kiểm tra ví ở vòng Allowlist đang mở, không cần private key
-  npm start -- --allowlist        kiểm tra và mint Allowlist/WL FCFS đang mở
+用法
+  npm start              在向导中自动识别 mint 轮次
+  npm start -- --help    显示此帮助
+  npm start -- --check-allowlist  检查钱包在当前 Allowlist 轮次的资格，无需私钥
+  npm start -- --allowlist        检查并 mint 当前 Allowlist/WL FCFS 轮次
 
-Chương trình sẽ lần lượt hỏi private key, chain, số lượng, liên kết NFT, RPC,
-gas và thời điểm mint. Có thể đặt giá trị mặc định trong .env (xem .env.example).
+程序会依次询问私钥、链、数量、NFT 链接、RPC、gas 和 mint 时间。
+可在 .env 中设置默认值（见 .env.example）。
 `;
 
 async function main(): Promise<void> {
