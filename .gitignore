@@ -7,6 +7,9 @@ dist/
 .env.*
 !.env.example
 
+# Batch config that may embed RPC keys — keep it local
+targets.local.json
+
 # Private keys — never commit
 wallets/
 keys.txt

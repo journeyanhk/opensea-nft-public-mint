@@ -11,6 +11,7 @@
 | 202609141442 | zh-cn-i18n | 重构 | ✅已完成 | [链接](2026-09/202609141442_zh-cn-i18n/) |
 | 202609141521 | cli-en | 重构 | ✅已完成 | [链接](2026-09/202609141521_cli-en/) |
 | 202609151934 | batch-timed-mint | 功能 | ✅已完成 | [链接](2026-09/202609151934_batch-timed-mint/) |
+| 202609152008 | review-fixes | 修复 | ✅已完成 | [链接](2026-09/202609152008_review-fixes/) |
 
 ---
 
@@ -21,3 +22,4 @@
 - [202609141442_zh-cn-i18n](2026-09/202609141442_zh-cn-i18n/) - 全量越南语文案翻译为简体中文（CLI/README/安装脚本/.env 注释），不改变功能与时区语义
 - [202609141521_cli-en](2026-09/202609141521_cli-en/) - CLI 文案英文化（文档保持中文）+ 时区切换为 UTC+8
 - [202609151934_batch-timed-mint](2026-09/202609151934_batch-timed-mint/) - 新增 `--batch` 多目标顺序定时公售（targets.json、余额预检、单次确认、T-3s 重读/重锚与价格护栏、SnipeResult 汇总）
+- [202609152008_review-fixes](2026-09/202609152008_review-fixes/) - review 修复：T-refresh 后二次预热；开售时间漂移（planned=null / 提前）改由 reconcileStart 裁决；targets.local.json 入库防护

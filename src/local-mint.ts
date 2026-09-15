@@ -45,6 +45,27 @@ export interface SnipeResult {
 // A postponed start is adopted at most this many times before we stop re-waiting.
 const MAX_START_MOVES = 2;
 
+// Reconcile the start time we planned to fire at against the one the chain now
+// reports. A creator can still move it after the batch was configured, so the
+// plan has to follow: a later opening is waited for again, an earlier one is
+// fired as soon as the chain allows. `plannedMs === null` means the batch
+// reached this target with the stage apparently already open.
+export function reconcileStart(
+  plannedMs: number | null,
+  chainStartMs: number,
+  nowMs: number,
+  round: number
+): { startMs: number | null; rewait: boolean } {
+  const reference = plannedMs ?? nowMs;
+  if (chainStartMs > reference + 1000) {
+    return { startMs: chainStartMs, rewait: round < MAX_START_MOVES };
+  }
+  if (plannedMs !== null && chainStartMs < plannedMs - 1000) {
+    return { startMs: Math.max(chainStartMs, nowMs), rewait: false };
+  }
+  return { startMs: plannedMs, rewait: false };
+}
+
 export async function localPublicSnipe(opts: LocalSnipeOpts): Promise<SnipeResult[]> {
   const {
     nftContract, quantity, walletKeys, rpcUrls,
@@ -93,14 +114,28 @@ export async function localPublicSnipe(opts: LocalSnipeOpts): Promise<SnipeResul
       }
 
       const movedTo = fresh.drop.startTime * 1000;
-      if (targetStart && movedTo > targetStart.getTime() + 1000) {
+      const decision = reconcileStart(
+        targetStart ? targetStart.getTime() : null,
+        movedTo,
+        Date.now(),
+        round
+      );
+
+      if (decision.rewait) {
         console.log(
-          chalk.bold.yellow(`  ⚠ Public start moved to ${toUtc8Time(new Date(movedTo))} UTC+8 — re-anchoring.`)
+          chalk.bold.yellow(`  ⚠ Public start moved to ${toUtc8Time(new Date(decision.startMs as number))} UTC+8 — re-anchoring.`)
         );
-        targetStart = new Date(movedTo);
+        targetStart = new Date(decision.startMs as number);
         planNow = fresh;
-        if (round < MAX_START_MOVES) continue;
-        console.log(chalk.yellow("  ⚠ Start moved again — adopting it without another refresh window."));
+        continue;
+      }
+
+      const plannedMs = targetStart ? targetStart.getTime() : null;
+      if (decision.startMs !== null && decision.startMs !== plannedMs) {
+        console.log(
+          chalk.bold.yellow(`  ⚠ Public start is now ${toUtc8Time(new Date(decision.startMs))} UTC+8 — firing as soon as the chain allows.`)
+        );
+        targetStart = new Date(decision.startMs);
       }
 
       if (maxValueWei !== undefined && fresh.value > maxValueWei) {
@@ -131,6 +166,10 @@ export async function localPublicSnipe(opts: LocalSnipeOpts): Promise<SnipeResul
     );
     return skipped();
   }
+
+  // Re-warm after the wait: keep-alive sockets are usually torn down by the far
+  // end long before T-0, and the blast must not pay for a fresh handshake.
+  await warmConnections(rpcUrls);
 
   // ── Pre-fetch everything the signature depends on, then sign ──
   const [nonces, network] = await Promise.all([

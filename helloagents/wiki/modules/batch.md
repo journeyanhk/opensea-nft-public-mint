@@ -20,6 +20,8 @@
 - 执行单元内每个目标在 T-refresh 才拉 pending nonce，串行天然无 nonce 冲突；同刻开售的目标未支持（需改并行分支）
 - `onFailure: continue`（默认）失败继续下一目标；`stop` 在整批无成功时提前结束
 - 已过 `endTime` 的目标直接标记 SKIPPED
+- 批量到达目标时若配置开售已过则传 `targetStart: null`；这不再等于"立刻发送"——链上 `startTime` 若仍在未来会被改为等待，提前开售也会即时对齐（由 local-mint 的 `reconcileStart` 裁决）
+- 安全：`targets.json` 会随仓库提交，禁止把带 API key 的 RPC 写入其 `rpcs`；RPC 统一放 `.env`，或改用已被 `.gitignore` 忽略的 `targets.local.json`
 
 ## API接口
 ### 导出
@@ -44,3 +46,4 @@
 
 ## 变更历史
 - [202609151934_batch-timed-mint](../../history/2026-09/202609151934_batch-timed-mint/) - 新增批量模式与 targets.json 配置
+- [202609152008_review-fixes](../../history/2026-09/202609152008_review-fixes/) - 开售时间漂移（planned=null / 提前）处理与 RPC key 入库提醒
