@@ -46,3 +46,24 @@
   "stage": "阶段索引字符串"
 }
 ```
+
+## 批量配置（targets.json）
+
+| 字段 | 类型 | 必填 | 说明 |
+|------|------|------|------|
+| chain | string | 是 | 整批固定单链：ethereum/base/robinhood |
+| walletSource | string | 否 | env（默认，走 .env）或 prompt（隐藏输入） |
+| refreshBeforeMs | number | 否 | T-refresh 提前量，默认 3000 |
+| onFailure | string | 否 | continue（默认）或 stop |
+| rpcs | string[] | 否 | 覆盖 .env 的 RPC 列表 |
+| gas | object | 否 | `{ maxFeeGwei, priorityGwei, gasLimit }`，覆盖 .env |
+| targets | object[] | 是 | `{ slug, quantity?, maxPriceEth?, startAt? }`；slug 支持链接/slug/合约地址；startAt 为 `"auto"` 或 ISO |
+
+## 执行结果（SnipeResult）
+
+| 字段 | 类型 | 说明 |
+|------|------|------|
+| idx | number | 钱包序号 |
+| address | string | 钱包地址 |
+| txHash | string \| null | 被 RPC 接受时为交易哈希，其余为 null |
+| status | string | SUCCESS / REVERTED / TIMEOUT / REJECTED / SKIPPED |

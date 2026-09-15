@@ -264,7 +264,8 @@ export async function runWizard(): Promise<void> {
 
 // ── Steps ───────────────────────────────────────────────────────────────
 
-async function promptKeys(): Promise<string[]> {
+// Exported so batch mode reuses the same hidden-input, duplicate-checked key flow.
+export async function promptKeys(): Promise<string[]> {
   console.log(chalk.bold.white("Private keys"));
   const source = await askChoice("Private key source", [
     { label: "Paste keys hidden in CLI", value: "paste", hint: "RAM only" },

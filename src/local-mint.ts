@@ -1,10 +1,13 @@
 // Public-mint execution with no OpenSea in the loop.
 //
 // Because the calldata is known ahead of time (see seadrop-public.ts), every
-// transaction can be signed and serialised *before* the stage opens. At T-0 the
-// only work left is writing bytes to sockets — no API poll, no signing, no
-// encoding. That is strictly faster than the OpenSea path, which cannot sign
-// until the API hands over calldata roughly a second after the stage starts.
+// transaction can be signed and serialised close to the stage opening. At T-0 the
+// only work left is writing bytes to sockets — no API poll, no encoding.
+//
+// Batch mode passes refreshBeforeMs, which moves signing to T-refresh: the drop
+// is re-read from the chain then, so a price or schedule change made by the
+// creator after the batch was configured is adopted (or refused) instead of
+// being signed blindly.
 
 import chalk from "chalk";
 import { performance } from "perf_hooks";
@@ -13,7 +16,8 @@ import { blastToAll, parseRpcEndpoints, prepareBlast, waitForReceipt, PreparedBl
 import { warmConnections } from "./connection-warmer";
 import { waitForMintTime } from "./timer";
 import { explorerTx } from "./chains";
-import { LocalMintPlan } from "./seadrop-public";
+import { toUtc8Time } from "./time-format";
+import { buildLocalMintPlan, LocalMintPlan } from "./seadrop-public";
 
 export interface LocalSnipeOpts {
   nftContract: string;
@@ -25,32 +29,110 @@ export interface LocalSnipeOpts {
   gasLimit: number;
   targetStart: Date | null;
   plan: LocalMintPlan;
+  maxValueWei?: bigint; // refuse to send when the fresh total exceeds this
+  refreshBeforeMs?: number; // re-read the drop this long before the stage opens
 }
 
-export async function localPublicSnipe(opts: LocalSnipeOpts): Promise<void> {
+export type SnipeStatus = "SUCCESS" | "REVERTED" | "TIMEOUT" | "REJECTED" | "SKIPPED";
+
+export interface SnipeResult {
+  idx: number;
+  address: string;
+  txHash: string | null;
+  status: SnipeStatus;
+}
+
+// A postponed start is adopted at most this many times before we stop re-waiting.
+const MAX_START_MOVES = 2;
+
+export async function localPublicSnipe(opts: LocalSnipeOpts): Promise<SnipeResult[]> {
   const {
     nftContract, quantity, walletKeys, rpcUrls,
-    maxFeePerGas, maxPriorityFee, gasLimit, targetStart, plan,
+    maxFeePerGas, maxPriorityFee, gasLimit, plan, maxValueWei,
   } = opts;
+
+  const refreshMs = opts.refreshBeforeMs ?? 0;
+  let targetStart = opts.targetStart;
+  let planNow = plan;
 
   const provider = new JsonRpcProvider(rpcUrls[0]);
   const endpoints = parseRpcEndpoints(rpcUrls);
   const wallets = walletKeys.map((k) => new Wallet(k, provider));
 
+  const skipped = (): SnipeResult[] =>
+    wallets.map((w, i) => ({ idx: i, address: w.address, txHash: null, status: "SKIPPED" as const }));
+
   console.log(chalk.bold.magenta("\n── LOCAL PUBLIC MINT (no OpenSea) ──"));
-  console.log(chalk.gray(`  SeaDrop:       ${plan.to}`));
+  console.log(chalk.gray(`  SeaDrop:       ${planNow.to}`));
   console.log(chalk.gray(`  NFT:           ${nftContract}`));
-  console.log(chalk.gray(`  Fee recipient: ${plan.feeRecipient}`));
+  console.log(chalk.gray(`  Fee recipient: ${planNow.feeRecipient}`));
   console.log(
     chalk.gray(
-      `  Price:         ${formatEther(plan.drop.mintPrice)} × ${quantity} = ${formatEther(plan.value)} per wallet`
+      `  Price:         ${formatEther(planNow.drop.mintPrice)} × ${quantity} = ${formatEther(planNow.value)} per wallet`
     )
   );
-  console.log(chalk.gray(`  Calldata:      ${(plan.data.length - 2) / 2} bytes (identical for all wallets)`));
+  console.log(chalk.gray(`  Calldata:      ${(planNow.data.length - 2) / 2} bytes (identical for all wallets)`));
+  if (maxValueWei !== undefined) {
+    console.log(chalk.gray(`  Max total:     ${formatEther(maxValueWei)} per wallet`));
+  }
 
-  // ── Warm sockets and pre-fetch everything the signature depends on ──
+  // ── Warm sockets before the refresh window, so it only has to cover reads ──
   await warmConnections(rpcUrls);
 
+  if (refreshMs > 0) {
+    for (let round = 0; ; round++) {
+      // Wait until T-refresh (or immediately when the stage is already live).
+      if (targetStart && targetStart.getTime() > Date.now()) {
+        await waitForMintTime(targetStart, refreshMs);
+      }
+
+      const fresh = await buildLocalMintPlan(rpcUrls[0], nftContract, quantity);
+      if (!fresh) {
+        console.log(chalk.bold.red("  ✗ The public drop is no longer readable on-chain — skipping this target."));
+        return skipped();
+      }
+
+      const movedTo = fresh.drop.startTime * 1000;
+      if (targetStart && movedTo > targetStart.getTime() + 1000) {
+        console.log(
+          chalk.bold.yellow(`  ⚠ Public start moved to ${toUtc8Time(new Date(movedTo))} UTC+8 — re-anchoring.`)
+        );
+        targetStart = new Date(movedTo);
+        planNow = fresh;
+        if (round < MAX_START_MOVES) continue;
+        console.log(chalk.yellow("  ⚠ Start moved again — adopting it without another refresh window."));
+      }
+
+      if (maxValueWei !== undefined && fresh.value > maxValueWei) {
+        console.log(
+          chalk.bold.red(
+            `  ✗ Total ${formatEther(fresh.value)} exceeds the ${formatEther(maxValueWei)} cap — skipping this target.`
+          )
+        );
+        return skipped();
+      }
+
+      if (fresh.data !== planNow.data || fresh.value !== planNow.value) {
+        console.log(
+          chalk.bold.yellow(
+            `  ⚠ Drop changed: ${formatEther(planNow.drop.mintPrice)} → ${formatEther(fresh.drop.mintPrice)} per NFT, fee recipient ${planNow.feeRecipient} → ${fresh.feeRecipient}. Using the fresh values.`
+          )
+        );
+      }
+
+      planNow = fresh;
+      break;
+    }
+  } else if (maxValueWei !== undefined && planNow.value > maxValueWei) {
+    console.log(
+      chalk.bold.red(
+        `  ✗ Total ${formatEther(planNow.value)} exceeds the ${formatEther(maxValueWei)} cap — skipping this target.`
+      )
+    );
+    return skipped();
+  }
+
+  // ── Pre-fetch everything the signature depends on, then sign ──
   const [nonces, network] = await Promise.all([
     Promise.all(wallets.map((w) => provider.getTransactionCount(w.address, "pending"))),
     provider.getNetwork(),
@@ -58,15 +140,14 @@ export async function localPublicSnipe(opts: LocalSnipeOpts): Promise<void> {
   const chainId = network.chainId;
   console.log(chalk.gray(`  Nonces: [${nonces.join(", ")}] | chainId: ${chainId}`));
 
-  // ── Sign everything now, well before the stage opens ──
   const signStart = performance.now();
   const prepared: { idx: number; address: string; blast: PreparedBlast }[] = [];
 
   for (let i = 0; i < wallets.length; i++) {
     const rawTx = await wallets[i].signTransaction({
-      to: plan.to,
-      data: plan.data,
-      value: plan.value,
+      to: planNow.to,
+      data: planNow.data,
+      value: planNow.value,
       nonce: nonces[i],
       maxFeePerGas,
       maxPriorityFeePerGas: maxPriorityFee,
@@ -127,9 +208,22 @@ export async function localPublicSnipe(opts: LocalSnipeOpts): Promise<void> {
     }
   }
 
+  const acceptedByIdx = new Map(accepted.map((a) => [a.idx, a.txHash] as const));
+  const statusByIdx = new Map<number, SnipeStatus>(
+    settled.map((s) => [s.idx, acceptedByIdx.has(s.idx) ? "TIMEOUT" : "REJECTED"] as const)
+  );
+
+  const collect = (): SnipeResult[] =>
+    prepared.map(({ idx, address }) => ({
+      idx,
+      address,
+      txHash: acceptedByIdx.get(idx) ?? null,
+      status: statusByIdx.get(idx) ?? "REJECTED",
+    }));
+
   if (accepted.length === 0) {
     console.log(chalk.bold.red("\n===== NOTHING WAS BROADCAST — NO RECEIPTS TO WAIT FOR =====\n"));
-    return;
+    return collect();
   }
 
   // ── Receipts (only for txs an endpoint actually accepted) ──
@@ -138,9 +232,11 @@ export async function localPublicSnipe(opts: LocalSnipeOpts): Promise<void> {
     accepted.map(async ({ idx, txHash }) => {
       const receipt = await waitForReceipt(txHash, rpcUrls[0], 60_000);
       if (!receipt) {
+        statusByIdx.set(idx, "TIMEOUT");
         console.log(chalk.yellow(`  [W${idx}] TIMEOUT — check: ${explorerTx(chainId, txHash)}`));
         return;
       }
+      statusByIdx.set(idx, receipt.status === "SUCCESS" ? "SUCCESS" : "REVERTED");
       const color = receipt.status === "SUCCESS" ? chalk.bold.green : chalk.bold.red;
       console.log(
         color(`  [W${idx}] Block: ${receipt.block} | Pos: ${receipt.position} | ${receipt.status} | Gas: ${receipt.gasUsed}`)
@@ -150,4 +246,5 @@ export async function localPublicSnipe(opts: LocalSnipeOpts): Promise<void> {
   );
 
   console.log(chalk.bold.white("\n===== LOCAL PUBLIC MINT COMPLETE ====="));
+  return collect();
 }

@@ -1,0 +1,20 @@
+{
+  "chain": "robinhood",
+  "walletSource": "env",
+  "refreshBeforeMs": 3000,
+  "onFailure": "continue",
+  "targets": [
+    {
+      "slug": "https://opensea.io/collection/hoodminers-rh/overview",
+      "quantity": 1,
+      "maxPriceEth": "0",
+      "startAt": "auto"
+    },
+    {
+      "slug": "https://opensea.io/collection/stock-salesman/overview",
+      "quantity": 3,
+      "maxPriceEth": "0.01",
+      "startAt": "auto"
+    }
+  ]
+}

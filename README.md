@@ -45,6 +45,49 @@ npm start
 ```
 
 <details>
+<summary><strong>批量模式：多个目标按开售时间顺序自动执行</strong></summary>
+
+<br>
+
+适用场景：在同一链上按开售时间依次抢多个 collection（例如 18:00 的 A、18:30 的 B），中途不想守着终端。
+
+1. 配置 `targets.json`（仓库根目录，可复制修改）：
+
+```json
+{
+  "chain": "robinhood",
+  "walletSource": "env",
+  "refreshBeforeMs": 3000,
+  "onFailure": "continue",
+  "targets": [
+    { "slug": "https://opensea.io/collection/hoodminers-rh/overview", "quantity": 1, "maxPriceEth": "0", "startAt": "auto" },
+    { "slug": "https://opensea.io/collection/stock-salesman/overview", "quantity": 3, "maxPriceEth": "0.01", "startAt": "auto" }
+  ]
+}
+```
+
+2. 确认 `.env` 里有 `PRIVATE_KEY`/`PRIVATE_KEYS`、对应链的 RPC（如 `RPC_URL_ROBINHOOD`），以及可选的 `MAX_FEE_PER_GAS`/`MAX_PRIORITY_FEE`/`GAS_LIMIT`。
+
+3. 在首个开售前启动（建议 tmux/screen 常驻）：
+
+```bash
+npm run build && npm start -- --batch targets.json
+```
+
+行为说明：
+
+- `slug` 支持 OpenSea 链接、slug 或合约地址；`quantity` 会被链上单钱包上限自动截断并提示。
+- `maxPriceEth` 是每个 NFT 的最高愿付价，也是防改价护栏；付费目标必须显式填写，未填会直接报错退出。总上限 = `maxPriceEth × quantity`。
+- `startAt: "auto"` 使用链上公售 `startTime`，也可以用 ISO 时间覆盖。
+- 启动时按 `Σ(mint value + gasLimit × maxFee)` 检查每个钱包余额，任一不足即报错退出，不发送任何交易。
+- 检查通过后**只需确认一次**，随后无人值守。
+- 每个目标在开售前 3 秒（`refreshBeforeMs`）重读链上价格与费用接收人，并重新校验开售时间；价格超过上限则跳过该目标，开售时间被 owner 推迟则自动重新对齐。
+- 目标按开售时间升序串行执行；`onFailure: "continue"` 时某个目标失败不影响后续目标，全部结束后输出汇总表。
+- 限制：整批只能是一条链；两个目标同时开售时未支持并行；Allowlist/WL 阶段仍需 `npm start -- --allowlist` 单独执行。
+
+</details>
+
+<details>
 <summary><strong>自定义 RPC 配置</strong></summary>
 
 <br>

@@ -4,14 +4,20 @@
 ```mermaid
 flowchart TD
     A[src/index.ts 入口] --> B[wizard 交互向导]
+    A --> N[batch-runner 批量执行器]
+    N --> O[batch-config 目标解析与排序]
+    O --> C
     B --> C[seadrop-public 本地构造 calldata]
     B --> D[allowlist Drops API 路径]
-    C --> E[local-mint 预签名]
+    C --> E[local-mint 预签名 + T-refresh 重读/护栏]
+    N --> E
     E --> F[rpc-blast 多 RPC 并发广播]
     F --> G[回执轮询]
     D --> H[stage-wait 轮次等待]
     B --> I[prompt 交互层]
+    N --> I
     B --> J[rpc-resolver RPC 选择]
+    N --> J
 ```
 
 ## 技术栈
@@ -38,3 +44,7 @@ sequenceDiagram
 | ADR-1 | 文案中文化但不改时区语义（保留 UTC+7） | 2026-09-14 | ✅已采纳（后被 ADR-3 取代时区部分） | 全部模块 | [history/2026-09/202609141442_zh-cn-i18n/how.md](../history/2026-09/202609141442_zh-cn-i18n/how.md) |
 | ADR-2 | CLI 英文化、文档保持中文 | 2026-09-14 | ✅已采纳 | 全部模块 | [history/2026-09/202609141521_cli-en/how.md](../history/2026-09/202609141521_cli-en/how.md) |
 | ADR-3 | 时区由 UTC+7 切换为 UTC+8 | 2026-09-14 | ✅已采纳 | time-format/wizard/stage-wait | [history/2026-09/202609141521_cli-en/how.md](../history/2026-09/202609141521_cli-en/how.md) |
+| ADR-4 | 多目标串行单队列，不做并行 | 2026-09-15 | ✅已采纳 | batch | [history/2026-09/202609151934_batch-timed-mint/how.md](../history/2026-09/202609151934_batch-timed-mint/how.md) |
+| ADR-5 | 配置复用 .env，targets.json 只列目标 | 2026-09-15 | ✅已采纳 | batch/rpc-resolver/keys | [history/2026-09/202609151934_batch-timed-mint/how.md](../history/2026-09/202609151934_batch-timed-mint/how.md) |
+| ADR-6 | 签名推迟到 T-3s 并重读+重锚 startTime | 2026-09-15 | ✅已采纳 | local-mint/batch | [history/2026-09/202609151934_batch-timed-mint/how.md](../history/2026-09/202609151934_batch-timed-mint/how.md) |
+| ADR-7 | 批量模式复用向导按键流程而非复制 | 2026-09-15 | ✅已采纳 | batch/wizard | [history/2026-09/202609151934_batch-timed-mint/how.md](../history/2026-09/202609151934_batch-timed-mint/how.md) |
