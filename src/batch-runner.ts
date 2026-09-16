@@ -105,10 +105,18 @@ export async function runBatch(configPath: string): Promise<void> {
   // ── 4. Schedule + one confirmation ────────────────────────────────────
   console.log(chalk.bold.white("\n──────── BATCH SCHEDULE ────────"));
   for (const t of cfg.targets) {
-    console.log(
+    const line =
       `  ${chalk.white(toUtc8Time(t.startAt))} UTC+8  ${chalk.bold(t.label)}  ×${t.quantity}  ` +
-        `${formatEther(t.plan.value)} ${chain.nativeSymbol}/wallet  cap ${formatEther(t.maxValueWei)}`
-    );
+      `${formatEther(t.plan.value)} ${chain.nativeSymbol}/wallet  cap ${formatEther(t.maxValueWei)}`;
+    const remaining =
+      t.supply && t.supply.maxSupply > 0n ? t.supply.maxSupply - t.supply.totalMinted : null;
+    if (remaining !== null && remaining <= 0n) {
+      console.log(`${line}  ${chalk.bold.red(`SOLD OUT (${t.supply!.totalMinted}/${t.supply!.maxSupply} minted)`)}`);
+    } else if (remaining !== null) {
+      console.log(`${line}  ${chalk.gray(`${t.supply!.totalMinted}/${t.supply!.maxSupply} minted`)}`);
+    } else {
+      console.log(line);
+    }
   }
   console.log(
     chalk.gray(

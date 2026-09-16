@@ -10,7 +10,7 @@
 // server-produced signature bound to one wallet, so that path still needs
 // OpenSea and there is no local equivalent.
 
-import { Contract, Interface, JsonRpcProvider } from "ethers";
+import { Contract, Interface, JsonRpcProvider, getAddress } from "ethers";
 
 export const SEADROP_ADDRESS = "0x00005EA00Ac477B1030CE78506496e8C2dE24bf5";
 
@@ -135,4 +135,40 @@ export async function buildLocalMintPlan(
     drop,
     feeRecipient: fee.address,
   };
+}
+
+// Supply is read from the token contract, not the SeaDrop singleton — the
+// singleton reverts on this call. totalMinted is cumulative and never drops when
+// a token is burned, which is exactly the number the mint checks against.
+const STATS_ABI = [
+  "function getMintStats(address minter) view returns (uint256 minterNumMinted, uint256 currentTotalSupply, uint256 maxSupply)",
+];
+
+export interface MintStats {
+  mintedByWallet: bigint;
+  totalMinted: bigint;
+  maxSupply: bigint; // 0 when the contract does not pin a supply
+}
+
+// Returns null for contracts that are not ERC721SeaDrop (or answer badly) so the
+// caller keeps its normal path instead of losing the mint over a failed probe.
+export async function fetchMintStats(
+  rpcUrlOrProvider: string | JsonRpcProvider,
+  nftContract: string,
+  minter: string
+): Promise<MintStats | null> {
+  const provider =
+    typeof rpcUrlOrProvider === "string" ? new JsonRpcProvider(rpcUrlOrProvider) : rpcUrlOrProvider;
+
+  try {
+    const token = new Contract(getAddress(nftContract.toLowerCase()), STATS_ABI, provider);
+    const stats = await token.getMintStats(minter);
+    return {
+      mintedByWallet: BigInt(stats.minterNumMinted),
+      totalMinted: BigInt(stats.currentTotalSupply),
+      maxSupply: BigInt(stats.maxSupply),
+    };
+  } catch {
+    return null;
+  }
 }

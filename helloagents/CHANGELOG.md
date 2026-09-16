@@ -7,6 +7,8 @@
 ## [Unreleased]
 
 ### 新增
+- 公售供应量检查：`fetchMintStats` 读取 NFT 合约的 `getMintStats`（SeaDrop 单例无此方法）；T-refresh 时全局售罄则该目标 SKIPPED，单钱包 `已铸 + quantity` 超过 `maxTotalMintableByWallet` 则剔除该钱包，合约不响应时不阻塞
+- 批量日程（BATCH SCHEDULE）每行显示目标的 `已铸/上限`，剩余为 0 时标红 `SOLD OUT`
 - 批量模式 `--batch <file>`：从 `targets.json` 读取多个目标，按开售时间升序无人值守依次执行公售 mint（余额预检、单次确认、汇总表、`onFailure` continue/stop）
 - `targets.json` 配置：链、目标列表（slug/链接/合约地址、quantity、maxPriceEth、startAt），可选 `rpcs`/`gas`/`walletSource`/`refreshBeforeMs`/`onFailure` 覆盖
 - `src/batch-config.ts`：目标解析、链一致性校验、数量 clamp 到链上单钱包上限、价格上限换算、按开售时间排序
@@ -22,6 +24,7 @@
 - 时区语义由越南时间 UTC+7 切换为 UTC+8（展示与输入均按 UTC+8；`time-format.ts` 符号重命名为 toUtc8Time/utc8TimeToDate）
 
 ### 修复
+- HoodMiners / Exit Founders 实战失败：公售库存已在白名单阶段被清空（5000/5000、4444/4444），脚本仍在开售首块发送并 revert `MintQuantityExceedsMaxSupply`。现在 T-refresh 检查链上剩余量，售罄目标直接 SKIPPED，不再白付 gas
 - 批量模式长等待后 keep-alive 套接字失效、T-0 广播需重付握手：T-refresh 重读后、拉 nonce 前二次调用 `warmConnections`
 - 批量到达目标时配置开售已过（`targetStart=null`）但链上开售被 owner 推迟到未来，会立即发送并 revert `NotActive`：改由 `reconcileStart` 统一裁决，推迟则重新等待
 - 开售时间被 owner 提前时脚本仍按旧时间等待、错过开售：现在即时对齐到新开售时间

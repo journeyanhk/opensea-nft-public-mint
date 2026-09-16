@@ -82,6 +82,7 @@ npm run build && npm start -- --batch targets.json
 - 启动时按 `Σ(mint value + gasLimit × maxFee)` 检查每个钱包余额，任一不足即报错退出，不发送任何交易。
 - 检查通过后**只需确认一次**，随后无人值守。
 - 每个目标在开售前 3 秒（`refreshBeforeMs`）重读链上价格与费用接收人，并重新校验开售时间；价格超过上限则跳过该目标，开售时间被 owner 推迟则自动重新对齐。
+- 同一时刻还会检查链上剩余供应量（`getMintStats`）：已售罄则整个目标跳过，某钱包已达单钱包上限则从本次发送中剔除；BATCH SCHEDULE 会显示每个目标的 `已铸/上限`，售罄标红。白名单阶段常把热门免费项目的公售库存提前清空，这类目标建议直接走 `npm start -- --allowlist`。
 - 目标按开售时间升序串行执行；`onFailure: "continue"` 时某个目标失败不影响后续目标，全部结束后输出汇总表。
 - 限制：整批只能是一条链；两个目标同时开售时未支持并行；Allowlist/WL 阶段仍需 `npm start -- --allowlist` 单独执行。
 - 注意：`targets.json` 会随仓库提交，不要把带 API key 的 RPC 写进 `rpcs`；RPC 统一放 `.env`（如 `RPC_URL_ROBINHOOD`），或改用已被 `.gitignore` 忽略的 `targets.local.json`。

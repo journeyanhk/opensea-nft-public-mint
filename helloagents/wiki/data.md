@@ -67,3 +67,13 @@
 | address | string | 钱包地址 |
 | txHash | string \| null | 被 RPC 接受时为交易哈希，其余为 null |
 | status | string | SUCCESS / REVERTED / TIMEOUT / REJECTED / SKIPPED |
+
+## 链上供应量（NFT 合约 getMintStats）
+
+| 字段 | 类型 | 说明 |
+|------|------|------|
+| mintedByWallet | bigint | 该钱包累计已铸（含白名单阶段，销毁不回退） |
+| totalMinted | bigint | 全集合累计已铸（含已销毁，即供应量检查所用值） |
+| maxSupply | bigint | 硬顶；0 表示合约未固定供应量，无法判定售罄 |
+
+> `getMintStats` 在 NFT 合约上，SeaDrop 单例调用会 revert。`BatchTarget.supply` 仅存 `{ totalMinted, maxSupply }`。

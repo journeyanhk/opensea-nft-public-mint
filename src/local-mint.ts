@@ -17,7 +17,7 @@ import { warmConnections } from "./connection-warmer";
 import { waitForMintTime } from "./timer";
 import { explorerTx } from "./chains";
 import { toUtc8Time } from "./time-format";
-import { buildLocalMintPlan, LocalMintPlan } from "./seadrop-public";
+import { buildLocalMintPlan, fetchMintStats, LocalMintPlan, MintStats } from "./seadrop-public";
 
 export interface LocalSnipeOpts {
   nftContract: string;
@@ -66,6 +66,27 @@ export function reconcileStart(
   return { startMs: plannedMs, rewait: false };
 }
 
+// A public stage can be an empty shell: a whitelist phase often mints the whole
+// supply before it opens. `maxSupply === 0n` means the contract does not pin a
+// supply, so no verdict can be given and the mint is attempted as before.
+export function supplyVerdict(
+  totalMinted: bigint,
+  maxSupply: bigint,
+  requested: bigint
+): "sold-out" | "tight" | "ok" {
+  if (maxSupply <= 0n) return "ok";
+  const remaining = maxSupply - totalMinted;
+  if (remaining <= 0n) return "sold-out";
+  if (remaining < requested) return "tight";
+  return "ok";
+}
+
+// `cap` 0 means unlimited in SeaDrop terms. The count is cumulative, so a wallet
+// that minted in a whitelist phase is already part-way to its public cap.
+export function exceedsWalletCap(minted: bigint, quantity: number, cap: number): boolean {
+  return cap > 0 && minted + BigInt(quantity) > BigInt(cap);
+}
+
 export async function localPublicSnipe(opts: LocalSnipeOpts): Promise<SnipeResult[]> {
   const {
     nftContract, quantity, walletKeys, rpcUrls,
@@ -82,6 +103,10 @@ export async function localPublicSnipe(opts: LocalSnipeOpts): Promise<SnipeResul
 
   const skipped = (): SnipeResult[] =>
     wallets.map((w, i) => ({ idx: i, address: w.address, txHash: null, status: "SKIPPED" as const }));
+
+  // Wallets can be dropped before signing (already at their on-chain cap), so the
+  // send path works on this list while results still cover every wallet.
+  let active = wallets.map((wallet, idx) => ({ idx, wallet }));
 
   console.log(chalk.bold.magenta("\n── LOCAL PUBLIC MINT (no OpenSea) ──"));
   console.log(chalk.gray(`  SeaDrop:       ${planNow.to}`));
@@ -147,6 +172,50 @@ export async function localPublicSnipe(opts: LocalSnipeOpts): Promise<SnipeResul
         return skipped();
       }
 
+      // A public stage can already be empty: a whitelist phase often mints the
+      // whole supply before it opens, leaving the public stage as a shell. Read
+      // supply and per-wallet counts now, while the decision is still free.
+      const stats = await Promise.all(
+        wallets.map((w) => fetchMintStats(provider, nftContract, w.address))
+      );
+      const headline = stats.find((s): s is MintStats => s !== null);
+      if (headline) {
+        active = active.filter(({ idx, wallet }) => {
+          const s = stats[idx];
+          if (!s || !exceedsWalletCap(s.mintedByWallet, quantity, fresh.drop.maxTotalMintableByWallet)) {
+            return true;
+          }
+          console.log(
+            chalk.bold.red(
+              `  ✗ [W${idx}] ${wallet.address} already minted ${s.mintedByWallet} of cap ${fresh.drop.maxTotalMintableByWallet} — dropping it.`
+            )
+          );
+          return false;
+        });
+        if (active.length === 0) {
+          console.log(chalk.bold.red("  ✗ Every wallet is at its on-chain cap — skipping this target."));
+          return skipped();
+        }
+
+        const requested = BigInt(quantity * active.length);
+        const verdict = supplyVerdict(headline.totalMinted, headline.maxSupply, requested);
+        if (verdict === "sold-out") {
+          console.log(
+            chalk.bold.red(
+              `  ✗ Sold out on-chain: ${headline.totalMinted}/${headline.maxSupply} minted — skipping this target.`
+            )
+          );
+          return skipped();
+        }
+        if (verdict === "tight") {
+          console.log(
+            chalk.bold.yellow(
+              `  ⚠ Only ${headline.maxSupply - headline.totalMinted} left on-chain for ${requested} requested — expect partial failure.`
+            )
+          );
+        }
+      }
+
       if (fresh.data !== planNow.data || fresh.value !== planNow.value) {
         console.log(
           chalk.bold.yellow(
@@ -173,7 +242,7 @@ export async function localPublicSnipe(opts: LocalSnipeOpts): Promise<SnipeResul
 
   // ── Pre-fetch everything the signature depends on, then sign ──
   const [nonces, network] = await Promise.all([
-    Promise.all(wallets.map((w) => provider.getTransactionCount(w.address, "pending"))),
+    Promise.all(active.map(({ wallet }) => provider.getTransactionCount(wallet.address, "pending"))),
     provider.getNetwork(),
   ]);
   const chainId = network.chainId;
@@ -182,8 +251,8 @@ export async function localPublicSnipe(opts: LocalSnipeOpts): Promise<SnipeResul
   const signStart = performance.now();
   const prepared: { idx: number; address: string; blast: PreparedBlast }[] = [];
 
-  for (let i = 0; i < wallets.length; i++) {
-    const rawTx = await wallets[i].signTransaction({
+  for (const [i, { idx, wallet }] of active.entries()) {
+    const rawTx = await wallet.signTransaction({
       to: planNow.to,
       data: planNow.data,
       value: planNow.value,
@@ -194,7 +263,7 @@ export async function localPublicSnipe(opts: LocalSnipeOpts): Promise<SnipeResul
       type: 2,
       chainId,
     });
-    prepared.push({ idx: i, address: wallets[i].address, blast: prepareBlast(rawTx) });
+    prepared.push({ idx, address: wallet.address, blast: prepareBlast(rawTx) });
   }
 
   console.log(
@@ -252,17 +321,24 @@ export async function localPublicSnipe(opts: LocalSnipeOpts): Promise<SnipeResul
     settled.map((s) => [s.idx, acceptedByIdx.has(s.idx) ? "TIMEOUT" : "REJECTED"] as const)
   );
 
-  const collect = (): SnipeResult[] =>
-    prepared.map(({ idx, address }) => ({
-      idx,
-      address,
-      txHash: acceptedByIdx.get(idx) ?? null,
-      status: statusByIdx.get(idx) ?? "REJECTED",
-    }));
+  // One result per wallet: wallets dropped before signing stay SKIPPED.
+  const results: SnipeResult[] = wallets.map((w, idx) => ({
+    idx,
+    address: w.address,
+    txHash: null,
+    status: "SKIPPED" as const,
+  }));
+  const finish = (): SnipeResult[] => {
+    for (const { idx } of prepared) {
+      results[idx].txHash = acceptedByIdx.get(idx) ?? null;
+      results[idx].status = statusByIdx.get(idx) ?? "REJECTED";
+    }
+    return results;
+  };
 
   if (accepted.length === 0) {
     console.log(chalk.bold.red("\n===== NOTHING WAS BROADCAST — NO RECEIPTS TO WAIT FOR =====\n"));
-    return collect();
+    return finish();
   }
 
   // ── Receipts (only for txs an endpoint actually accepted) ──
@@ -285,5 +361,5 @@ export async function localPublicSnipe(opts: LocalSnipeOpts): Promise<SnipeResul
   );
 
   console.log(chalk.bold.white("\n===== LOCAL PUBLIC MINT COMPLETE ====="));
-  return collect();
+  return finish();
 }

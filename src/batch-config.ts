@@ -10,7 +10,9 @@ import { formatEther, parseEther, parseUnits } from "ethers";
 import { ChainProfile, resolveChain } from "./chains";
 import { resolveSlug } from "./slug-resolver";
 import { parseNftLink } from "./nft-link";
-import { buildLocalMintPlan, fetchPublicDrop, LocalMintPlan } from "./seadrop-public";
+import { buildLocalMintPlan, fetchMintStats, fetchPublicDrop, LocalMintPlan } from "./seadrop-public";
+
+const ZERO_ADDRESS = "0x0000000000000000000000000000000000000000";
 
 export interface BatchTarget {
   label: string;
@@ -19,6 +21,7 @@ export interface BatchTarget {
   maxValueWei: bigint; // ceiling for mintPrice × quantity, per wallet
   startAt: Date;
   plan: LocalMintPlan;
+  supply: { totalMinted: bigint; maxSupply: bigint } | null; // null when the contract cannot answer
 }
 
 export interface BatchConfig {
@@ -187,7 +190,19 @@ export async function loadBatchConfig(
       throw new Error(`${where} (${input}): "startAt" must be "auto" or an ISO timestamp.`);
     }
 
-    targets.push({ label, contract, quantity, maxValueWei, startAt, plan });
+    // Global supply only — the per-wallet count is checked at fire time, when the
+    // wallet set is known. A contract that cannot answer simply reports null.
+    const stats = await fetchMintStats(rpcUrls[0], contract, ZERO_ADDRESS);
+
+    targets.push({
+      label,
+      contract,
+      quantity,
+      maxValueWei,
+      startAt,
+      plan,
+      supply: stats ? { totalMinted: stats.totalMinted, maxSupply: stats.maxSupply } : null,
+    });
   }
 
   return {

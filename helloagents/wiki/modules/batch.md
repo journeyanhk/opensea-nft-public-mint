@@ -22,6 +22,7 @@
 - 已过 `endTime` 的目标直接标记 SKIPPED
 - 批量到达目标时若配置开售已过则传 `targetStart: null`；这不再等于"立刻发送"——链上 `startTime` 若仍在未来会被改为等待，提前开售也会即时对齐（由 local-mint 的 `reconcileStart` 裁决）
 - 安全：`targets.json` 会随仓库提交，禁止把带 API key 的 RPC 写入其 `rpcs`；RPC 统一放 `.env`，或改用已被 `.gitignore` 忽略的 `targets.local.json`
+- 加载时以 minter=0x0 读一次 `getMintStats` 存入 `BatchTarget.supply`；BATCH SCHEDULE 每行追加 `已铸/上限`，剩余为 0 时标红 `SOLD OUT`。仅提示不自动跳过——开售前供应仍可能被提高，最终以 T-refresh 的检查为准
 
 ## API接口
 ### 导出
@@ -37,7 +38,7 @@
   - `chain`（必填）、`walletSource`、`refreshBeforeMs`、`onFailure`
   - `rpcs?`、`gas?`（可选覆盖）
   - `targets[]`: `{ slug, quantity?, maxPriceEth?, startAt? }`
-- BatchTarget: `{ label, contract, quantity, maxValueWei, startAt, plan }`
+- BatchTarget: `{ label, contract, quantity, maxValueWei, startAt, plan, supply }`，`supply = { totalMinted, maxSupply } | null`（合约不响应时为 null）
 - BatchConfig: `{ chainKey, walletSource, rpcUrls, maxFeePerGas, maxPriorityFee, gasLimit, refreshBeforeMs, onFailure, targets }`
 - 付费目标必须显式 `maxPriceEth`，否则加载期报错；当前价已超上限则警告（执行时会被 SKIPPED）
 
@@ -47,3 +48,4 @@
 ## 变更历史
 - [202609151934_batch-timed-mint](../../history/2026-09/202609151934_batch-timed-mint/) - 新增批量模式与 targets.json 配置
 - [202609152008_review-fixes](../../history/2026-09/202609152008_review-fixes/) - 开售时间漂移（planned=null / 提前）处理与 RPC key 入库提醒
+- [202609161339_supply-check](../../history/2026-09/202609161339_supply-check/) - BATCH SCHEDULE 显示已铸/上限并标红售罄；T-refresh 增加 getMintStats 售罄与单钱包上限检查

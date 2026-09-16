@@ -1,6 +1,6 @@
 const { test } = require('node:test');
 const assert = require('node:assert/strict');
-const { reconcileStart } = require('../dist/local-mint');
+const { reconcileStart, supplyVerdict, exceedsWalletCap } = require('../dist/local-mint');
 
 const NOW = 1_800_000_000_000;
 const MINUTE = 60_000;
@@ -31,4 +31,20 @@ test('fires as soon as the chain allows when the opening moved earlier', () => {
 test('keeps the plan when the start has not moved', () => {
   const planned = NOW + MINUTE;
   assert.deepEqual(reconcileStart(planned, planned - 500, NOW, 0), { startMs: planned, rewait: false });
+});
+
+test('supply verdict flags sold-out and tight targets', () => {
+  assert.equal(supplyVerdict(5000n, 5000n, 1n), 'sold-out');
+  assert.equal(supplyVerdict(4445n, 4444n, 1n), 'sold-out');
+  assert.equal(supplyVerdict(4443n, 4444n, 3n), 'tight');
+  assert.equal(supplyVerdict(0n, 5000n, 3n), 'ok');
+  assert.equal(supplyVerdict(5000n, 0n, 1n), 'ok');
+});
+
+test('detects wallets already at the per-wallet cap', () => {
+  assert.equal(exceedsWalletCap(1n, 1, 1), true);
+  assert.equal(exceedsWalletCap(0n, 1, 1), false);
+  assert.equal(exceedsWalletCap(2n, 1, 3), false);
+  assert.equal(exceedsWalletCap(3n, 1, 3), true);
+  assert.equal(exceedsWalletCap(9n, 1, 0), false);
 });
