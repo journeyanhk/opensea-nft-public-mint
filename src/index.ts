@@ -10,6 +10,7 @@ import { runWizard } from "./wizard";
 import { closePrompts } from "./prompt";
 import { runAllowlistWizard } from "./allowlist";
 import { runBatch } from "./batch-runner";
+import { runAuditCommand } from "./audit/cli";
 
 const HELP = `
 NFT Public Mint Sniper
@@ -23,11 +24,14 @@ Usage
   npm start -- --check-allowlist  check wallet eligibility for a live Allowlist stage, no private key needed
   npm start -- --allowlist        check and mint a live Allowlist/WL FCFS stage
   npm start -- --batch <file>     run several public mints in start-time order, unattended (default file: targets.json)
+  npm start -- --audit <target...> [--chain <key>] [--wallets 0x..,0x..] [--export <file> [--force]] [--grade A,B]
+                                  check supply, mint curve and late changes before queueing; read-only
 
 The program will ask for private keys, chain, quantity, NFT link, RPC,
 gas and mint time in order. Defaults can be set in .env (see .env.example).
 Batch mode reads its targets from the given JSON file and takes gas, RPC and
 keys from .env unless the file overrides them.
+Audit mode takes a chain from the link or --chain; @file expands one target per line.
 `;
 
 async function main(): Promise<void> {
@@ -39,7 +43,9 @@ async function main(): Promise<void> {
 
   try {
     const batchIndex = args.indexOf("--batch");
-    if (batchIndex >= 0) {
+    if (args.includes("--audit")) {
+      await runAuditCommand(args);
+    } else if (batchIndex >= 0) {
       await runBatch(args[batchIndex + 1] ?? "targets.json");
     } else if (args.includes("--check-allowlist") || args.includes("--allowlist")) {
       await runAllowlistWizard(args.includes("--check-allowlist"));

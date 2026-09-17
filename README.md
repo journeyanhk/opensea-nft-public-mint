@@ -84,8 +84,34 @@ npm run build && npm start -- --batch targets.json
 - 每个目标在开售前 3 秒（`refreshBeforeMs`）重读链上价格与费用接收人，并重新校验开售时间；价格超过上限则跳过该目标，开售时间被 owner 推迟则自动重新对齐。
 - 同一时刻还会检查链上剩余供应量（`getMintStats`）：已售罄则整个目标跳过，某钱包已达单钱包上限则从本次发送中剔除；BATCH SCHEDULE 会显示每个目标的 `已铸/上限`，售罄标红。白名单阶段常把热门免费项目的公售库存提前清空，这类目标建议直接走 `npm start -- --allowlist`。
 - 目标按开售时间升序串行执行；`onFailure: "continue"` 时某个目标失败不影响后续目标，全部结束后输出汇总表。
+- 每个目标默认在开售前 30 分钟（`auditBeforeMs`）自动做一次链上体检：预计公售无货（等级 C）就跳过并记录 `SKIPPED`，不再空等；审计本身失败只告警、不影响发送。设为 `0` 可关闭。
 - 限制：整批只能是一条链；两个目标同时开售时未支持并行；Allowlist/WL 阶段仍需 `npm start -- --allowlist` 单独执行。
 - 注意：`targets.json` 会随仓库提交，不要把带 API key 的 RPC 写进 `rpcs`；RPC 统一放 `.env`（如 `RPC_URL_ROBINHOOD`），或改用已被 `.gitignore` 忽略的 `targets.local.json`。
+
+</details>
+
+<details>
+<summary><strong>审计模式：排进批量之前先体检目标</strong></summary>
+
+<br>
+
+只读检查，不发交易、不需要私钥。回答两个问题：**公售到底还有没有货**、**项目方有没有临时改参数**。
+
+```bash
+npm run build
+npm start -- --audit https://opensea.io/collection/xxx/overview --chain robinhood
+npm start -- --audit 0x合约地址 0x另一个 --chain arc --wallets 0x你的地址 --export targets.arc.json --grade A,B --quantity 1 --max-price current
+npm start -- --audit @watchlist.txt --chain robinhood
+```
+
+输出包含：
+
+- **两个余量及其等级**：上界余量（链上总量 − 已铸，提前几天就能算）与预计余量（再减去"近 15 分钟铸造速率 × 距开售时间"）；两者都为正才可能是 A
+- **分阶段铸造曲线**：直接读 SeaDrop 单例的 `SeaDropMint` 事件，按阶段给出铸出量、独立地址数、Top 地址集中度（白名单吃掉了多少一目了然）
+- **配置变更史**：`PublicDropUpdated` 解码后的价格/开售时间/上限变更次数与最近一次时间；开售前一小时内改价会标 ⚠
+- 可选增强：`.env` 里有 `OPENSEA_API_KEY` 时附加阶段名额、社交与创建日期（无 key 不影响等级判定）
+
+`--export` 写出的 `targets.<chain>.json` 会用批量模式的同一套校验跑一遍，并打印 BATCH SCHEDULE 预览；`--grade` 决定导出哪些等级（默认 A,B）。
 
 </details>
 

@@ -25,6 +25,7 @@ OpenSea SeaDrop 公售抢 mint CLI 工具（fork 自 morsyxbt/nft-public-mint）
 | wizard | 交互向导（私钥/链/数量/NFT/RPC/gas/时机/确认） | 稳定 | [modules/wizard.md](modules/wizard.md) |
 | local-mint | 公售本地构造 calldata、T-refresh 重读与护栏、预签名、多 RPC 并发广播、回执轮询 | 稳定 | [modules/local-mint.md](modules/local-mint.md) |
 | batch | 多目标顺序定时公售（targets.json、余额预检、单次确认、串行执行与汇总） | 稳定 | [modules/batch.md](modules/batch.md) |
+| audit | 目标体检（SeaDropMint 曲线、两套余量、变更史、等级与导出） | 开发中 | [modules/audit.md](modules/audit.md) |
 | allowlist | OpenSea Drops API 取签名交易、校验、模拟、轮次等待 | 稳定 | [modules/allowlist.md](modules/allowlist.md) |
 | rpc | 链注册表、RPC 选择与 chainId 校验 | 稳定 | [modules/rpc.md](modules/rpc.md) |
 | keys | .env / CLI 私钥加载与校验 | 稳定 | [modules/keys.md](modules/keys.md) |

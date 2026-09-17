@@ -54,6 +54,8 @@
 | chain | string | 是 | 整批固定单链：ethereum/base/robinhood |
 | walletSource | string | 否 | env（默认，走 .env）或 prompt（隐藏输入） |
 | refreshBeforeMs | number | 否 | T-refresh 提前量，默认 3000 |
+| auditBeforeMs | number | 否 | 开售前多久做链上复检，默认 1800000；0 关闭 |
+| auditSkipGrades | string[] | 否 | 复检命中即跳过的等级，默认 `["C"]`；空数组表示从不跳过 |
 | onFailure | string | 否 | continue（默认）或 stop |
 | rpcs | string[] | 否 | 覆盖 .env 的 RPC 列表 |
 | gas | object | 否 | `{ maxFeeGwei, priorityGwei, gasLimit }`，覆盖 .env |

@@ -5,7 +5,12 @@
 flowchart TD
     A[src/index.ts 入口] --> B[wizard 交互向导]
     A --> N[batch-runner 批量执行器]
+    A --> P[audit/cli 审计命令]
     N --> O[batch-config 目标解析与排序]
+    N --> Q[audit 开售前复检]
+    P --> R[audit 链上体检]
+    R --> S[events SeaDrop 事件扫描]
+    Q --> R
     O --> C
     B --> C[seadrop-public 本地构造 calldata]
     B --> D[allowlist Drops API 路径]
@@ -48,3 +53,8 @@ sequenceDiagram
 | ADR-5 | 配置复用 .env，targets.json 只列目标 | 2026-09-15 | ✅已采纳 | batch/rpc-resolver/keys | [history/2026-09/202609151934_batch-timed-mint/how.md](../history/2026-09/202609151934_batch-timed-mint/how.md) |
 | ADR-6 | 签名推迟到 T-3s 并重读+重锚 startTime | 2026-09-15 | ✅已采纳 | local-mint/batch | [history/2026-09/202609151934_batch-timed-mint/how.md](../history/2026-09/202609151934_batch-timed-mint/how.md) |
 | ADR-7 | 批量模式复用向导按键流程而非复制 | 2026-09-15 | ✅已采纳 | batch/wizard | [history/2026-09/202609151934_batch-timed-mint/how.md](../history/2026-09/202609151934_batch-timed-mint/how.md) |
+| ADR-8 | 审计优先于发现（M1 先于 M2） | 2026-09-17 | ✅已采纳 | audit | [history/2026-09/202609171426_target-audit/how.md](../history/2026-09/202609171426_target-audit/how.md) |
+| ADR-9 | 链上为主判据，OpenSea 为可选增强 | 2026-09-17 | ✅已采纳 | audit | [history/2026-09/202609171426_target-audit/how.md](../history/2026-09/202609171426_target-audit/how.md) |
+| ADR-10 | headroom 用实测铸造曲线而非名额公式 | 2026-09-17 | ✅已采纳 | audit/events | [history/2026-09/202609171426_target-audit/how.md](../history/2026-09/202609171426_target-audit/how.md) |
+| ADR-11 | 不引入原生依赖存储（JSON 缓存） | 2026-09-17 | ✅已采纳 | audit/cache | [history/2026-09/202609171426_target-audit/how.md](../history/2026-09/202609171426_target-audit/how.md) |
+| ADR-12 | M1.5 接入 batch-runner，fail-open | 2026-09-17 | ✅已采纳 | batch/audit | [history/2026-09/202609171426_target-audit/how.md](../history/2026-09/202609171426_target-audit/how.md) |

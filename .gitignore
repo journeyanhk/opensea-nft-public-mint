@@ -10,6 +10,9 @@ dist/
 # Batch config that may embed RPC keys — keep it local
 targets.local.json
 
+# Audit scan cache — rebuilt on demand
+.audit-cache/
+
 # Private keys — never commit
 wallets/
 keys.txt

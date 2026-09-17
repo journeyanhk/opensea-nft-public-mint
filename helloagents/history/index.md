@@ -14,6 +14,7 @@
 | 202609152008 | review-fixes | 修复 | ✅已完成 | [链接](2026-09/202609152008_review-fixes/) |
 | 202609161339 | supply-check | 修复 | ✅已完成 | [链接](2026-09/202609161339_supply-check/) |
 | 202609171345 | arc-chain | 功能 | ✅已完成 | [链接](2026-09/202609171345_arc-chain/) |
+| 202609171426 | target-audit | 功能 | ✅已完成 | [链接](2026-09/202609171426_target-audit/) |
 
 ---
 
@@ -27,3 +28,4 @@
 - [202609152008_review-fixes](2026-09/202609152008_review-fixes/) - review 修复：T-refresh 后二次预热；开售时间漂移（planned=null / 提前）改由 reconcileStart 裁决；targets.local.json 入库防护
 - [202609161339_supply-check](2026-09/202609161339_supply-check/) - 实战复盘修复：getMintStats 售罄检查（T-refresh 跳过售罄目标、剔除已达上限钱包）与批量日程剩余量展示
 - [202609171345_arc-chain](2026-09/202609171345_arc-chain/) - Arc 链接入（chainId 5042）、gas 默认值按链配置、批量广播前 base fee 预检、向导路径补供应量检查
+- [202609171426_target-audit](2026-09/202609171426_target-audit/) - `--audit` 目标审计（两套余量、SeaDropMint 分阶段曲线、变更史、A/B/C/D、导出）与批量前置审计 M1.5

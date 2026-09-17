@@ -7,6 +7,9 @@
 ## [Unreleased]
 
 ### 新增
+- `--audit` 目标审计（只读）：链上两套余量（上界 / 按近期铸造速率的实测投影）各自分级，SeaDrop 单例 `SeaDropMint` 分阶段铸造曲线（铸出/独立地址/Top 集中度），`PublicDropUpdated` 语义变更史，开售前 1 小时改价/改期告警，A/B/C/D 综合等级；`--export` 产出经 `loadBatchConfig` 校验的 `targets.<chain>.json`
+- 批量前置审计（M1.5）：`auditBeforeMs`（默认 30 分钟）在开售前自动复检，命中 `auditSkipGrades`（默认 C）则跳过该目标；审计失败只告警不阻断
+- SeaDrop 事件扫描原语（窗口分片 + 重试退避 + `.audit-cache` JSON 缓存），无原生依赖；`tests/fixtures/seadropmint-arc.json` 为真实链上日志
 - Arc 链支持（chainId 5042，RPC `https://rpc.mainnet.arc.io`，浏览器 `https://explorer.arc.io`，原生 gas 为 USDC/18 位；SeaDrop 1.0 单例同地址）
 - 每链 gas 默认值 `ChainProfile.gas`：ethereum 80/5、base 2/0.05、robinhood 2/0.05、arc 40/0；`.env` 的 `MAX_FEE_PER_GAS`/`MAX_PRIORITY_FEE` 留空时生效
 - 批量模式广播前 base fee 预检：`maxFeePerGas` 低于链上 `baseFeePerGas` 时启动即报错并给出建议值，不再等到开售被节点拒收
@@ -29,6 +32,7 @@
 - 时区语义由越南时间 UTC+7 切换为 UTC+8（展示与输入均按 UTC+8；`time-format.ts` 符号重命名为 toUtc8Time/utc8TimeToDate）
 
 ### 修复
+- 向导的 gas 环境变量读取统一为 trim 判空（与批量模式的 `resolveGas` 一致）：纯空白的 `MAX_FEE_PER_GAS`/`MAX_PRIORITY_FEE` 不再被 `Number(" ")` 当成 0，而是回落到链默认值
 - HoodMiners / Exit Founders 实战失败：公售库存已在白名单阶段被清空（5000/5000、4444/4444），脚本仍在开售首块发送并 revert `MintQuantityExceedsMaxSupply`。现在 T-refresh 检查链上剩余量，售罄目标直接 SKIPPED，不再白付 gas
 - 批量模式长等待后 keep-alive 套接字失效、T-0 广播需重付握手：T-refresh 重读后、拉 nonce 前二次调用 `warmConnections`
 - 批量到达目标时配置开售已过（`targetStart=null`）但链上开售被 owner 推迟到未来，会立即发送并 revert `NotActive`：改由 `reconcileStart` 统一裁决，推迟则重新等待

@@ -14,6 +14,7 @@ CLI 交互向导：引导用户完成私钥、链、数量、NFT 目标、RPC、
 用户在向导中依次回答：私钥来源 → 链 → 每钱包数量 → NFT 链接/slug/合约地址 → RPC → gas → 时机 → 确认。
 - 时机选项：等待开售（T-0 发送）/立即发送/自定义 HH:MM（UTC+8）
 - 余额检查按 `gasLimit × maxFee + mint 金额` 预占口径
+- gas 预填值来自 `ChainProfile.gas`（`.env` 覆盖，空白值按未设置处理）；低于链上 base fee 时自动抬到建议值
 
 ## API接口
 ### 导出

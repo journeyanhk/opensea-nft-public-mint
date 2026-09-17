@@ -152,8 +152,12 @@ export async function runWizard(): Promise<void> {
     console.log(chalk.gray(`  Current network base fee: ${baseFeeGwei.toFixed(6)} gwei`));
   }
 
-  const envMaxFee = Number(process.env.MAX_FEE_PER_GAS || chainProfile.gas.maxFeeGwei);
-  const envPriority = Number(process.env.MAX_PRIORITY_FEE || chainProfile.gas.priorityGwei);
+  // Blank .env entries fall through to the chain defaults; a literal 0 (Arc's
+  // suggested tip) is a valid value and must survive.
+  const feeEnv = (process.env.MAX_FEE_PER_GAS || "").trim();
+  const priorityEnv = (process.env.MAX_PRIORITY_FEE || "").trim();
+  const envMaxFee = feeEnv ? Number(feeEnv) : chainProfile.gas.maxFeeGwei;
+  const envPriority = priorityEnv ? Number(priorityEnv) : chainProfile.gas.priorityGwei;
 
   // A ceiling under the base fee is rejected outright by every node, so it must
   // not be enterable at all.

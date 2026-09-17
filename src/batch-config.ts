@@ -11,6 +11,7 @@ import { ChainProfile, resolveChain } from "./chains";
 import { resolveSlug } from "./slug-resolver";
 import { parseNftLink } from "./nft-link";
 import { buildLocalMintPlan, fetchMintStats, fetchPublicDrop, LocalMintPlan } from "./seadrop-public";
+import { Grade } from "./audit/score";
 
 const ZERO_ADDRESS = "0x0000000000000000000000000000000000000000";
 
@@ -32,12 +33,26 @@ export interface BatchConfig {
   maxPriorityFee: bigint;
   gasLimit: number;
   refreshBeforeMs: number;
+  auditBeforeMs: number; // re-audit this long before the stage opens; 0 disables
+  auditSkipGrades: Grade[];
   onFailure: "continue" | "stop";
   targets: BatchTarget[];
 }
 
 const DEFAULT_GAS_LIMIT = 250_000;
 const DEFAULT_REFRESH_MS = 3_000;
+const DEFAULT_AUDIT_MS = 30 * 60_000;
+const ALL_GRADES: Grade[] = ["A", "B", "C", "D"];
+
+// A target graded C is expected to have no public supply left, so it is skipped
+// unless the config says otherwise. Audit failures never skip anything.
+function parseSkipGrades(value: unknown): Grade[] {
+  if (!Array.isArray(value)) return ["C"];
+  const grades = value
+    .map((g) => String(g).trim().toUpperCase())
+    .filter((g): g is Grade => ALL_GRADES.includes(g as Grade));
+  return grades;
+}
 
 // SeaDrop reports an unset per-wallet cap as 0, which means "no limit" rather
 // than "mint nothing".
@@ -216,6 +231,8 @@ export async function loadBatchConfig(
     rpcUrls,
     ...resolveGas(chain.key, raw.gas ?? {}),
     refreshBeforeMs: nonNegativeInt(raw.refreshBeforeMs, DEFAULT_REFRESH_MS),
+    auditBeforeMs: nonNegativeInt(raw.auditBeforeMs, DEFAULT_AUDIT_MS),
+    auditSkipGrades: parseSkipGrades(raw.auditSkipGrades),
     onFailure: raw.onFailure === "stop" ? "stop" : "continue",
     targets: sortTargetsByStart(targets),
   };

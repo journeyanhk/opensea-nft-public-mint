@@ -13,6 +13,8 @@ import { resolveChain } from "./chains";
 import { BatchTarget, loadBatchConfig } from "./batch-config";
 import { planRpcs, resolveRpcsForChain } from "./rpc-resolver";
 import { localPublicSnipe, SnipeResult } from "./local-mint";
+import { auditTarget } from "./audit/audit";
+import { waitForMintTime } from "./timer";
 import { toUtc8Time } from "./time-format";
 import { askYesNo, closePrompts } from "./prompt";
 import { walletKeysFromEnv } from "./wallet-keys";
@@ -162,6 +164,35 @@ export async function runBatch(configPath: string): Promise<void> {
     }
 
     console.log(chalk.bold.magenta(`\n━━━ ${t.label} (${t.contract}) ━━━`));
+
+    // Re-audit shortly before the stage opens: a whitelist phase can drain the
+    // supply in the meantime, and the T-3s on-chain check is the last line of
+    // defence rather than the first. An audit that cannot run never blocks a mint.
+    if (cfg.auditBeforeMs > 0 && t.startAt.getTime() > Date.now()) {
+      const deadline = t.startAt.getTime() - cfg.auditBeforeMs;
+      if (deadline > Date.now()) {
+        await waitForMintTime(new Date(deadline), 0);
+      } else {
+        console.log(chalk.gray("  audit window already open — checking now"));
+      }
+      try {
+        const audit = await auditTarget(
+          { chainKey: cfg.chainKey, target: t.contract },
+          { wallets: wallets.map((w) => w.address), requestedQuantity: t.quantity }
+        );
+        console.log(chalk.gray(`  audit: ${audit.grade.grade} — ${audit.grade.reason}`));
+        if (cfg.auditSkipGrades.includes(audit.grade.grade)) {
+          console.log(chalk.bold.yellow(`  skipping ${t.label}: audit grade ${audit.grade.grade}`));
+          summary.push({
+            target: t,
+            results: wallets.map((w, idx) => ({ idx, address: w.address, txHash: null, status: "SKIPPED" as const })),
+          });
+          continue;
+        }
+      } catch (err) {
+        console.log(chalk.yellow(`  audit unavailable, continuing: ${(err as Error).message}`));
+      }
+    }
 
     let results: SnipeResult[];
     try {

@@ -2,6 +2,8 @@
   "chain": "robinhood",
   "walletSource": "env",
   "refreshBeforeMs": 3000,
+  "auditBeforeMs": 1800000,
+  "auditSkipGrades": ["C"],
   "onFailure": "continue",
   "targets": [
     {
