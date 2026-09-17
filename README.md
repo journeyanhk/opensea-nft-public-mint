@@ -85,6 +85,17 @@ npm run build && npm start -- --batch targets.json
 - 同一时刻还会检查链上剩余供应量（`getMintStats`）：已售罄则整个目标跳过，某钱包已达单钱包上限则从本次发送中剔除；BATCH SCHEDULE 会显示每个目标的 `已铸/上限`，售罄标红。白名单阶段常把热门免费项目的公售库存提前清空，这类目标建议直接走 `npm start -- --allowlist`。
 - 目标按开售时间升序串行执行；`onFailure: "continue"` 时某个目标失败不影响后续目标，全部结束后输出汇总表。
 - 每个目标默认在开售前 30 分钟（`auditBeforeMs`）自动做一次链上体检：预计公售无货（等级 C）就跳过并记录 `SKIPPED`，不再空等；审计本身失败只告警、不影响发送。设为 `0` 可关闭。
+- `--watch` 常驻模式：每 `--watch-interval`（默认 60 秒）重读主配置与 `--watch` 后列出的文件，**新目标自动合入队列**（按开售时间排序）并执行；从配置中消失且未执行的目标会被移出队列。
+- **执行账本** `.batch-state.json`：广播前先写 `PENDING`，收到结果后更新。任何已经广播过的目标（`txHash` 非空）在进程重启后都不会重发；`--no-ledger` 可关闭（不推荐），`--retry-pending` 可重发没有结果的 `PENDING`。
+- 完整闭环示例：
+
+```bash
+# 窗口 1：常驻扫描（每 20 分钟一轮，A/B 级自动导出）
+while true; do npm start -- --scan --chain robinhood,arc --limit 20 --export targets.scan.json --force; sleep 1200; done
+
+# 窗口 2：常驻批量，自动吃下扫描导出的新目标
+npm start -- --batch targets.json --watch targets.scan.json --watch-interval 60
+```
 - 限制：整批只能是一条链；两个目标同时开售时未支持并行；Allowlist/WL 阶段仍需 `npm start -- --allowlist` 单独执行。
 - 注意：`targets.json` 会随仓库提交，不要把带 API key 的 RPC 写进 `rpcs`；RPC 统一放 `.env`（如 `RPC_URL_ROBINHOOD`），或改用已被 `.gitignore` 忽略的 `targets.local.json`。
 

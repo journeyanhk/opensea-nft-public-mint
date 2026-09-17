@@ -18,6 +18,10 @@ targets.local.json
 .scan-history.jsonl
 .scan-state.json.tmp
 
+# Batch execution ledger (guards against sending twice after a restart)
+.batch-state.json
+.batch-state.json.tmp
+
 # Private keys — never commit
 wallets/
 keys.txt

@@ -18,6 +18,7 @@ const ZERO_ADDRESS = "0x0000000000000000000000000000000000000000";
 export interface BatchTarget {
   label: string;
   contract: string;
+  slug: string; // original config input, kept for the ledger and backfill
   quantity: number;
   maxValueWei: bigint; // ceiling for mintPrice × quantity, per wallet
   startAt: Date;
@@ -114,8 +115,12 @@ function nonNegativeInt(value: unknown, fallback: number): number {
 export async function loadBatchConfig(
   raw: any,
   chain: ChainProfile,
-  rpcUrls: string[]
+  rpcUrls: string[],
+  options: { quiet?: boolean } = {}
 ): Promise<BatchConfig> {
+  // Watched configs are re-read on every poll; repeating warnings for targets
+  // that have not changed is noise. The runner logs changes itself.
+  const say = options.quiet ? () => {} : (message: string) => console.log(message);
   if (rpcUrls.length === 0) {
     throw new Error("No usable RPC endpoint — the batch would have nothing to send through.");
   }
@@ -150,7 +155,7 @@ export async function loadBatchConfig(
       const hint = link.chainHint ? resolveChain(link.chainHint) : undefined;
       if (hint) targetChain = hint.key;
     } else {
-      console.log(chalk.gray(`  Resolving ${link.value}...`));
+      say(chalk.gray(`  Resolving ${link.value}...`));
       const info = await resolveSlug(link.value, apiKey, chain.key);
       contract = info.contractAddress;
       label = info.name || link.value;
@@ -175,7 +180,7 @@ export async function loadBatchConfig(
     const requested = entry.quantity === undefined ? 1 : Number(entry.quantity);
     const quantity = clampQuantity(requested, drop.maxTotalMintableByWallet);
     if (quantity !== requested) {
-      console.log(
+      say(
         chalk.yellow(
           `  ${label}: quantity ${requested} → ${quantity} (on-chain per-wallet cap ${drop.maxTotalMintableByWallet})`
         )
@@ -195,7 +200,7 @@ export async function loadBatchConfig(
         );
       }
     } else if (plan.value > maxValueWei) {
-      console.log(
+      say(
         chalk.yellow(
           `  ${label}: current total ${formatEther(plan.value)} is above the maxPriceEth cap ${formatEther(maxValueWei)} — it will be skipped unless the price drops.`
         )
@@ -217,6 +222,7 @@ export async function loadBatchConfig(
     targets.push({
       label,
       contract,
+      slug: input,
       quantity,
       maxValueWei,
       startAt,

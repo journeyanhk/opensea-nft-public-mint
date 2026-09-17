@@ -161,11 +161,13 @@ export async function exportTargets(results: AuditResult[], opts: ExportOptions)
   }
 
   const cfg = raw.targets.length > 0 ? await loadBatchConfig(raw, chain, rpcPlan.urls) : null;
-  // Never silently clobber a config the user may have edited.
+  // Never silently clobber a config the user may have edited, and write
+  // atomically so a watching batch never reads a half-written file.
   if (fs.existsSync(opts.path) && !opts.force) {
     throw new Error(`${opts.path} already exists — pass --force to overwrite it.`);
   }
-  fs.writeFileSync(opts.path, JSON.stringify(raw, null, 2));
+  fs.writeFileSync(`${opts.path}.tmp`, JSON.stringify(raw, null, 2));
+  fs.renameSync(`${opts.path}.tmp`, opts.path);
 
   const schedule = cfg
     ? cfg.targets.map(

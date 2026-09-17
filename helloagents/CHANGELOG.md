@@ -7,6 +7,9 @@
 ## [Unreleased]
 
 ### 新增
+- M3a 批量热加载：`--batch <file> --watch [file...] --watch-interval <秒>` 定期重读配置，新目标经校验与逐目标余额预检后自动入队（按开售时间排序），消失的目标移出队列
+- M3a 执行账本 `.batch-state.json`：广播前写 PENDING、结果回填；`txHash` 非空或 SUCCESS/REVERTED/TIMEOUT 一律跳过，SKIPPED/REJECTED 允许重试；`--no-ledger` 关闭，`--retry-pending` 重发 PENDING
+- 导出改为临时文件 + rename 原子写，避免 watch 读到半写配置
 - `--scan` 发现器（M2，只读）：监听 SeaDrop 单例的 `PublicDropUpdated` 与 `SeaDropMint`（topic0 OR，`topic1` 去重合约），每链 JSON 游标（只前进到 `latest − 64`，确认延迟），候选过滤（`buildLocalMintPlan` + `getMintStats` 排除售罄/已结束/超 horizon），`--limit` 封顶单次审计数，`--grade` 过滤后复用审计导出
 - 扫描状态与快照：`.scan-state.json`（原子写：临时文件 + rename，损坏回退空状态）与 `.scan-history.jsonl`（每次审计一行），均无原生依赖并已 gitignore
 - Arc 限流适配：Arc 扫描串行（`SCAN_CONCURRENCY.arc = 1`），限流错误退避上限 15s；审计支持分数天回看（scan 默认 0.5 天）与 `maxRetries` 透传

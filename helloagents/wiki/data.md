@@ -81,6 +81,16 @@
 
 > `getMintStats` 在 NFT 合约上，SeaDrop 单例调用会 revert。`BatchTarget.supply` 仅存 `{ totalMinted, maxSupply }`。
 
+## 执行账本（.batch-state.json，gitignore）
+
+| 字段 | 类型 | 说明 |
+|------|------|------|
+| entries[chain][contract].status | string | PENDING / SUCCESS / REVERTED / TIMEOUT / REJECTED / SKIPPED |
+| entries[chain][contract].txHash | string \| null | 非空即代表已广播，重启后不再重发 |
+| entries[chain][contract].at | string | ISO 时间 |
+| entries[chain][contract].quantity | number | 每钱包数量 |
+| entries[chain][contract].slug | string \| null | 配置原始输入（供 M3c 回填复用） |
+
 ## 发现器状态（.scan-state.json / .scan-history.jsonl，均 gitignore）
 
 | 字段 | 类型 | 说明 |

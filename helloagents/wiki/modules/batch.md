@@ -47,6 +47,7 @@
 - batch-config / local-mint / rpc-resolver / keys(wallet-keys) / wizard(promptKeys) / chains / time-format / prompt / ethers
 
 ## 变更历史
+- [202609171655_m3-pipeline](../../history/2026-09/202609171655_m3-pipeline/) - M3a 热加载与执行账本（见 [batch-watch](batch-watch.md)）
 - [202609151934_batch-timed-mint](../../history/2026-09/202609151934_batch-timed-mint/) - 新增批量模式与 targets.json 配置
 - [202609152008_review-fixes](../../history/2026-09/202609152008_review-fixes/) - 开售时间漂移（planned=null / 提前）处理与 RPC key 入库提醒
 - [202609161339_supply-check](../../history/2026-09/202609161339_supply-check/) - BATCH SCHEDULE 显示已铸/上限并标红售罄；T-refresh 增加 getMintStats 售罄与单钱包上限检查
