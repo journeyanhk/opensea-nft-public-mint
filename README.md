@@ -135,8 +135,10 @@ npm start -- --scan --chain arc --no-audit            # 只看发现，不审计
 - 扫描 `PublicDropUpdated` 与 `SeaDropMint` 两类事件，按合约去重；游标只前进到 `latest − 64` 块（确认延迟）
 - 候选过滤：公售未结束、开售在 `--horizon-hours`（默认 72h）内、且不是已售罄
 - 已知合约仅在"有新事件"或"开售临近且距上次审计超过 30 分钟"时重审；售罄合约在出现新事件前不再查询
-- `--limit` 之外的候选计入 `over limit`，留待下次；审计失败只记录，下次扫描自动重试
-- Arc 公共 RPC 限流严重，Arc 扫描串行执行；如配置了私有 RPC（`RPC_URL_ARC`）会明显更快
+- `--limit` 之外的候选写入状态文件的积压队列（`pendingAudit`），下一轮**优先审计积压**再处理新发现；审计失败会保留待重试
+- 首次回填建议 Robinhood `--since-days 1`（实测约 5 分钟、86 个窗口、600+ 合约），之后每轮增量仅 1 个窗口
+- 公共 RPC 限流明显，Arc 与 Robinhood 均串行扫描；配置私有 RPC（`RPC_URL_ARC`、`RPC_URL_ROBINHOOD`）会快很多
+- 审计只回看 0.5 天，因此分阶段数据会标注 `(partial scan: x/y)`；集中度风险标签仅在覆盖率 ≥50% 且样本 ≥50 枚时给出
 - 建议 crontab 示例：`*/20 * * * * cd <repo> && npm start -- --scan --limit 10 >> scan.log 2>&1`
 
 </details>

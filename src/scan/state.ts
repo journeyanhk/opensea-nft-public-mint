@@ -24,6 +24,7 @@ export interface ContractEntry {
   lastGrade: Grade | null;
   soldOutAtBlock: number | null;
   publicStart: number | null; // unix seconds, latest known
+  pendingAudit: boolean; // was a candidate but beyond --limit; audited first next run
 }
 
 export interface ScanState {
@@ -91,6 +92,7 @@ export function recordContracts(
         lastGrade: null,
         soldOutAtBlock: null,
         publicStart: null,
+        pendingAudit: false,
       };
       added.push(key);
     } else {

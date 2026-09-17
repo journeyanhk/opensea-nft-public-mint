@@ -75,11 +75,14 @@ export function renderAuditDetail(results: AuditResult[]): string {
       `  minted ${r.totalMinted}${r.maxSupply ? `/${r.maxSupply}` : " (supply unpinned)"} | ${r.mintScan.totalTxs} txs | ${r.mintScan.uniqueMinters} minters | top share ${Math.round(r.mintScan.topMinterShare * 100)}%`
     );
     if (r.mintScan.stages.length > 0) {
+      const partial = r.mintScan.totalTokens < r.totalMinted;
+      const suffix = partial ? chalk.gray(` (partial scan: ${r.mintScan.totalTokens}/${r.totalMinted})`) : "";
       lines.push(
         "  stages: " +
           r.mintScan.stages
             .map((s) => `#${s.stage} ${s.tokens} (${s.uniqueMinters} wallets)`)
-            .join(" | ")
+            .join(" | ") +
+          suffix
       );
     }
     if (r.updates.length > 0) {

@@ -35,6 +35,10 @@
 - 时区语义由越南时间 UTC+7 切换为 UTC+8（展示与输入均按 UTC+8；`time-format.ts` 符号重命名为 toUtc8Time/utc8TimeToDate）
 
 ### 修复
+- `--scan` 默认参数在 Robinhood 上必崩：发现阶段对单例做无过滤 OR 查询，100k 块窗口（约 2.8 小时）内日志数轻易超过 RPC 的 1 万条上限。现在发现窗口降到 10k 块，并在 `scanLogs` 内实现**自适应二分**（命中 `exceeds limit` 类错误就把窗口对半拆，16 块为下限），对所有扫描调用生效
+- 公开 RPC 限流：Robinhood 也改为串行扫描（此前 Arc 已是串行），发现阶段重试上限提到 8 次；`--since-days 1` 首次回填实测 5 分 14 秒（86 窗口、614 个合约），增量每轮仅 1 个窗口
+- 局部扫描误导风险标签：审计触发的 0.5 天回看下，集中度标签会基于少量样本（如 5 个 token 里占 80%）。现在只有覆盖率 ≥50% 且样本 ≥50 枚时才打 "top minter" 标签，覆盖率不足时改标 `partial scan (x% of mints)`；报告的分阶段行也会标注 `(partial scan: x/y)`
+- 超限候选被永久丢弃：`--limit` 之外的候选现在记入 `ContractEntry.pendingAudit`，下次运行优先消化积压再处理新发现；审计成功或判定售罄/过期时清除，失败则保留待重试
 - 向导的 gas 环境变量读取统一为 trim 判空（与批量模式的 `resolveGas` 一致）：纯空白的 `MAX_FEE_PER_GAS`/`MAX_PRIORITY_FEE` 不再被 `Number(" ")` 当成 0，而是回落到链默认值
 - HoodMiners / Exit Founders 实战失败：公售库存已在白名单阶段被清空（5000/5000、4444/4444），脚本仍在开售首块发送并 revert `MintQuantityExceedsMaxSupply`。现在 T-refresh 检查链上剩余量，售罄目标直接 SKIPPED，不再白付 gas
 - 批量模式长等待后 keep-alive 套接字失效、T-0 广播需重付握手：T-refresh 重读后、拉 nonce 前二次调用 `warmConnections`

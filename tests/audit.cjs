@@ -127,6 +127,8 @@ const base = {
   publicStartAt: 1_800_000_000,
   now: 1_800_000_000,
   topMinterShare: 0,
+  scanTokens: 0n,
+  scanCoverage: 1,
   socialKnown: false,
   socialAny: false,
   ageHours: null,
@@ -158,4 +160,16 @@ test('only an API-known, brand-new, social-less collection reaches D', () => {
   assert.equal(noApi.grade, 'A');
   const withSocial = gradeTarget({ ...base, maxSupply: 100n, totalMinted: 0n, socialKnown: true, socialAny: true, ageHours: 5 });
   assert.equal(withSocial.grade, 'A');
+});
+
+test('suppresses concentration labels when the scan saw only part of the mints', () => {
+  const complete = gradeTarget({ ...base, maxSupply: 20000n, totalMinted: 10000n, scanTokens: 10000n, scanCoverage: 1, topMinterShare: 0.8 });
+  assert.ok(complete.risks.some(r => r.includes('top minter holds 80%')));
+
+  const partial = gradeTarget({ ...base, maxSupply: 20000n, totalMinted: 10000n, scanTokens: 100n, scanCoverage: 0.01, topMinterShare: 0.8 });
+  assert.ok(!partial.risks.some(r => r.includes('top minter')));
+  assert.ok(partial.risks.some(r => r.includes('partial scan')));
+
+  const tiny = gradeTarget({ ...base, maxSupply: 20000n, totalMinted: 10000n, scanTokens: 20n, scanCoverage: 1, topMinterShare: 0.8 });
+  assert.ok(!tiny.risks.some(r => r.includes('top minter')));
 });

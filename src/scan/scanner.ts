@@ -12,9 +12,9 @@ import { SEADROP_ADDRESS, buildLocalMintPlan, fetchMintStats, PublicDrop } from 
 import {
   PUBLIC_DROP_UPDATED_TOPIC,
   SEADROP_MINT_TOPIC,
+  discoveryWindowBlocks,
   estimateBlockTime,
   scanLogs,
-  windowBlocks,
 } from "../audit/events";
 import { AuditResult, auditTarget } from "../audit/audit";
 import { projectedHeadroom, remainingSupply } from "../audit/score";
@@ -35,6 +35,17 @@ export const CONFIRMATIONS = 64;
 const REAUDIT_MS = 30 * 60_000;
 const CANDIDATE_CONCURRENCY = 3;
 const RECENT_WINDOW_MINUTES = 15;
+
+// Pending candidates go first so a run that hit --limit does not starve behind
+// next run's fresh discoveries.
+export function selectAuditBatch(
+  pending: string[],
+  fresh: string[],
+  limit: number
+): { audit: string[]; overflow: string[] } {
+  const ordered = [...pending, ...fresh];
+  return { audit: ordered.slice(0, limit), overflow: ordered.slice(limit) };
+}
 
 export function discoveryTopics(): string[] {
   return [PUBLIC_DROP_UPDATED_TOPIC, SEADROP_MINT_TOPIC];
@@ -165,13 +176,17 @@ export async function runScan(
     report.fromBlock = fromBlock;
     report.toBlock = toBlock;
     report.windows =
-      fromBlock <= toBlock ? Math.ceil((toBlock - fromBlock + 1) / windowBlocks(chainKey)) : 0;
+      fromBlock <= toBlock
+        ? Math.ceil((toBlock - fromBlock + 1) / discoveryWindowBlocks(chainKey))
+        : 0;
 
     let seenContracts: string[] = [];
     if (fromBlock <= toBlock) {
       onProgress(`${chainKey}: scanning blocks ${fromBlock}..${toBlock}`);
       const logs = await scanLogs(chainKey, SEADROP_ADDRESS, [discoveryTopics()], fromBlock, toBlock, {
         rpcUrl,
+        window: discoveryWindowBlocks(chainKey),
+        maxRetries: 8,
         onProgress: (message) => onProgress(`${chainKey}: ${message}`),
       });
 
@@ -197,19 +212,40 @@ export async function runScan(
     // Discovery is persisted before any audit runs.
     saveState(state, statePath);
 
-    // Candidate seeds: every contract seen in this window, plus known contracts
-    // whose public stage is approaching and whose audit is stale.
+    // Candidate seeds: contracts seen in this window, contracts left pending by
+    // an earlier --limit, and known contracts whose public stage is approaching.
     const nowMs = Date.now();
     const horizonMs = opts.horizonHours * 3_600_000;
-    const seeds = new Set<string>(seenContracts);
-    for (const [contract, entry] of Object.entries(state.contracts[chainKey] ?? {})) {
-      if (entry.publicStart !== null && entry.publicStart * 1000 > nowMs && entry.publicStart * 1000 - nowMs <= horizonMs) {
-        seeds.add(contract);
+    const queued = new Set<string>();
+    const pendingSeeds: string[] = [];
+    const freshSeeds: string[] = [];
+    for (const contract of seenContracts) {
+      if (!queued.has(contract)) {
+        queued.add(contract);
+        freshSeeds.push(contract);
       }
     }
+    for (const [contract, entry] of Object.entries(state.contracts[chainKey] ?? {})) {
+      if (queued.has(contract)) continue;
+      if (entry.pendingAudit) {
+        queued.add(contract);
+        pendingSeeds.push(contract);
+        continue;
+      }
+      if (
+        entry.publicStart !== null &&
+        entry.publicStart * 1000 > nowMs &&
+        entry.publicStart * 1000 - nowMs <= horizonMs
+      ) {
+        queued.add(contract);
+        freshSeeds.push(contract);
+      }
+    }
+    const pendingSet = new Set(pendingSeeds);
 
-    const candidates: string[] = [];
-    await pool([...seeds], CANDIDATE_CONCURRENCY, async (contract) => {
+    const pendingCandidates: string[] = [];
+    const freshCandidates: string[] = [];
+    await pool([...pendingSeeds, ...freshSeeds], CANDIDATE_CONCURRENCY, async (contract) => {
       const entry = state.contracts[chainKey][contract];
       const eventSinceAudit =
         entry.lastAuditedBlock === null || entry.lastSeenBlock > entry.lastAuditedBlock;
@@ -227,6 +263,7 @@ export async function runScan(
       if (!isCandidateDrop(plan.drop, nowSec, opts.horizonHours)) {
         if (plan.drop.endTime <= nowSec) report.skipped.ended++;
         else report.skipped.far++;
+        entry.pendingAudit = false;
         return;
       }
 
@@ -236,20 +273,25 @@ export async function runScan(
         // something actually happens again.
         entry.soldOutAtBlock = entry.lastSeenBlock;
         entry.lastAuditedBlock = entry.lastSeenBlock;
+        entry.pendingAudit = false;
         report.skipped.soldOut++;
         return;
       }
 
       if (!shouldAudit({ entry, eventSinceAudit, startAtMs: plan.drop.startTime * 1000, nowMs, horizonMs })) {
+        entry.pendingAudit = false;
         report.skipped.known++;
         return;
       }
-      candidates.push(contract);
+      (pendingSet.has(contract) ? pendingCandidates : freshCandidates).push(contract);
     });
 
-    const toAudit = candidates.slice(0, opts.limit);
+    const { audit: toAudit, overflow } = selectAuditBatch(pendingCandidates, freshCandidates, opts.limit);
     report.candidates = toAudit;
-    report.skipped.limited = candidates.length - toAudit.length;
+    report.skipped.limited = overflow.length;
+    if (opts.audit) {
+      for (const contract of overflow) state.contracts[chainKey][contract].pendingAudit = true;
+    }
     saveState(state, statePath);
 
     if (opts.audit) {
@@ -266,6 +308,7 @@ export async function runScan(
           entry.lastAuditedAt = new Date().toISOString();
           entry.lastGrade = result.grade.grade;
           entry.publicStart = result.publicDrop?.startTime ?? entry.publicStart;
+          entry.pendingAudit = false;
           const remaining = remainingSupply(result.maxSupply, result.totalMinted);
           appendHistory(
             [

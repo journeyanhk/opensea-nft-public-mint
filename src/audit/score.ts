@@ -119,6 +119,8 @@ export interface RiskInputs {
   publicStartAt: number; // unix seconds
   now: number; // unix seconds
   topMinterShare: number; // 0..1
+  scanTokens: bigint; // tokens observed by this scan
+  scanCoverage: number; // scanTokens / totalMinted, 1 when nothing is minted
   socialKnown: boolean; // API answered
   socialAny: boolean;
   ageHours: number | null; // collection created → public start
@@ -148,8 +150,15 @@ export function assessRisk(input: RiskInputs): RiskResult {
   if (input.priceChanges >= 1 && (priceMinutes === null || priceMinutes > 60)) {
     labels.push(`price changed ${input.priceChanges} times`);
   }
-  if (input.topMinterShare >= 0.5) {
+
+  // Concentration is only meaningful when the scan saw most of the mints; a
+  // 0.5-day lookback on a long-running drop can make one wallet look dominant
+  // on a handful of tokens.
+  const coverage = Math.max(0, Math.min(1, input.scanCoverage));
+  if (input.topMinterShare >= 0.5 && coverage >= 0.5 && input.scanTokens >= 50n) {
     labels.push(`top minter holds ${Math.round(input.topMinterShare * 100)}%`);
+  } else if (coverage < 0.5) {
+    labels.push(`partial scan (${Math.round(coverage * 100)}% of mints)`);
   }
 
   if (input.socialKnown && !input.socialAny) {

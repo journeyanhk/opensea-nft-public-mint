@@ -10,7 +10,7 @@ const {
   recordContracts,
   advanceCursor,
 } = require('../dist/scan/state');
-const { isCandidateDrop, shouldAudit, discoveryTopics, CONFIRMATIONS } = require('../dist/scan/scanner');
+const { isCandidateDrop, shouldAudit, discoveryTopics, CONFIRMATIONS, selectAuditBatch } = require('../dist/scan/scanner');
 const { PUBLIC_DROP_UPDATED_TOPIC, SEADROP_MINT_TOPIC } = require('../dist/audit/events');
 
 const A = '0xaaa0000000000000000000000000000000000001';
@@ -113,4 +113,40 @@ test('re-audit policy: new, changed, approaching, and sold-out contracts', () =>
 test('discovery watches both config changes and mints, with a confirmation lag', () => {
   assert.deepEqual(discoveryTopics(), [PUBLIC_DROP_UPDATED_TOPIC, SEADROP_MINT_TOPIC]);
   assert.ok(CONFIRMATIONS >= 32);
+});
+
+test('a window rejected as too dense is split until it fits', async () => {
+  const { scanLogs } = require('../dist/audit/events');
+  const realFetch = globalThis.fetch;
+  const ranges = [];
+  globalThis.fetch = async (_url, init) => {
+    const body = JSON.parse(init.body);
+    const from = parseInt(body.params[0].fromBlock, 16);
+    const to = parseInt(body.params[0].toBlock, 16);
+    ranges.push([from, to]);
+    if (to - from + 1 > 5000) {
+      return { json: async () => ({ error: { message: 'logs matched by query exceeds limit of 10000' } }) };
+    }
+    return { json: async () => ({ result: [] }) };
+  };
+  try {
+    const logs = await scanLogs('robinhood', '0x0000000000000000000000000000000000000000', [], 0, 9999, {
+      rpcUrl: 'http://unused',
+      concurrency: 1,
+      maxRetries: 0,
+      window: 10000,
+    });
+    assert.deepEqual(logs, []);
+    assert.equal(ranges.length, 3);
+    assert.deepEqual(ranges[0], [0, 9999]);
+    assert.deepEqual(ranges.slice(1), [[0, 4999], [5000, 9999]]);
+  } finally {
+    globalThis.fetch = realFetch;
+  }
+});
+
+test('pending candidates are audited before fresh discoveries', () => {
+  assert.deepEqual(selectAuditBatch(['p1', 'p2'], ['f1', 'f2'], 3), { audit: ['p1', 'p2', 'f1'], overflow: ['f2'] });
+  assert.deepEqual(selectAuditBatch([], ['f1'], 5), { audit: ['f1'], overflow: [] });
+  assert.deepEqual(selectAuditBatch(['p1'], [], 0), { audit: [], overflow: ['p1'] });
 });

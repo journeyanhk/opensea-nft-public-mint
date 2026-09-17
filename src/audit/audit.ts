@@ -397,6 +397,8 @@ export async function auditTarget(input: AuditInput, opts: AuditOptions = {}): P
     publicStartAt: plan.drop.startTime,
     now,
     topMinterShare: mintScan.topMinterShare,
+    scanTokens: mintScan.totalTokens,
+    scanCoverage: totalMinted > 0n ? Number((mintScan.totalTokens * 10_000n) / totalMinted) / 10_000 : 1,
     socialKnown: social !== null,
     socialAny: social !== null && (social.twitter || social.discord || social.website),
     ageHours,

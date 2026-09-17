@@ -91,5 +91,6 @@
 | contracts[chain][addr].lastGrade | string \| null | 最近审计等级 |
 | contracts[chain][addr].soldOutAtBlock | number \| null | 判定售罄时的 `lastSeenBlock`（此后无新事件则不再重查） |
 | contracts[chain][addr].publicStart | number \| null | 最近一次读到的公售开始时间（unix 秒） |
+| contracts[chain][addr].pendingAudit | boolean | 曾是候选但超出 `--limit`，下次运行优先审计 |
 
 `scan-history.jsonl` 每行：`{ at, chain, contract, grade, remaining, projected, start }`。

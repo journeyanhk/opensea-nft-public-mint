@@ -30,8 +30,9 @@ const DROP_IFACE = new Interface([
 const WINDOWS: Record<string, number> = { robinhood: 100_000, arc: 5_000 };
 const DEFAULT_WINDOW = 10_000;
 
-// Arc's public RPC throttles hard even at low parallelism; run it serially.
-const SCAN_CONCURRENCY: Record<string, number> = { arc: 1 };
+// Public RPCs throttle hard even at low parallelism; run scans serially. Private
+// endpoints (RPC_URL_<CHAIN>) are what make this fast, not concurrency.
+const SCAN_CONCURRENCY: Record<string, number> = { arc: 1, robinhood: 1 };
 const DEFAULT_CONCURRENCY = 2;
 
 export function windowBlocks(chainKey: string): number {
@@ -40,6 +41,20 @@ export function windowBlocks(chainKey: string): number {
 
 export function scanConcurrency(chainKey: string): number {
   return SCAN_CONCURRENCY[chainKey] ?? DEFAULT_CONCURRENCY;
+}
+
+// Discovery queries the singleton without a contract filter, so a window that is
+// comfortable for one contract can return tens of thousands of logs. Keep those
+// windows small; the adaptive split below covers anything still too dense.
+export function discoveryWindowBlocks(chainKey: string): number {
+  return Math.min(windowBlocks(chainKey), 10_000);
+}
+
+// Providers word the "too many results" rejection differently.
+export function isDenseLogError(message: string): boolean {
+  return /exceeds limit|too many results|more than \d+ results|response size|query returned more|limit of 10000/i.test(
+    message
+  );
 }
 
 export function splitWindows(fromBlock: number, toBlock: number, window: number): { from: number; to: number }[] {
@@ -61,6 +76,8 @@ export interface ScanDeps {
   concurrency?: number;
   maxRetries?: number;
   timeoutMs?: number;
+  window?: number; // override the per-chain window (discovery uses a smaller one)
+  minWindow?: number; // bisection floor, default 64 blocks
   onProgress?: (message: string) => void;
 }
 
@@ -114,21 +131,39 @@ export async function scanLogs(
   toBlock: number,
   deps: ScanDeps
 ): Promise<RawLog[]> {
-  const windows = splitWindows(fromBlock, toBlock, windowBlocks(chainKey));
+  const windowSize = deps.window ?? windowBlocks(chainKey);
+  const windows = splitWindows(fromBlock, toBlock, windowSize);
   const results: RawLog[][] = new Array(windows.length).fill([]);
   const reportEvery = Math.max(1, Math.floor(windows.length / 4));
+  const minWindow = deps.minWindow ?? 64;
   let cursor = 0;
+
+  // A window answered with "too many results" is halved and retried; the floor
+  // keeps a pathological range from recursing forever.
+  const fetchWindow = async (w: { from: number; to: number }, label: string): Promise<RawLog[]> => {
+    try {
+      return await withRetry(
+        () => rpcCall<RawLog[]>(deps.rpcUrl, "eth_getLogs", [{ address, topics, fromBlock: hex(w.from), toBlock: hex(w.to) }], deps.timeoutMs),
+        deps,
+        label
+      );
+    } catch (err) {
+      const message = (err as Error).message;
+      if (!isDenseLogError(message) || w.to - w.from < minWindow) throw err;
+      const mid = Math.floor((w.from + w.to) / 2);
+      deps.onProgress?.(`window ${w.from}..${w.to} too dense — splitting`);
+      return [
+        ...(await fetchWindow({ from: w.from, to: mid }, label)),
+        ...(await fetchWindow({ from: mid + 1, to: w.to }, label)),
+      ];
+    }
+  };
 
   const worker = async (): Promise<void> => {
     for (;;) {
       const index = cursor++;
       if (index >= windows.length) return;
-      const w = windows[index];
-      results[index] = await withRetry(
-        () => rpcCall<RawLog[]>(deps.rpcUrl, "eth_getLogs", [{ address, topics, fromBlock: hex(w.from), toBlock: hex(w.to) }], deps.timeoutMs),
-        deps,
-        `logs ${index + 1}/${windows.length}`
-      );
+      results[index] = await fetchWindow(windows[index], `logs ${index + 1}/${windows.length}`);
       const done = index + 1;
       if (done % reportEvery === 0 || done === windows.length) {
         deps.onProgress?.(`scanned ${done}/${windows.length} windows`);
