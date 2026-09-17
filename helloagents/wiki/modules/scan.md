@@ -11,13 +11,15 @@
 ## 规范
 ### 需求: 发现新目标
 **模块:** scan
-- 发现主题：`PublicDropUpdated`（配置出现/变更）与 `SeaDropMint`（铸造活动），一次 `eth_getLogs`（topic0 OR）取回，`topic1` 即合约地址
-- 发现窗口独立于审计窗口（`discoveryWindowBlocks`：Robinhood 10k、Arc 5k）：无 topic1 过滤的 OR 查询在 100k 块窗口下会超过公共 RPC 的 1 万条日志上限；仍超限时 `scanLogs` 自适应二分（命中 `exceeds limit` 类错误即对半拆，下限 64 块）
+- 发现主题默认只订阅 `PublicDropUpdated`（能被脚本 mint 的 drop 必然发过配置事件），`topic1` 即合约地址；`--include-mints` 可额外订阅 `SeaDropMint`（日志量高一个数量级，窗口降到 10k）
+- 发现窗口（`discoveryWindowBlocks`）：仅配置事件时用链默认窗口（Robinhood 100k、Arc 5k）；带 `--include-mints` 时降到 10k。被节点以范围/结果过多拒绝时，`scanLogs` 采用节点提示的范围（如 Arc 的 `retry with the range A-B`）或二分（下限 64 块）
+- 端点角色：扫描使用 `resolveScanRpcs`（公共优先，`SCAN_RPC_URL_<CHAIN>` 可固定）；被 10 块级范围上限拒绝的端点会被跳过，换下一个候选
+- 范围类错误是确定性的：不再退避重试，直接拆分或换端点；限流类错误才走长退避
 - 游标只前进到 `latest − 64`（确认延迟），增量扫描每次仅数个窗口；首次无游标按 `--since-days`（默认 1 天）回看
 - 候选过滤用 `buildLocalMintPlan`（等价于脚本能否构造交易），再查 `getMintStats` 排除已售罄；公售已结束或开售超出 `--horizon-hours`（默认 72h）的合约记数跳过
 - 重审策略：新合约必审；已知合约在"有新事件（`lastSeenBlock > lastAuditedBlock`）"或"开售临近 horizon 且距上次审计超 30 分钟"时重审；售罄合约仅在出现新事件后重查
 - `--limit` 之外的候选写入 `pendingAudit`，下次运行**优先消化积压**再处理新发现；审计成功或判定售罄/过期/暂不需审时清除，审计失败保留待重试
-- 公共 RPC 限流严重：Arc 与 Robinhood 均串行扫描（`SCAN_CONCURRENCY`），限流错误退避上限 15s、发现阶段重试 8 次；配置私有 RPC 才是提速手段
+- 公共 RPC 限流严重：Arc 与 Robinhood 均串行扫描（`SCAN_CONCURRENCY`），限流错误退避上限 15s、发现阶段重试 8 次；`SCAN_RPC_URL_<CHAIN>`（宽范围付费节点）才是提速手段
 - 发现结果先落盘再审计；审计失败只记录，下次扫描会自动重试（`eventSinceAudit` 仍为真）
 
 ### 需求: 状态与快照

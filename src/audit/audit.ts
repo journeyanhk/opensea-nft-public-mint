@@ -7,7 +7,7 @@
 
 import { Contract, JsonRpcProvider, getAddress } from "ethers";
 import { resolveChain } from "../chains";
-import { planRpcs, resolveRpcsForChain } from "../rpc-resolver";
+import { planRpcs, resolveScanRpcs } from "../rpc-resolver";
 import { parseNftLink } from "../nft-link";
 import { resolveSlug } from "../slug-resolver";
 import { buildLocalMintPlan, fetchMintStats, PublicDrop, SEADROP_ADDRESS } from "../seadrop-public";
@@ -193,7 +193,9 @@ export async function auditTarget(input: AuditInput, opts: AuditOptions = {}): P
   }
 
   // ── RPC ──────────────────────────────────────────────────────────────
-  const { urls } = resolveRpcsForChain(chain.key);
+  // Log scans use the scan-role endpoints: a sending-optimised private RPC can
+  // cap eth_getLogs ranges far below what a scan needs.
+  const { urls } = resolveScanRpcs(chain.key);
   const rpcPlan = await planRpcs(urls, chain.chainId);
   if (!rpcPlan.verified || rpcPlan.urls.length === 0) {
     throw new Error(`No RPC endpoint confirmed chain ID ${chain.chainId} (${chain.name}).`);
@@ -294,12 +296,12 @@ export async function auditTarget(input: AuditInput, opts: AuditOptions = {}): P
     progress(`scanning ${lookbackDays}d of SeaDrop logs...`);
     const [mintLogs, updateLogs] = await Promise.all([
       scanLogs(chain.key, SEADROP_ADDRESS, [SEADROP_MINT_TOPIC, paddedContract], fromBlock, latestBlock, {
-        rpcUrl,
+        rpcUrls: rpcPlan.urls,
         maxRetries: opts.maxRetries,
         onProgress: progress,
       }),
       scanLogs(chain.key, SEADROP_ADDRESS, [PUBLIC_DROP_UPDATED_TOPIC, paddedContract], fromBlock, latestBlock, {
-        rpcUrl,
+        rpcUrls: rpcPlan.urls,
         maxRetries: opts.maxRetries,
         onProgress: progress,
       }),

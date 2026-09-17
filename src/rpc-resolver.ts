@@ -102,6 +102,30 @@ export function resolveRpcsForChain(chainKey: string, manual: string[] = []): Re
   };
 }
 
+// Log scanning wants endpoints with wide eth_getLogs ranges — the opposite of
+// what sending wants. The private endpoint that wins for a fast broadcast
+// (Alchemy's free tier caps eth_getLogs at a 10-block range) is often the worst
+// choice for a scan, so public endpoints lead here and private ones trail as
+// fallback. SCAN_RPC_URL_<CHAIN> pins a paid endpoint explicitly.
+export function resolveScanRpcs(chainKey: string): ResolvedRpcs {
+  const profile = resolveChain(chainKey);
+  if (!profile) throw new Error(`Unknown chain: "${chainKey}"`);
+
+  const pinned = splitList(process.env[`SCAN_RPC_URL_${chainKey.toUpperCase()}`]);
+  if (pinned.length > 0) {
+    return {
+      urls: dedupe([...pinned, ...profile.rpc.public]),
+      source: "SCAN_RPC_URL_<CHAIN> + public fallback",
+    };
+  }
+
+  const fromEnv = privateRpcsFromEnv(chainKey);
+  return {
+    urls: dedupe([...profile.rpc.public, ...fromEnv]),
+    source: "public endpoints first, private RPC as fallback",
+  };
+}
+
 // Accept either a full URL or a bare provider API key, which we expand against
 // the chain's Alchemy host. Returns null if it's neither.
 export function toRpcUrl(value: string, chainKey: string): string | null {

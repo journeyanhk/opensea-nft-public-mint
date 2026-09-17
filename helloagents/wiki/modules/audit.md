@@ -15,7 +15,7 @@
 - 两个余量各自给 A/B/C，综合取较差者；`rateConfident`（样本 ≥10 分钟且 ≥20 枚）不足时不因投影判 C
 - 公售已开始时，"剩余 ≤ 0"是观测事实而非投影，不受 `rateConfident` 影响
 - D 级仅在 API 可用时给出（无任何社交 且 创建距开售 < 24 小时）；开售前 60 分钟内改价/改期只标 ⚠，不单独降级
-- 事件扫描按链窗口上限分片（Robinhood 100k、Arc 5k；发现阶段另用 10k），默认并发见 `scanConcurrency`（Arc/Robinhood 串行），指数退避（限流类错误上限 15s）；超限窗口自适应二分；扫描结果缓存 `.audit-cache/<chain>/<contract>.json`（TTL 5 分钟，bigint 以字符串存储）
+- 事件扫描使用 `resolveScanRpcs`（公共端点优先，`SCAN_RPC_URL_<CHAIN>` 可固定），按链窗口上限分片（Robinhood 100k、Arc 5k），默认并发见 `scanConcurrency`（Arc/Robinhood 串行），指数退避（限流类错误上限 15s）；范围类错误不重试，采用节点提示范围或二分，10 块级上限的端点直接跳过；扫描结果缓存 `.audit-cache/<chain>/<contract>.json`（TTL 5 分钟，bigint 以字符串存储）
 - 局部扫描保护：风险集中度只在覆盖率（`scanTokens/totalMinted`）≥50% 且样本 ≥50 枚时标注，否则标 `partial scan (x% of mints)`；报告的分阶段行会追加 `(partial scan: x/y)`
 
 ### 需求: 批量前置审计（M1.5）

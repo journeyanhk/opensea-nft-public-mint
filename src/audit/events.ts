@@ -43,18 +43,44 @@ export function scanConcurrency(chainKey: string): number {
   return SCAN_CONCURRENCY[chainKey] ?? DEFAULT_CONCURRENCY;
 }
 
-// Discovery queries the singleton without a contract filter, so a window that is
-// comfortable for one contract can return tens of thousands of logs. Keep those
-// windows small; the adaptive split below covers anything still too dense.
-export function discoveryWindowBlocks(chainKey: string): number {
-  return Math.min(windowBlocks(chainKey), 10_000);
+// Discovery queries the singleton without a contract filter. Config events alone
+// are sparse enough for the chain's full window; adding mints multiplies the log
+// count by orders of magnitude and needs a much smaller window.
+export function discoveryWindowBlocks(chainKey: string, includeMints = false): number {
+  return includeMints ? Math.min(windowBlocks(chainKey), 10_000) : windowBlocks(chainKey);
 }
 
-// Providers word the "too many results" rejection differently.
-export function isDenseLogError(message: string): boolean {
-  return /exceeds limit|too many results|more than \d+ results|response size|query returned more|limit of 10000/i.test(
+// Providers word the "range or result set is too large" rejection differently:
+// Geth-family nodes cap results, Alchemy caps the block range, Arc suggests a
+// narrower range outright.
+export function isRangeError(message: string): boolean {
+  return /exceeds limit|exceeds max results|too many results|more than \d+ results|response size|query returned more|limit of 10000|max allowed range|up to a \d+ block range|retry with the range/i.test(
     message
   );
+}
+
+// "retry with the range 21133555-21134355" or "up to a 10 block range"
+export function parseRangeHint(message: string): number | null {
+  const pair = /range (\d+)-(\d+)/.exec(message);
+  if (pair) {
+    const span = Number(pair[2]) - Number(pair[1]) + 1;
+    if (Number.isFinite(span) && span > 0) return span;
+  }
+  const single = /up to a (\d+) block range/i.exec(message);
+  if (single) {
+    const span = Number(single[1]);
+    if (Number.isFinite(span) && span > 0) return span;
+  }
+  return null;
+}
+
+// A hint far below the bisection floor (Alchemy free tier: 10 blocks) means the
+// endpoint is unfit for log scanning; 86k requests per day is not a fix.
+export const ENDPOINT_MIN_RANGE = 64;
+
+export function isEndpointUnusable(message: string): boolean {
+  const hint = parseRangeHint(message);
+  return hint !== null && hint < ENDPOINT_MIN_RANGE;
 }
 
 export function splitWindows(fromBlock: number, toBlock: number, window: number): { from: number; to: number }[] {
@@ -72,7 +98,7 @@ export interface RawLog {
 }
 
 export interface ScanDeps {
-  rpcUrl: string;
+  rpcUrls: string[]; // ordered candidates; a range-limited endpoint is skipped for the next one
   concurrency?: number;
   maxRetries?: number;
   timeoutMs?: number;
@@ -111,11 +137,15 @@ async function withRetry<T>(fn: () => Promise<T>, deps: ScanDeps, label: string)
       return await fn();
     } catch (err) {
       lastError = err;
+      const message = (err as Error).message;
+      // Range errors are deterministic: retrying identical parameters can only
+      // fail again. The caller splits the window or moves to another endpoint.
+      if (isRangeError(message)) throw err;
       if (attempt === maxRetries) break;
-      deps.onProgress?.(`${label}: ${(err as Error).message} — retry ${attempt + 1}/${maxRetries}`);
+      deps.onProgress?.(`${label}: ${message} — retry ${attempt + 1}/${maxRetries}`);
       // Rate-limited public RPCs need patience more than speed, so those errors
       // back off much further; jitter keeps parallel workers out of lockstep.
-      const limited = /rate limit|too many requests|429/i.test((err as Error).message);
+      const limited = /rate limit|too many requests|429/i.test(message);
       const backoff = Math.min(limited ? 15_000 : 8_000, (limited ? 500 : 250) * 2 ** attempt);
       await sleep(backoff / 2 + Math.random() * (backoff / 2));
     }
@@ -135,27 +165,58 @@ export async function scanLogs(
   const windows = splitWindows(fromBlock, toBlock, windowSize);
   const results: RawLog[][] = new Array(windows.length).fill([]);
   const reportEvery = Math.max(1, Math.floor(windows.length / 4));
-  const minWindow = deps.minWindow ?? 64;
+  const minWindow = deps.minWindow ?? ENDPOINT_MIN_RANGE;
   let cursor = 0;
+  let endpointIndex = 0;
 
-  // A window answered with "too many results" is halved and retried; the floor
-  // keeps a pathological range from recursing forever.
+  if (deps.rpcUrls.length === 0) throw new Error("scanLogs needs at least one RPC endpoint");
+
+  // Range rejections are handled here, not by retrying: adopt a range the node
+  // suggests, split the window, or move to an endpoint that can scan at all.
   const fetchWindow = async (w: { from: number; to: number }, label: string): Promise<RawLog[]> => {
-    try {
-      return await withRetry(
-        () => rpcCall<RawLog[]>(deps.rpcUrl, "eth_getLogs", [{ address, topics, fromBlock: hex(w.from), toBlock: hex(w.to) }], deps.timeoutMs),
-        deps,
-        label
-      );
-    } catch (err) {
-      const message = (err as Error).message;
-      if (!isDenseLogError(message) || w.to - w.from < minWindow) throw err;
-      const mid = Math.floor((w.from + w.to) / 2);
-      deps.onProgress?.(`window ${w.from}..${w.to} too dense — splitting`);
-      return [
-        ...(await fetchWindow({ from: w.from, to: mid }, label)),
-        ...(await fetchWindow({ from: mid + 1, to: w.to }, label)),
-      ];
+    for (;;) {
+      const url = deps.rpcUrls[endpointIndex];
+      try {
+        return await withRetry(
+          () => rpcCall<RawLog[]>(url, "eth_getLogs", [{ address, topics, fromBlock: hex(w.from), toBlock: hex(w.to) }], deps.timeoutMs),
+          deps,
+          label
+        );
+      } catch (err) {
+        const message = (err as Error).message;
+
+        if (isEndpointUnusable(message)) {
+          if (endpointIndex < deps.rpcUrls.length - 1) {
+            endpointIndex++;
+            deps.onProgress?.(`${url} cannot scan wide ranges — switching to ${deps.rpcUrls[endpointIndex]}`);
+            continue;
+          }
+          throw err;
+        }
+
+        if (!isRangeError(message)) throw err;
+
+        const hint = parseRangeHint(message);
+        const span = w.to - w.from + 1;
+        if (hint !== null && hint >= minWindow && hint < span) {
+          const chunks: { from: number; to: number }[] = [];
+          for (let from = w.from; from <= w.to; from += hint) {
+            chunks.push({ from, to: Math.min(w.to, from + hint - 1) });
+          }
+          deps.onProgress?.(`node suggests a ${hint}-block range — splitting ${w.from}..${w.to}`);
+          const out: RawLog[] = [];
+          for (const chunk of chunks) out.push(...(await fetchWindow(chunk, label)));
+          return out;
+        }
+
+        if (span <= minWindow) throw err;
+        const mid = Math.floor((w.from + w.to) / 2);
+        deps.onProgress?.(`window ${w.from}..${w.to} too dense — splitting`);
+        return [
+          ...(await fetchWindow({ from: w.from, to: mid }, label)),
+          ...(await fetchWindow({ from: mid + 1, to: w.to }, label)),
+        ];
+      }
     }
   };
 
@@ -358,7 +419,11 @@ export function summarizeChanges(updates: DropUpdate[]): ChangeSummary {
 }
 
 export async function latestBlockNumber(rpcUrl: string, deps?: Partial<ScanDeps>): Promise<number> {
-  const raw = await withRetry(() => rpcCall<string>(rpcUrl, "eth_blockNumber", [], deps?.timeoutMs), { rpcUrl, ...deps }, "blockNumber");
+  const raw = await withRetry(
+    () => rpcCall<string>(rpcUrl, "eth_blockNumber", [], deps?.timeoutMs),
+    { rpcUrls: [rpcUrl], ...deps },
+    "blockNumber"
+  );
   return Number(BigInt(raw));
 }
 

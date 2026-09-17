@@ -10,7 +10,8 @@
 | 字段名 | 类型 | 说明 |
 |--------|------|------|
 | PRIVATE_KEY / PRIVATE_KEYS | string | 明文私钥（可逗号/空白分隔多个） |
-| RPC_URL_<CHAIN> / RPC_URL / EXTRA_RPC_URLS | string | RPC URL，逗号分隔 |
+| RPC_URL_<CHAIN> / RPC_URL / EXTRA_RPC_URLS | string | 发送用 RPC（私有优先），逗号分隔 |
+| SCAN_RPC_URL_<CHAIN> | string | 扫描/审计用 RPC（公共优先）；配置后优先使用，需支持宽 eth_getLogs 范围 |
 | CHAIN | string | 默认链：ethereum/base/robinhood |
 | MAX_FEE_PER_GAS | number(gwei) | 留空按链默认：ethereum 80、base/robinhood 2、arc 40 |
 | MAX_PRIORITY_FEE | number(gwei) | 留空按链默认：ethereum 5、base/robinhood 0.05、arc 0 |

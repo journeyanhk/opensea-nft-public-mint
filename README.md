@@ -132,7 +132,8 @@ npm start -- --scan --chain arc --no-audit            # 只看发现，不审计
 
 行为说明：
 
-- 扫描 `PublicDropUpdated` 与 `SeaDropMint` 两类事件，按合约去重；游标只前进到 `latest − 64` 块（确认延迟）
+- 扫描 `PublicDropUpdated` 事件发现新 drop（可铸造的 drop 必然发过该事件）；`--include-mints` 可额外订阅 `SeaDropMint`，但日志量会大一个数量级
+- 游标只前进到 `latest − 64` 块（确认延迟）；`eth_getLogs` 被节点以"范围/结果过多"拒绝时会采用节点建议的范围或二分，被 10 块级别的范围上限拒绝时自动换下一个端点
 - 候选过滤：公售未结束、开售在 `--horizon-hours`（默认 72h）内、且不是已售罄
 - 已知合约仅在"有新事件"或"开售临近且距上次审计超过 30 分钟"时重审；售罄合约在出现新事件前不再查询
 - `--limit` 之外的候选写入状态文件的积压队列（`pendingAudit`），下一轮**优先审计积压**再处理新发现；审计失败会保留待重试
@@ -157,6 +158,8 @@ RPC_URL_ROBINHOOD=
 ```
 
 也可以在程序询问时直接粘贴 RPC URL 或 Alchemy key。
+
+> 扫描（`--scan`/`--audit`）默认优先使用公共节点做 `eth_getLogs`，因为发送交易最优的私有节点往往限制日志范围（Alchemy 免费档仅 10 块）。若你有支持宽范围的付费节点，在 `.env` 里设置 `SCAN_RPC_URL_ROBINHOOD`（或对应链）即可固定扫描端点。
 
 ### .env 中的私钥（可选）
 

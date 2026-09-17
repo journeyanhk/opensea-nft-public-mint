@@ -7,7 +7,7 @@
 // reorg cannot lose a drop.
 
 import { resolveChain } from "../chains";
-import { planRpcs, resolveRpcsForChain } from "../rpc-resolver";
+import { planRpcs, resolveScanRpcs } from "../rpc-resolver";
 import { SEADROP_ADDRESS, buildLocalMintPlan, fetchMintStats, PublicDrop } from "../seadrop-public";
 import {
   PUBLIC_DROP_UPDATED_TOPIC,
@@ -47,8 +47,12 @@ export function selectAuditBatch(
   return { audit: ordered.slice(0, limit), overflow: ordered.slice(limit) };
 }
 
-export function discoveryTopics(): string[] {
-  return [PUBLIC_DROP_UPDATED_TOPIC, SEADROP_MINT_TOPIC];
+// A drop the script can mint always publishes its public schedule, so the config
+// event alone discovers it. Mints are an order of magnitude denser and are what
+// blew out log ranges; activity for known contracts is checked by the audit
+// stage's per-contract (topic1-filtered) scan instead.
+export function discoveryTopics(includeMints = false): string[] {
+  return includeMints ? [PUBLIC_DROP_UPDATED_TOPIC, SEADROP_MINT_TOPIC] : [PUBLIC_DROP_UPDATED_TOPIC];
 }
 
 export function isCandidateDrop(drop: PublicDrop, nowSec: number, horizonHours: number): boolean {
@@ -102,6 +106,7 @@ export interface ChainScanReport {
 
 export interface ScanOptions {
   chains: string[];
+  includeMints: boolean;
   sinceDays: number;
   horizonHours: number;
   limit: number;
@@ -155,8 +160,9 @@ export async function runScan(
     };
     reports.push(report);
 
-    const { urls } = resolveRpcsForChain(chain.key);
+    const { urls, source } = resolveScanRpcs(chain.key);
     const rpcPlan = await planRpcs(urls, chain.chainId);
+    onProgress(`${chainKey}: scan RPCs — ${source}`);
     if (!rpcPlan.verified || rpcPlan.urls.length === 0) {
       onProgress(`${chainKey}: no RPC confirmed chain ID ${chain.chainId} — skipped`);
       continue;
@@ -177,15 +183,15 @@ export async function runScan(
     report.toBlock = toBlock;
     report.windows =
       fromBlock <= toBlock
-        ? Math.ceil((toBlock - fromBlock + 1) / discoveryWindowBlocks(chainKey))
+        ? Math.ceil((toBlock - fromBlock + 1) / discoveryWindowBlocks(chainKey, opts.includeMints))
         : 0;
 
     let seenContracts: string[] = [];
     if (fromBlock <= toBlock) {
       onProgress(`${chainKey}: scanning blocks ${fromBlock}..${toBlock}`);
-      const logs = await scanLogs(chainKey, SEADROP_ADDRESS, [discoveryTopics()], fromBlock, toBlock, {
-        rpcUrl,
-        window: discoveryWindowBlocks(chainKey),
+      const logs = await scanLogs(chainKey, SEADROP_ADDRESS, [discoveryTopics(opts.includeMints)], fromBlock, toBlock, {
+        rpcUrls: rpcPlan.urls,
+        window: discoveryWindowBlocks(chainKey, opts.includeMints),
         maxRetries: 8,
         onProgress: (message) => onProgress(`${chainKey}: ${message}`),
       });

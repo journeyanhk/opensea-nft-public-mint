@@ -75,7 +75,7 @@ test('retries a throttled window and keeps scanning the rest', async () => {
   };
   try {
     const logs = await scanLogs('arc', '0x0000000000000000000000000000000000000000', [], 0, 9999, {
-      rpcUrl: 'http://unused',
+      rpcUrls: ['http://unused'],
       concurrency: 1,
       maxRetries: 3,
     });

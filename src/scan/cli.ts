@@ -21,6 +21,7 @@ interface Args {
   maxPrice: string | "current";
   json: boolean;
   audit: boolean;
+  includeMints: boolean;
 }
 
 const VALID_GRADES: Grade[] = ["A", "B", "C", "D"];
@@ -41,12 +42,14 @@ export function parseScanArgs(args: string[]): Args {
     maxPrice: "current",
     json: false,
     audit: true,
+    includeMints: false,
   };
 
   for (let i = 0; i < rest.length; i++) {
     const arg = rest[i];
     if (arg === "--json") parsed.json = true;
     else if (arg === "--no-audit") parsed.audit = false;
+    else if (arg === "--include-mints") parsed.includeMints = true;
     else if (arg === "--force") parsed.force = true;
     else if (arg === "--chain") parsed.chains.push(...(rest[++i] ?? "").split(",").map((s) => s.trim()).filter(Boolean));
     else if (arg === "--since-days") parsed.sinceDays = Math.max(0.01, Number(rest[++i] ?? "1") || 1);
@@ -76,6 +79,7 @@ export async function runScanCommand(args: string[]): Promise<void> {
   const reports = await runScan(
     {
       chains: parsed.chains,
+      includeMints: parsed.includeMints,
       sinceDays: parsed.sinceDays,
       horizonHours: parsed.horizonHours,
       limit: parsed.limit,

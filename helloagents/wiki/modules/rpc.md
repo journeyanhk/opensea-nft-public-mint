@@ -13,6 +13,8 @@
 **模块:** rpc
 - 解析顺序: RPC_URL_<CHAIN> → (RPC_URL + EXTRA_RPC_URLS，仅当 CHAIN 匹配) → chains.ts 公共端点
 - 报错链 ID 不同的端点直接丢弃；不响应 eth_chainId 的端点保留为纯发送（如 Base/Robinhood sequencer）
+- **扫描角色分离**（`resolveScanRpcs`）：日志扫描需要宽 `eth_getLogs` 范围，与发送偏好相反。顺序为 `SCAN_RPC_URL_<CHAIN>`（若配置）→ 公共端点 → `.env` 私有端点；扫描/审计使用它，批量发送仍用 `resolveRpcsForChain`（私有优先）
+- 扫描遇到"范围过小"类拒绝（Alchemy 免费档 10 块）会**切换端点**；遇到"结果过多"类拒绝会采用节点建议范围或二分（`isRangeError`/`parseRangeHint`/`isEndpointUnusable`），且这类确定性错误不再重试
 - `gas: { maxFeeGwei, priorityGwei }` 为每链默认上限，`.env` 的 `MAX_FEE_PER_GAS`/`MAX_PRIORITY_FEE` 为空时生效；Arc 为 40/0（base fee ≈ 20 gwei）
 
 ### 需求: Arc 支持

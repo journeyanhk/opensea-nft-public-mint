@@ -35,6 +35,10 @@
 - 时区语义由越南时间 UTC+7 切换为 UTC+8（展示与输入均按 UTC+8；`time-format.ts` 符号重命名为 toUtc8Time/utc8TimeToDate）
 
 ### 修复
+- 首次回填失败（Robinhood）：扫描把 `.env` 里的私有 RPC 当作日志端点，而发送最优的私有节点常常限制日志范围（Alchemy 免费档 `eth_getLogs` 仅 10 块）。新增 **RPC 角色分离** `resolveScanRpcs`：`SCAN_RPC_URL_<CHAIN>` → 公共端点 → `.env` 私有端点；`--scan`/`--audit` 的日志与区块读取改用它，批量发送仍用私有优先的 `resolveRpcsForChain`
+- 首次回填失败（Arc）：密度错误正则不匹配 Arc 的 `query exceeds max results 2000, retry with the range A-B`，被当作瞬时错误重试 8 次。现在 `isRangeError` 覆盖 Arc/Alchemy 文案，`parseRangeHint` 采用节点建议范围；10 块级上限的端点直接判定不可用并**切换端点**
+- 确定性错误不再重试：范围/结果类错误立即抛出并交由拆分或换端点处理，只有限流与网络错误才退避重试（此前 Arc/Robinhood 各浪费 8 轮退避）
+- 发现阶段默认只订阅 `PublicDropUpdated`（能被脚本 mint 的 drop 必然发过配置事件），`SeaDropMint` 改为 `--include-mints` 显式开启：Robinhood 1 天回填从 86 窗口/5 分 14 秒降到 **9 窗口/2 分 32 秒**，Arc 2 窗口；已知合约的活动检查仍由审计阶段按合约（topic1）扫描承担
 - `--scan` 默认参数在 Robinhood 上必崩：发现阶段对单例做无过滤 OR 查询，100k 块窗口（约 2.8 小时）内日志数轻易超过 RPC 的 1 万条上限。现在发现窗口降到 10k 块，并在 `scanLogs` 内实现**自适应二分**（命中 `exceeds limit` 类错误就把窗口对半拆，16 块为下限），对所有扫描调用生效
 - 公开 RPC 限流：Robinhood 也改为串行扫描（此前 Arc 已是串行），发现阶段重试上限提到 8 次；`--since-days 1` 首次回填实测 5 分 14 秒（86 窗口、614 个合约），增量每轮仅 1 个窗口
 - 局部扫描误导风险标签：审计触发的 0.5 天回看下，集中度标签会基于少量样本（如 5 个 token 里占 80%）。现在只有覆盖率 ≥50% 且样本 ≥50 枚时才打 "top minter" 标签，覆盖率不足时改标 `partial scan (x% of mints)`；报告的分阶段行也会标注 `(partial scan: x/y)`
