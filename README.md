@@ -116,6 +116,32 @@ npm start -- --audit @watchlist.txt --chain robinhood
 </details>
 
 <details>
+<summary><strong>发现模式：自动扫描链上新 drop</strong></summary>
+
+<br>
+
+只读。监听 SeaDrop 单例的事件（配置变更 + 铸造），自动找出候选并做一遍审计；游标保存在 `.scan-state.json`，适合定时任务每 10–30 分钟跑一次。
+
+```bash
+npm run build
+npm start -- --scan --chain robinhood,arc              # 增量扫描 + 审计（默认最多 20 个）
+npm start -- --scan --chain arc --export targets.arc.json --grade A,B
+npm start -- --scan --chain robinhood --since-days 3 --limit 5   # 首次回看 3 天
+npm start -- --scan --chain arc --no-audit            # 只看发现，不审计
+```
+
+行为说明：
+
+- 扫描 `PublicDropUpdated` 与 `SeaDropMint` 两类事件，按合约去重；游标只前进到 `latest − 64` 块（确认延迟）
+- 候选过滤：公售未结束、开售在 `--horizon-hours`（默认 72h）内、且不是已售罄
+- 已知合约仅在"有新事件"或"开售临近且距上次审计超过 30 分钟"时重审；售罄合约在出现新事件前不再查询
+- `--limit` 之外的候选计入 `over limit`，留待下次；审计失败只记录，下次扫描自动重试
+- Arc 公共 RPC 限流严重，Arc 扫描串行执行；如配置了私有 RPC（`RPC_URL_ARC`）会明显更快
+- 建议 crontab 示例：`*/20 * * * * cd <repo> && npm start -- --scan --limit 10 >> scan.log 2>&1`
+
+</details>
+
+<details>
 <summary><strong>自定义 RPC 配置</strong></summary>
 
 <br>

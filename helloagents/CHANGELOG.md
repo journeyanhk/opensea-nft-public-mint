@@ -7,6 +7,9 @@
 ## [Unreleased]
 
 ### 新增
+- `--scan` 发现器（M2，只读）：监听 SeaDrop 单例的 `PublicDropUpdated` 与 `SeaDropMint`（topic0 OR，`topic1` 去重合约），每链 JSON 游标（只前进到 `latest − 64`，确认延迟），候选过滤（`buildLocalMintPlan` + `getMintStats` 排除售罄/已结束/超 horizon），`--limit` 封顶单次审计数，`--grade` 过滤后复用审计导出
+- 扫描状态与快照：`.scan-state.json`（原子写：临时文件 + rename，损坏回退空状态）与 `.scan-history.jsonl`（每次审计一行），均无原生依赖并已 gitignore
+- Arc 限流适配：Arc 扫描串行（`SCAN_CONCURRENCY.arc = 1`），限流错误退避上限 15s；审计支持分数天回看（scan 默认 0.5 天）与 `maxRetries` 透传
 - `--audit` 目标审计（只读）：链上两套余量（上界 / 按近期铸造速率的实测投影）各自分级，SeaDrop 单例 `SeaDropMint` 分阶段铸造曲线（铸出/独立地址/Top 集中度），`PublicDropUpdated` 语义变更史，开售前 1 小时改价/改期告警，A/B/C/D 综合等级；`--export` 产出经 `loadBatchConfig` 校验的 `targets.<chain>.json`
 - 批量前置审计（M1.5）：`auditBeforeMs`（默认 30 分钟）在开售前自动复检，命中 `auditSkipGrades`（默认 C）则跳过该目标；审计失败只告警不阻断
 - SeaDrop 事件扫描原语（窗口分片 + 重试退避 + `.audit-cache` JSON 缓存），无原生依赖；`tests/fixtures/seadropmint-arc.json` 为真实链上日志

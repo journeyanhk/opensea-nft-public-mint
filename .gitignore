@@ -13,6 +13,11 @@ targets.local.json
 # Audit scan cache — rebuilt on demand
 .audit-cache/
 
+# Discovery scanner state and history
+.scan-state.json
+.scan-history.jsonl
+.scan-state.json.tmp
+
 # Private keys — never commit
 wallets/
 keys.txt

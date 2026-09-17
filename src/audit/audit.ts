@@ -41,6 +41,7 @@ export interface AuditOptions {
   wallets?: string[];
   requestedQuantity?: number;
   lookbackDays?: number;
+  maxRetries?: number; // per-window retries while scanning events
   cacheDir?: string;
   cacheTtlMs?: number;
   onProgress?: (message: string) => void;
@@ -270,7 +271,9 @@ export async function auditTarget(input: AuditInput, opts: AuditOptions = {}): P
 
   // ── events ───────────────────────────────────────────────────────────
   const { latestBlock, secondsPerBlock, latestTimestamp } = await estimateBlockTime(rpcUrl);
-  const lookbackDays = Math.max(1, opts.lookbackDays ?? DEFAULT_LOOKBACK_DAYS);
+  // Fractional days are allowed: a scan-triggered audit only needs recent history,
+  // and Arc rate-limits long ranges hard.
+  const lookbackDays = Math.max(0.05, opts.lookbackDays ?? DEFAULT_LOOKBACK_DAYS);
   const lookbackBlocks = Math.ceil((lookbackDays * 86_400) / secondsPerBlock);
   const fromBlock = Math.max(0, latestBlock - lookbackBlocks);
   const recentFromBlock = Math.max(fromBlock, latestBlock - Math.ceil((RECENT_WINDOW_MINUTES * 60) / secondsPerBlock));
@@ -292,10 +295,12 @@ export async function auditTarget(input: AuditInput, opts: AuditOptions = {}): P
     const [mintLogs, updateLogs] = await Promise.all([
       scanLogs(chain.key, SEADROP_ADDRESS, [SEADROP_MINT_TOPIC, paddedContract], fromBlock, latestBlock, {
         rpcUrl,
+        maxRetries: opts.maxRetries,
         onProgress: progress,
       }),
       scanLogs(chain.key, SEADROP_ADDRESS, [PUBLIC_DROP_UPDATED_TOPIC, paddedContract], fromBlock, latestBlock, {
         rpcUrl,
+        maxRetries: opts.maxRetries,
         onProgress: progress,
       }),
     ]);

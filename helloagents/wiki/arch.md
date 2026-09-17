@@ -6,9 +6,13 @@ flowchart TD
     A[src/index.ts 入口] --> B[wizard 交互向导]
     A --> N[batch-runner 批量执行器]
     A --> P[audit/cli 审计命令]
+    A --> T[scan/cli 发现命令]
+    T --> U[scanner 单例事件扫描 + 候选过滤]
+    T --> V[state .scan-state.json / .scan-history.jsonl]
     N --> O[batch-config 目标解析与排序]
     N --> Q[audit 开售前复检]
     P --> R[audit 链上体检]
+    U --> R
     R --> S[events SeaDrop 事件扫描]
     Q --> R
     O --> C
@@ -58,3 +62,6 @@ sequenceDiagram
 | ADR-10 | headroom 用实测铸造曲线而非名额公式 | 2026-09-17 | ✅已采纳 | audit/events | [history/2026-09/202609171426_target-audit/how.md](../history/2026-09/202609171426_target-audit/how.md) |
 | ADR-11 | 不引入原生依赖存储（JSON 缓存） | 2026-09-17 | ✅已采纳 | audit/cache | [history/2026-09/202609171426_target-audit/how.md](../history/2026-09/202609171426_target-audit/how.md) |
 | ADR-12 | M1.5 接入 batch-runner，fail-open | 2026-09-17 | ✅已采纳 | batch/audit | [history/2026-09/202609171426_target-audit/how.md](../history/2026-09/202609171426_target-audit/how.md) |
+| ADR-13 | 发现主题用 OR 一次扫描（单例不是逐合约） | 2026-09-17 | ✅已采纳 | scan/events | [history/2026-09/202609171557_scan-discovery/how.md](../history/2026-09/202609171557_scan-discovery/how.md) |
+| ADR-14 | 状态用 JSON 原子写 + JSONL 快照，不用 SQLite | 2026-09-17 | ✅已采纳 | scan/state | [history/2026-09/202609171557_scan-discovery/how.md](../history/2026-09/202609171557_scan-discovery/how.md) |
+| ADR-15 | 确认延迟 64 块 + 发现先落盘再审计 | 2026-09-17 | ✅已采纳 | scan | [history/2026-09/202609171557_scan-discovery/how.md](../history/2026-09/202609171557_scan-discovery/how.md) |

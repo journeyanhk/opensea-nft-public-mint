@@ -30,8 +30,16 @@ const DROP_IFACE = new Interface([
 const WINDOWS: Record<string, number> = { robinhood: 100_000, arc: 5_000 };
 const DEFAULT_WINDOW = 10_000;
 
+// Arc's public RPC throttles hard even at low parallelism; run it serially.
+const SCAN_CONCURRENCY: Record<string, number> = { arc: 1 };
+const DEFAULT_CONCURRENCY = 2;
+
 export function windowBlocks(chainKey: string): number {
   return WINDOWS[chainKey] ?? DEFAULT_WINDOW;
+}
+
+export function scanConcurrency(chainKey: string): number {
+  return SCAN_CONCURRENCY[chainKey] ?? DEFAULT_CONCURRENCY;
 }
 
 export function splitWindows(fromBlock: number, toBlock: number, window: number): { from: number; to: number }[] {
@@ -88,7 +96,11 @@ async function withRetry<T>(fn: () => Promise<T>, deps: ScanDeps, label: string)
       lastError = err;
       if (attempt === maxRetries) break;
       deps.onProgress?.(`${label}: ${(err as Error).message} — retry ${attempt + 1}/${maxRetries}`);
-      await sleep(Math.min(2_000, 250 * 2 ** attempt));
+      // Rate-limited public RPCs need patience more than speed, so those errors
+      // back off much further; jitter keeps parallel workers out of lockstep.
+      const limited = /rate limit|too many requests|429/i.test((err as Error).message);
+      const backoff = Math.min(limited ? 15_000 : 8_000, (limited ? 500 : 250) * 2 ** attempt);
+      await sleep(backoff / 2 + Math.random() * (backoff / 2));
     }
   }
   throw lastError instanceof Error ? lastError : new Error(String(lastError));
@@ -97,7 +109,7 @@ async function withRetry<T>(fn: () => Promise<T>, deps: ScanDeps, label: string)
 export async function scanLogs(
   chainKey: string,
   address: string,
-  topics: (string | null)[],
+  topics: unknown[],
   fromBlock: number,
   toBlock: number,
   deps: ScanDeps
@@ -124,7 +136,7 @@ export async function scanLogs(
     }
   };
 
-  const workers = Math.max(1, Math.min(deps.concurrency ?? 2, windows.length));
+  const workers = Math.max(1, Math.min(deps.concurrency ?? scanConcurrency(chainKey), windows.length));
   await Promise.all(Array.from({ length: workers }, worker));
   return results.flat();
 }

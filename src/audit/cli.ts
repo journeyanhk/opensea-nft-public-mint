@@ -8,7 +8,7 @@ import chalk from "chalk";
 import { parseNftLink } from "../nft-link";
 import { auditTarget, AuditResult } from "./audit";
 import { Grade } from "./score";
-import { exportTargets, renderAuditDetail, renderAuditTable, renderJson } from "./report";
+import { exportByChain, renderAuditDetail, renderAuditTable, renderJson } from "./report";
 
 interface Args {
   targets: string[];
@@ -118,32 +118,20 @@ export async function runAuditCommand(args: string[]): Promise<void> {
   }
 
   if (parsed.exportPath) {
-    const byChain = new Map<string, AuditResult[]>();
-    for (const result of results) {
-      byChain.set(result.chainKey, [...(byChain.get(result.chainKey) ?? []), result]);
-    }
-    for (const [chainKey, chainResults] of byChain) {
-      const path =
-        byChain.size === 1
-          ? parsed.exportPath
-          : parsed.exportPath.replace(/\.json$/i, "") +
-            "." +
-            chainKey +
-            (parsed.exportPath.toLowerCase().endsWith(".json") ? ".json" : "");
-      const exported = await exportTargets(chainResults, {
-        path,
-        chainKey,
-        quantity: parsed.quantity,
-        maxPriceEth: parsed.maxPrice,
-        grades: parsed.grades,
-        force: parsed.force,
-      });
-      console.log(chalk.bold(`\nExported ${exported.accepted} target(s) to ${path}`));
-      if (exported.schedule.length > 0) {
+    const exported = await exportByChain(results, {
+      path: parsed.exportPath,
+      quantity: parsed.quantity,
+      maxPriceEth: parsed.maxPrice,
+      grades: parsed.grades,
+      force: parsed.force,
+    });
+    for (const file of exported) {
+      console.log(chalk.bold(`\nExported ${file.accepted} target(s) to ${file.path}`));
+      if (file.schedule.length > 0) {
         console.log(chalk.gray("BATCH SCHEDULE preview:"));
-        for (const line of exported.schedule) console.log(chalk.gray(line));
+        for (const line of file.schedule) console.log(chalk.gray(line));
       }
-      for (const reject of exported.rejected) {
+      for (const reject of file.rejected) {
         console.log(chalk.red(`  rejected ${reject.target}: ${reject.reason}`));
       }
     }

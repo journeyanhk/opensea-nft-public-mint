@@ -79,3 +79,17 @@
 | maxSupply | bigint | 硬顶；0 表示合约未固定供应量，无法判定售罄 |
 
 > `getMintStats` 在 NFT 合约上，SeaDrop 单例调用会 revert。`BatchTarget.supply` 仅存 `{ totalMinted, maxSupply }`。
+
+## 发现器状态（.scan-state.json / .scan-history.jsonl，均 gitignore）
+
+| 字段 | 类型 | 说明 |
+|------|------|------|
+| chains[chain].cursorBlock | number | 已确认扫描到的区块（= latest − 64） |
+| chains[chain].blockTimeSec | number | 扫描时实测的平均出块时间 |
+| contracts[chain][addr].firstSeenBlock / lastSeenBlock | number | 首次/最近一次出现事件的区块 |
+| contracts[chain][addr].lastAuditedBlock / lastAuditedAt | number \| null / string \| null | 最近一次审计的位置与时间 |
+| contracts[chain][addr].lastGrade | string \| null | 最近审计等级 |
+| contracts[chain][addr].soldOutAtBlock | number \| null | 判定售罄时的 `lastSeenBlock`（此后无新事件则不再重查） |
+| contracts[chain][addr].publicStart | number \| null | 最近一次读到的公售开始时间（unix 秒） |
+
+`scan-history.jsonl` 每行：`{ at, chain, contract, grade, remaining, projected, start }`。

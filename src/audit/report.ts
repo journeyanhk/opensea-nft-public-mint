@@ -173,3 +173,32 @@ export async function exportTargets(results: AuditResult[], opts: ExportOptions)
 
   return { accepted: raw.targets.length, rejected, schedule };
 }
+
+// One file per chain: `--batch` runs a single chain at a time.
+export async function exportByChain(
+  results: AuditResult[],
+  opts: { path: string; quantity: number; maxPriceEth: string | "current"; grades?: Grade[]; force?: boolean }
+): Promise<(ExportResult & { path: string })[]> {
+  const byChain = new Map<string, AuditResult[]>();
+  for (const result of results) {
+    byChain.set(result.chainKey, [...(byChain.get(result.chainKey) ?? []), result]);
+  }
+
+  const out: (ExportResult & { path: string })[] = [];
+  for (const [chainKey, chainResults] of byChain) {
+    const path =
+      byChain.size === 1
+        ? opts.path
+        : opts.path.replace(/\.json$/i, "") + "." + chainKey + (opts.path.toLowerCase().endsWith(".json") ? ".json" : "");
+    const exported = await exportTargets(chainResults, {
+      path,
+      chainKey,
+      quantity: opts.quantity,
+      maxPriceEth: opts.maxPriceEth,
+      grades: opts.grades,
+      force: opts.force,
+    });
+    out.push({ path, ...exported });
+  }
+  return out;
+}
