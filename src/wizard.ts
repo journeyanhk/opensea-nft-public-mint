@@ -152,8 +152,8 @@ export async function runWizard(): Promise<void> {
     console.log(chalk.gray(`  Current network base fee: ${baseFeeGwei.toFixed(6)} gwei`));
   }
 
-  const envMaxFee = Number(process.env.MAX_FEE_PER_GAS || (chainKey === "ethereum" ? 80 : 2));
-  const envPriority = Number(process.env.MAX_PRIORITY_FEE || (chainKey === "ethereum" ? 5 : 0.05));
+  const envMaxFee = Number(process.env.MAX_FEE_PER_GAS || chainProfile.gas.maxFeeGwei);
+  const envPriority = Number(process.env.MAX_PRIORITY_FEE || chainProfile.gas.priorityGwei);
 
   // A ceiling under the base fee is rejected outright by every node, so it must
   // not be enterable at all.

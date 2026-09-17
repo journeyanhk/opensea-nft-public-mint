@@ -12,7 +12,8 @@
 ### 需求: 顺序定时执行多目标
 **模块:** batch
 - 整批固定单条链；跨链需拆成两份配置
-- gas / RPC / 密钥默认复用 `.env` 与现有 resolver（`rpc-resolver`、`wallet-keys`），JSON 中 `rpcs`/`gas` 为可选覆盖
+- gas / RPC / 密钥默认复用 `.env` 与现有 resolver（`rpc-resolver`、`wallet-keys`），JSON 中 `rpcs`/`gas` 为可选覆盖；gas 的 `.env` 缺省值按链（`ChainProfile.gas`，Arc 40/0）
+- 广播前 gas 预检：读最新块 `baseFeePerGas`，`maxFeePerGas < baseFee` 直接报错退出（避免开售时才被节点以 base fee 拒收），并给出建议值
 - `walletSource: env`（默认）用 `PRIVATE_KEY`/`PRIVATE_KEYS`；`prompt` 复用向导的隐藏输入流程（`promptKeys`，已导出）
 - 目标按 `startAt` 升序排序；`startAt: "auto"` 取链上 `getPublicDrop().startTime`，也可用 ISO 时间覆盖
 - 余额预检要求**每个**钱包 ≥ Σ(每目标 value + `gasLimit × maxFee`)，任一不足即报错退出
@@ -49,3 +50,4 @@
 - [202609151934_batch-timed-mint](../../history/2026-09/202609151934_batch-timed-mint/) - 新增批量模式与 targets.json 配置
 - [202609152008_review-fixes](../../history/2026-09/202609152008_review-fixes/) - 开售时间漂移（planned=null / 提前）处理与 RPC key 入库提醒
 - [202609161339_supply-check](../../history/2026-09/202609161339_supply-check/) - BATCH SCHEDULE 显示已铸/上限并标红售罄；T-refresh 增加 getMintStats 售罄与单钱包上限检查
+- [202609171345_arc-chain](../../history/2026-09/202609171345_arc-chain/) - Arc 链支持、gas 按链默认、广播前 base fee 预检

@@ -1,7 +1,7 @@
 # NFT Public Mint Sniper
 
 - 参考源码来自：[morsyxbt](https://github.com/morsyxbt/nft-public-mint)
-- 在 Ethereum、Base 和 Robinhood Chain 上通过 SeaDrop mint NFT 的 CLI 工具。
+- 在 Ethereum、Base、Robinhood Chain 和 Arc 上通过 SeaDrop mint NFT 的 CLI 工具。
 - **支持 mint 轮次：WL FCFS、Allowlist 和 Public。** WL FCFS/Allowlist 轮次要求钱包具备资格。
 - 运行 `npm start` 并输入 collection 链接/slug 和 `OPENSEA_API_KEY` 可自动识别 mint 轮次。当前轮次未开放或不满足 mint 条件时，工具会自动等待排期中的下一轮并在开放时重新检查；发送前仍需要确认费用。
 - Public 使用链上数据构造交易，并支持预签名以准点发送。WL FCFS/Allowlist 从 OpenSea API 获取 mint 数据，发送前会校验并在链上模拟。
@@ -187,6 +187,9 @@ API key 仅用于将 slug 转换为合约地址。如果不想获取 key，
 | Ethereum | 1 | etherscan.io |
 | Base | 8453 | basescan.org |
 | Robinhood Chain | 4663 | robinhoodchain.blockscout.com |
+| Arc | 5042 | explorer.arc.io |
+
+> Arc 的 gas 用链上原生 USDC 支付（RPC 按 18 位小数计），且 base fee 约 20 gwei——`.env` 里的 `MAX_FEE_PER_GAS` 若还是 2 会被节点拒收，批量模式会在启动时直接报错提示。
 
 </details>
 

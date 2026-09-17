@@ -8,7 +8,7 @@
 
 import fs from "fs";
 import chalk from "chalk";
-import { JsonRpcProvider, Wallet, formatEther } from "ethers";
+import { JsonRpcProvider, Wallet, formatEther, formatUnits } from "ethers";
 import { resolveChain } from "./chains";
 import { BatchTarget, loadBatchConfig } from "./batch-config";
 import { planRpcs, resolveRpcsForChain } from "./rpc-resolver";
@@ -76,6 +76,20 @@ export async function runBatch(configPath: string): Promise<void> {
   const wallets = keys.map((k) => new Wallet(k));
 
   const provider = new JsonRpcProvider(cfg.rpcUrls[0]);
+
+  // A max fee under the chain's base fee is rejected by every node, which would
+  // otherwise only surface as a rejected broadcast at fire time. Fail now, while
+  // the config can still be fixed.
+  const latestBlock = await provider.getBlock("latest").catch(() => null);
+  const baseFee = latestBlock?.baseFeePerGas ?? null;
+  if (baseFee !== null && cfg.maxFeePerGas < baseFee) {
+    const headroom = Math.ceil((Number(formatUnits(baseFee, "gwei")) * 2 + Number(formatUnits(cfg.maxPriorityFee, "gwei"))) * 1000) / 1000;
+    throw new Error(
+      `Max fee ${formatUnits(cfg.maxFeePerGas, "gwei")} gwei is below ${chain.name}'s current base fee ${formatUnits(baseFee, "gwei")} gwei. ` +
+        `Raise MAX_FEE_PER_GAS (or gas.maxFeeGwei in ${configPath}); around ${headroom} gwei leaves headroom.`
+    );
+  }
+
   const gasReservePerTarget = BigInt(cfg.gasLimit) * cfg.maxFeePerGas;
   const requiredPerWallet = cfg.targets.reduce(
     (sum, t) => sum + t.plan.value + gasReservePerTarget,

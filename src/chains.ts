@@ -16,6 +16,10 @@ export interface ChainProfile {
   name: string;         // human label
   explorer: string;     // block explorer base URL, NO trailing slash
   nativeSymbol: string;
+  gas: {                // per-chain defaults; .env MAX_FEE_PER_GAS / MAX_PRIORITY_FEE override
+    maxFeeGwei: number;
+    priorityGwei: number;
+  };
   rpc: {
     alchemyHost?: string; // Alchemy host for this network (docs/reference)
     public: string[];     // public RPC + sequencer endpoints
@@ -29,6 +33,7 @@ export const CHAINS: ChainProfile[] = [
     name: "Ethereum",
     explorer: "https://etherscan.io",
     nativeSymbol: "ETH",
+    gas: { maxFeeGwei: 80, priorityGwei: 5 },
     rpc: {
       alchemyHost: "eth-mainnet.g.alchemy.com",
       public: [
@@ -44,6 +49,7 @@ export const CHAINS: ChainProfile[] = [
     name: "Base",
     explorer: "https://basescan.org",
     nativeSymbol: "ETH",
+    gas: { maxFeeGwei: 2, priorityGwei: 0.05 },
     rpc: {
       alchemyHost: "base-mainnet.g.alchemy.com",
       public: [
@@ -61,12 +67,26 @@ export const CHAINS: ChainProfile[] = [
     name: "Robinhood Chain",
     explorer: "https://robinhoodchain.blockscout.com",
     nativeSymbol: "ETH",
+    gas: { maxFeeGwei: 2, priorityGwei: 0.05 },
     rpc: {
       alchemyHost: "robinhood-mainnet.g.alchemy.com",
       public: [
         "https://rpc.mainnet.chain.robinhood.com",
         "https://sequencer.mainnet.chain.robinhood.com",
       ],
+    },
+  },
+  {
+    key: "arc",
+    chainId: 5042,
+    name: "Arc",
+    explorer: "https://explorer.arc.io",
+    // Circle's chain settles gas in its native USDC, accounted with 18 decimals.
+    nativeSymbol: "USDC",
+    // Base fee observed at 20 gwei with a 0 tip; 40 is the feeData suggestion.
+    gas: { maxFeeGwei: 40, priorityGwei: 0 },
+    rpc: {
+      public: ["https://rpc.mainnet.arc.io"],
     },
   },
 ];

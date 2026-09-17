@@ -108,6 +108,52 @@ export async function localPublicSnipe(opts: LocalSnipeOpts): Promise<SnipeResul
   // send path works on this list while results still cover every wallet.
   let active = wallets.map((wallet, idx) => ({ idx, wallet }));
 
+  // A public stage can already be empty: a whitelist phase often mints the whole
+  // supply before it opens, leaving the public stage as a shell. Read supply and
+  // per-wallet counts while the decision is still free. Returns false when there
+  // is nothing left to mint.
+  async function checkSupply(cap: number): Promise<boolean> {
+    const stats = await Promise.all(
+      wallets.map((w) => fetchMintStats(provider, nftContract, w.address))
+    );
+    const headline = stats.find((s): s is MintStats => s !== null);
+    if (!headline) return true; // the contract cannot answer; never block the mint over it
+
+    active = active.filter(({ idx, wallet }) => {
+      const s = stats[idx];
+      if (!s || !exceedsWalletCap(s.mintedByWallet, quantity, cap)) return true;
+      console.log(
+        chalk.bold.red(
+          `  ✗ [W${idx}] ${wallet.address} already minted ${s.mintedByWallet} of cap ${cap} — dropping it.`
+        )
+      );
+      return false;
+    });
+    if (active.length === 0) {
+      console.log(chalk.bold.red("  ✗ Every wallet is at its on-chain cap — skipping this target."));
+      return false;
+    }
+
+    const requested = BigInt(quantity * active.length);
+    const verdict = supplyVerdict(headline.totalMinted, headline.maxSupply, requested);
+    if (verdict === "sold-out") {
+      console.log(
+        chalk.bold.red(
+          `  ✗ Sold out on-chain: ${headline.totalMinted}/${headline.maxSupply} minted — skipping this target.`
+        )
+      );
+      return false;
+    }
+    if (verdict === "tight") {
+      console.log(
+        chalk.bold.yellow(
+          `  ⚠ Only ${headline.maxSupply - headline.totalMinted} left on-chain for ${requested} requested — expect partial failure.`
+        )
+      );
+    }
+    return true;
+  }
+
   console.log(chalk.bold.magenta("\n── LOCAL PUBLIC MINT (no OpenSea) ──"));
   console.log(chalk.gray(`  SeaDrop:       ${planNow.to}`));
   console.log(chalk.gray(`  NFT:           ${nftContract}`));
@@ -173,48 +219,8 @@ export async function localPublicSnipe(opts: LocalSnipeOpts): Promise<SnipeResul
       }
 
       // A public stage can already be empty: a whitelist phase often mints the
-      // whole supply before it opens, leaving the public stage as a shell. Read
-      // supply and per-wallet counts now, while the decision is still free.
-      const stats = await Promise.all(
-        wallets.map((w) => fetchMintStats(provider, nftContract, w.address))
-      );
-      const headline = stats.find((s): s is MintStats => s !== null);
-      if (headline) {
-        active = active.filter(({ idx, wallet }) => {
-          const s = stats[idx];
-          if (!s || !exceedsWalletCap(s.mintedByWallet, quantity, fresh.drop.maxTotalMintableByWallet)) {
-            return true;
-          }
-          console.log(
-            chalk.bold.red(
-              `  ✗ [W${idx}] ${wallet.address} already minted ${s.mintedByWallet} of cap ${fresh.drop.maxTotalMintableByWallet} — dropping it.`
-            )
-          );
-          return false;
-        });
-        if (active.length === 0) {
-          console.log(chalk.bold.red("  ✗ Every wallet is at its on-chain cap — skipping this target."));
-          return skipped();
-        }
-
-        const requested = BigInt(quantity * active.length);
-        const verdict = supplyVerdict(headline.totalMinted, headline.maxSupply, requested);
-        if (verdict === "sold-out") {
-          console.log(
-            chalk.bold.red(
-              `  ✗ Sold out on-chain: ${headline.totalMinted}/${headline.maxSupply} minted — skipping this target.`
-            )
-          );
-          return skipped();
-        }
-        if (verdict === "tight") {
-          console.log(
-            chalk.bold.yellow(
-              `  ⚠ Only ${headline.maxSupply - headline.totalMinted} left on-chain for ${requested} requested — expect partial failure.`
-            )
-          );
-        }
-      }
+      // whole supply before it opens, leaving the public stage as a shell.
+      if (!(await checkSupply(fresh.drop.maxTotalMintableByWallet))) return skipped();
 
       if (fresh.data !== planNow.data || fresh.value !== planNow.value) {
         console.log(
@@ -227,13 +233,18 @@ export async function localPublicSnipe(opts: LocalSnipeOpts): Promise<SnipeResul
       planNow = fresh;
       break;
     }
-  } else if (maxValueWei !== undefined && planNow.value > maxValueWei) {
-    console.log(
-      chalk.bold.red(
-        `  ✗ Total ${formatEther(planNow.value)} exceeds the ${formatEther(maxValueWei)} cap — skipping this target.`
-      )
-    );
-    return skipped();
+  } else {
+    if (maxValueWei !== undefined && planNow.value > maxValueWei) {
+      console.log(
+        chalk.bold.red(
+          `  ✗ Total ${formatEther(planNow.value)} exceeds the ${formatEther(maxValueWei)} cap — skipping this target.`
+        )
+      );
+      return skipped();
+    }
+    // No refresh window (wizard path): the plan is read once up front, but a
+    // sold-out stage is still worth refusing before anything is signed.
+    if (!(await checkSupply(planNow.drop.maxTotalMintableByWallet))) return skipped();
   }
 
   // Re-warm after the wait: keep-alive sockets are usually torn down by the far

@@ -66,8 +66,13 @@ export function resolveGas(
   chainKey: string,
   override: { maxFeeGwei?: number; priorityGwei?: number; gasLimit?: number } = {}
 ): { maxFeePerGas: bigint; maxPriorityFee: bigint; gasLimit: number } {
-  const envMaxFee = Number(process.env.MAX_FEE_PER_GAS || (chainKey === "ethereum" ? 80 : 2));
-  const envPriority = Number(process.env.MAX_PRIORITY_FEE || (chainKey === "ethereum" ? 5 : 0.05));
+  const profile = resolveChain(chainKey);
+  // Empty .env entries must fall through to the chain defaults, and a 0 tip is a
+  // valid value (Arc suggests exactly that), so `||` cannot be used here.
+  const feeEnv = (process.env.MAX_FEE_PER_GAS || "").trim();
+  const priorityEnv = (process.env.MAX_PRIORITY_FEE || "").trim();
+  const envMaxFee = feeEnv ? Number(feeEnv) : profile?.gas.maxFeeGwei ?? 2;
+  const envPriority = priorityEnv ? Number(priorityEnv) : profile?.gas.priorityGwei ?? 0.05;
   const envGasLimit = parseInt(process.env.GAS_LIMIT || "0", 10) || DEFAULT_GAS_LIMIT;
 
   const maxFeeGwei = override.maxFeeGwei ?? envMaxFee;

@@ -10,7 +10,7 @@
 OpenSea SeaDrop 公售抢 mint CLI 工具（fork 自 morsyxbt/nft-public-mint）。Public 阶段完全绕过 OpenSea，直接读 SeaDrop 1.0 单例合约拼 calldata、提前签名、开售瞬间多 RPC 并发广播；Allowlist/WL FCFS 阶段走 OpenSea Drops API 取服务端签名，校验并链上模拟后发送。
 
 ### 范围
-- **范围内:** Ethereum / Base / Robinhood Chain 的 SeaDrop 1.0 单例公售抢 mint；Allowlist/WL FCFS 支持
+- **范围内:** Ethereum / Base / Robinhood Chain / Arc 的 SeaDrop 1.0 单例公售抢 mint；Allowlist/WL FCFS 支持
 - **范围外:** 非 SeaDrop 合约、新版 SeaDrop（配置在 token 合约）、非 EVM 链
 
 ### 干系人

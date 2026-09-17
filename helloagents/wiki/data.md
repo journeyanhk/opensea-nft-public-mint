@@ -12,8 +12,8 @@
 | PRIVATE_KEY / PRIVATE_KEYS | string | 明文私钥（可逗号/空白分隔多个） |
 | RPC_URL_<CHAIN> / RPC_URL / EXTRA_RPC_URLS | string | RPC URL，逗号分隔 |
 | CHAIN | string | 默认链：ethereum/base/robinhood |
-| MAX_FEE_PER_GAS | number(gwei) | 默认 2，ethereum 链默认 80 |
-| MAX_PRIORITY_FEE | number(gwei) | 默认 0.05，ethereum 链默认 5 |
+| MAX_FEE_PER_GAS | number(gwei) | 留空按链默认：ethereum 80、base/robinhood 2、arc 40 |
+| MAX_PRIORITY_FEE | number(gwei) | 留空按链默认：ethereum 5、base/robinhood 0.05、arc 0 |
 | GAS_LIMIT | number | 默认 250000 |
 | OPENSEA_API_KEY | string | slug 解析用（可选） |
 
