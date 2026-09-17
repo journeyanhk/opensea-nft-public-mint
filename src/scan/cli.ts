@@ -3,12 +3,21 @@
 // Intended to run unattended on a timer; the incremental path costs a handful of
 // RPC calls per run, so every 10-30 minutes is cheap.
 
+import fs from "fs";
 import chalk from "chalk";
 import { Grade } from "../audit/score";
+import { DEFAULT_LEDGER_PATH, loadLedger } from "../batch-ledger";
+import { DEFAULT_HISTORY_PATH, DEFAULT_STATE_PATH, loadState } from "./state";
+import { loadDashboardRows, loadHistory, renderDashboard } from "./html";
 import { exportByChain, renderAuditDetail, renderAuditTable, renderJson } from "../audit/report";
 import { DEFAULT_SCAN_CHAINS, runScan } from "./scanner";
 
 interface Args {
+  scan: boolean;
+  reportPath: string | null;
+  statePath: string;
+  historyPath: string;
+  ledgerPath: string;
   chains: string[];
   sinceDays: number;
   horizonHours: number;
@@ -27,9 +36,15 @@ interface Args {
 const VALID_GRADES: Grade[] = ["A", "B", "C", "D"];
 
 export function parseScanArgs(args: string[]): Args {
-  const index = args.indexOf("--scan");
-  const rest = args.slice(index + 1);
+  const marker = args.includes("--scan") ? args.indexOf("--scan") : args.indexOf("--report");
+  if (marker < 0) throw new Error("--report needs the flag itself (--scan --report <file> or --report <file>)");
+  const rest = args.slice(marker + 1);
   const parsed: Args = {
+    scan: args.includes("--scan"),
+    reportPath: null,
+    statePath: process.env.SCAN_STATE_PATH ?? DEFAULT_STATE_PATH,
+    historyPath: process.env.SCAN_HISTORY_PATH ?? DEFAULT_HISTORY_PATH,
+    ledgerPath: process.env.BATCH_LEDGER_PATH ?? DEFAULT_LEDGER_PATH,
     chains: [],
     sinceDays: 1,
     horizonHours: 72,
@@ -57,6 +72,10 @@ export function parseScanArgs(args: string[]): Args {
     else if (arg === "--limit") parsed.limit = Math.max(1, parseInt(rest[++i] ?? "20", 10) || 20);
     else if (arg === "--lookback-days") parsed.lookbackDays = Math.max(0.05, Number(rest[++i] ?? "0.5") || 0.5);
     else if (arg === "--export") parsed.exportPath = rest[++i] ?? "targets.scan.json";
+    else if (arg === "--report") parsed.reportPath = rest[++i] ?? "dashboard.html";
+    else if (arg === "--state") parsed.statePath = rest[++i] ?? parsed.statePath;
+    else if (arg === "--history") parsed.historyPath = rest[++i] ?? parsed.historyPath;
+    else if (arg === "--ledger") parsed.ledgerPath = rest[++i] ?? parsed.ledgerPath;
     else if (arg === "--quantity") parsed.quantity = Math.max(1, parseInt(rest[++i] ?? "1", 10) || 1);
     else if (arg === "--max-price") parsed.maxPrice = rest[++i] ?? "current";
     else if (arg === "--grade") {
@@ -66,6 +85,11 @@ export function parseScanArgs(args: string[]): Args {
         .filter((g): g is Grade => VALID_GRADES.includes(g as Grade));
     } else if (arg.startsWith("--")) {
       throw new Error(`Unknown option "${arg}"`);
+    } else if (!parsed.scan && parsed.reportPath === null) {
+      // `--report dashboard.html` slices the path in as a positional.
+      parsed.reportPath = arg;
+    } else {
+      throw new Error(`Unexpected argument "${arg}"`);
     }
   }
 
@@ -73,8 +97,27 @@ export function parseScanArgs(args: string[]): Args {
   return parsed;
 }
 
+function writeDashboard(parsed: Args): void {
+  const { state } = loadState(parsed.statePath);
+  const rows = loadDashboardRows(state, loadHistory(parsed.historyPath), loadLedger(parsed.ledgerPath));
+  if (rows.length === 0) {
+    throw new Error(`No targets in ${parsed.statePath} — run --scan first.`);
+  }
+  const html = renderDashboard(rows, {
+    generatedAt: new Date().toISOString(),
+    sources: [parsed.statePath, parsed.historyPath, parsed.ledgerPath],
+  });
+  fs.writeFileSync(parsed.reportPath!, html);
+  console.log(chalk.bold(`\nDashboard: ${parsed.reportPath} (${rows.length} target(s))`));
+  console.log(chalk.gray(`  open ${parsed.reportPath}`));
+}
+
 export async function runScanCommand(args: string[]): Promise<void> {
   const parsed = parseScanArgs(args);
+  if (!parsed.scan) {
+    writeDashboard(parsed);
+    return;
+  }
 
   const reports = await runScan(
     {
@@ -125,6 +168,8 @@ export async function runScanCommand(args: string[]): Promise<void> {
       console.log(renderAuditDetail(audited));
     }
   }
+
+  if (parsed.reportPath) writeDashboard(parsed);
 
   if (parsed.exportPath) {
     const exported = await exportByChain(audited, {

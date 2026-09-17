@@ -34,6 +34,9 @@ Usage
                                   check supply, mint curve and late changes before queueing; read-only
   npm start -- --scan [--chain robinhood,arc] [--since-days 1] [--horizon-hours 72] [--limit 20] [--export <file>]
                                   discover new drops on-chain, audit the candidates; incremental cursor in .scan-state.json
+      --report <out.html>         also write a static dashboard from .scan-state.json, .scan-history.jsonl
+                                  and .batch-state.json (works alone, or after --scan)
+      --state/--history/--ledger  override the input files for --report
 
 The program will ask for private keys, chain, quantity, NFT link, RPC,
 gas and mint time in order. Defaults can be set in .env (see .env.example).
@@ -72,7 +75,7 @@ async function main(): Promise<void> {
     const batchIndex = args.indexOf("--batch");
     if (args.includes("--audit")) {
       await runAuditCommand(args);
-    } else if (args.includes("--scan")) {
+    } else if (args.includes("--scan") || args.includes("--report")) {
       await runScanCommand(args);
     } else if (batchIndex >= 0) {
       const options = batchRunOptions(args);

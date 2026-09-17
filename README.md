@@ -139,6 +139,7 @@ npm start -- --scan --chain robinhood,arc              # 增量扫描 + 审计�
 npm start -- --scan --chain arc --export targets.arc.json --grade A,B
 npm start -- --scan --chain robinhood --since-days 3 --limit 5   # 首次回看 3 天
 npm start -- --scan --chain arc --no-audit            # 只看发现，不审计
+npm start -- --report dashboard.html                   # 从本地状态生成静态看板（可单独用）
 ```
 
 行为说明：
@@ -151,6 +152,7 @@ npm start -- --scan --chain arc --no-audit            # 只看发现，不审计
 - 首次回填建议 Robinhood `--since-days 1`（实测约 5 分钟、86 个窗口、600+ 合约），之后每轮增量仅 1 个窗口
 - 公共 RPC 限流明显，Arc 与 Robinhood 均串行扫描；配置私有 RPC（`RPC_URL_ARC`、`RPC_URL_ROBINHOOD`）会快很多
 - 审计只回看 0.5 天，因此分阶段数据会标注 `(partial scan: x/y)`；集中度风险标签仅在覆盖率 ≥50% 且样本 ≥50 枚时给出
+- `--report <out.html>` 生成单文件静态看板（无 server、无外部资源、file:// 直接打开）：按开售时间排序，显示等级、剩余/预计、分阶段铸造、变更与风险标注、执行结果（含浏览器交易链接）与等级变化轨迹；支持按等级/链筛选、排序、搜索，勾选后一键复制短名单与审计/导出命令（可另行保存成 `@shortlist.<chain>.txt`）
 - 建议 crontab 示例：`*/20 * * * * cd <repo> && npm start -- --scan --limit 10 >> scan.log 2>&1`
 
 </details>

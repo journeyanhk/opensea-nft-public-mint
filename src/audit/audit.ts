@@ -130,7 +130,7 @@ function csv(value: unknown): number | null {
 }
 
 // The cache is JSON, so the bigint fields have to be carried as strings.
-type CachedScan = { mintScan: MintScan; updates: (DropUpdate & { at: number | null })[] };
+interface CachedPayload { mintScan: unknown; updates: unknown[] }
 
 function serializeScan(scan: MintScan): unknown {
   return {
@@ -166,6 +166,32 @@ function serializeUpdates(updates: (DropUpdate & { at: number | null })[]): unkn
 
 function deserializeUpdates(raw: any[]): (DropUpdate & { at: number | null })[] {
   return (raw ?? []).map((u) => ({ ...u, price: BigInt(u.price ?? 0) }));
+}
+
+export interface CachedScan {
+  mintScan: MintScan;
+  updates: (DropUpdate & { at: number | null })[];
+  scannedAt: number;
+}
+
+
+// Offline reader for the dashboard: no network, null when nothing is cached.
+export function readCachedScan(
+  chainKey: string,
+  contract: string,
+  cacheDir = DEFAULT_CACHE_DIR
+): CachedScan | null {
+  const cached = readCache<{ mintScan: unknown; updates: unknown[] }>(chainKey, contract, cacheDir);
+  if (!cached) return null;
+  try {
+    return {
+      mintScan: deserializeScan(cached.data.mintScan),
+      updates: deserializeUpdates(cached.data.updates),
+      scannedAt: cached.scannedAt,
+    };
+  } catch {
+    return null;
+  }
 }
 
 export async function auditTarget(input: AuditInput, opts: AuditOptions = {}): Promise<AuditResult> {
@@ -283,7 +309,7 @@ export async function auditTarget(input: AuditInput, opts: AuditOptions = {}): P
 
   const cacheDir = opts.cacheDir ?? DEFAULT_CACHE_DIR;
   const cacheTtlMs = opts.cacheTtlMs ?? CACHE_TTL_MS;
-  const cached = readCache<CachedScan>(chain.key, contract, cacheDir);
+  const cached = readCache<CachedPayload>(chain.key, contract, cacheDir);
 
   let mintScan: MintScan;
   let updates: (DropUpdate & { at: number | null })[];

@@ -37,7 +37,13 @@
 
 ### CLI
 - `npm start -- --scan [--chain robinhood,arc] [--since-days 1] [--horizon-hours 72] [--limit 20] [--lookback-days 0.5] [--grade A,B] [--export <path>] [--force] [--quantity N] [--max-price <eth|current>] [--json] [--no-audit]`
+- `npm start -- --report <out.html> [--state <file>] [--history <file>] [--ledger <file>]`（可单独使用，也可与 `--scan` 连用：先扫描再生成）
 - 建议由 cron/定时任务每 10–30 分钟运行一次（增量成本极低）
+
+## 看板（--report）
+- 输入三个本地文件：`.scan-state.json`（合约状态）、`.scan-history.jsonl`（等级/余量轨迹）、`.batch-state.json`（执行结果）；可选读取 `.audit-cache/` 得到分阶段铸造与变更标注
+- 输出单文件 HTML：无 server、无外部资源；全字段转义；等级/链筛选、列排序、搜索、勾选生成短名单与命令；交易链接指向对应链浏览器
+- 纯函数：`parseHistory` / `loadDashboardRows` / `renderDashboard` / `escapeHtml`
 
 ## 数据模型
 - `ChainCursor`: `{ cursorBlock, blockTimeSec, updatedAt }`

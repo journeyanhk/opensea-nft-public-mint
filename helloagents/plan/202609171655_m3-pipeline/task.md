@@ -15,10 +15,12 @@
 - [√] 1.6 账本写入时机：广播前写 `PENDING`，收到结果后更新；`txHash` 非空一律跳过，验证 why.md#[需求-m3a-队列热加载]-[场景-进程重启不重复-mint]，依赖任务1.1、1.4
 - [√] 1.7 `exportTargets` 改为先写临时文件再 rename，避免 watch 读到半写文件，依赖任务1.4
 
-## 2. M3b 静态看板（未开始）
-- [ ] 2.1 新增 `src/scan/html.ts`：`loadDashboardRows(state, history)` 组装行（最新等级 + 变化序列）与 `renderDashboard(rows, meta)` 生成单文件 HTML（内联 CSS/JS、全字段转义、等级/链筛选、排序、勾选生成短名单与命令）
-- [ ] 2.2 在 `src/scan/cli.ts` 增加 `--report <out.html>`（可与 `--scan` 同时用：先扫描再生成），更新 HELP
-- [ ] 2.3 补 `renderDashboard` 用例：HTML 转义（名称含 `<script>`）、排序、筛选标记
+## 2. M3b 静态看板
+- [√] 2.1 新增 `src/scan/html.ts`：`loadDashboardRows(state, history, ledger, cacheLoader)` 组装行（最新等级 + 变化序列 + 执行结果 + 分阶段/风险标注）与 `renderDashboard(rows, meta)` 生成单文件 HTML（内联 CSS/JS、全字段转义、等级/链筛选、排序、搜索、勾选生成短名单与命令）
+- [√] 2.2 在 `src/scan/cli.ts` 增加 `--report <out.html>`（单独用或接在 `--scan` 后），并支持 `--state/--history/--ledger` 覆盖；更新 HELP
+- [√] 2.3 新增 `tests/dashboard.cjs`：历史解析（容错半行）、状态/历史/账本/缓存合并、降级（无缓存/无账本）、HTML 转义（合约与名称含 `<script>`）
+- [√] 2.4 真链验收：33 个真实目标生成 24KB 单文件 HTML，行数/等级徽标/短名单/无外部资源/等级轨迹全部核对通过；
+  > 备注: 浏览器人工打开确认待你在本机执行（生成命令见 README）
 
 ## 3. M3c 地板价回填（未开始）
 - [ ] 3.1 新增 `src/scan/backfill.ts`：`dueCheckpoints(ledger, feedback, now, horizons)` 纯函数选出到期目标；`runBackfill(opts)` 反查 slug（账本已存则直接用）→ 拉 `collections/{slug}/stats` → 追加 `.feedback.jsonl`；无 key/401/429 跳过并计数
@@ -38,7 +40,7 @@
 - [√] 6.1 `tests/batch-watch.cjs`：`mergeRawConfigs` 去重与优先级、`diffKeys`、`rawTargetKey`、账本往返、`shouldSkipLedger` 全状态覆盖
 - [ ] 6.2 真链验收 M3a（发送）：需要已充值钱包——用扫描导出的免费目标在 watch 下自动执行一笔，重启后确认账本阻止重发
   > 备注: 无资金路径已验证（见执行总结）；真实发送待用户钱包
-- [ ] 6.3 真链验收 M3b：用真实 `.scan-state.json` 生成 HTML 并人工打开确认
+- [?] 6.3 真链验收 M3b：已用真实 `.scan-state.json` 生成 HTML 并核对内容；浏览器人工打开确认待用户执行
 - [ ] 6.4 真链验收 M3c：有 key 时回填一笔历史 SUCCESS；无 key 时提示明确且不报错
 - [√] 6.5 `npm run build` 与 `node --test tests/*.cjs` 通过（**52/52**，新增 5 例）
 
