@@ -65,6 +65,16 @@ watch stopped after 2 poll(s)
 
 ---
 
+## review6 修复（M3a 收口）
+
+- [√] watch 文件缺失视为空配置（提示 `waiting for <file>`），不再 ENOENT 致命；主配置仍必需
+- [√] watch 模式允许空队列启动（`loadBatchConfig({ allowEmpty })`），确认文案改为 "Watch for targets and run them unattended?"
+- [√] `REVERTED` 在公售仍开放且 `attempts < 2` 时允许重试（revert 证明未铸出）；账本新增 `attempts` 计数；其余带 `txHash` 的状态仍一律跳过（防御）
+- [√] 从配置移除且未执行的目标清理 `known`，等级回升重新导出后可再入队
+- [√] 余额不足的新目标每 5 分钟重试（充值后自动入队）——顺手修掉"affordability 与入队分离导致拦截失效"的自引入缺陷
+- [√] 端到端验证（Arc 真链，空钱包）：空启动 + 文件后到 → 合并入队 → REVERTED 重试 → 签名/广播被 RPC 以余额不足拒绝（零成本）→ 账本 SKIPPED attempts=2
+- 说明：report.ts 导出的 tmp+rename 原子写已在 M3a 首次提交中实现（review 第 5 条无需再改）
+
 ## 任务状态符号
 - `[ ]` 待执行
 - `[√]` 已完成

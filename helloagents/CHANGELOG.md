@@ -38,6 +38,9 @@
 - 时区语义由越南时间 UTC+7 切换为 UTC+8（展示与输入均按 UTC+8；`time-format.ts` 符号重命名为 toUtc8Time/utc8TimeToDate）
 
 ### 修复
+- M3a 启动条件：watch 文件缺失不再致命（视为空配置并提示 waiting），watch 模式允许空队列启动——修好"批量先于扫描器启动"这个核心场景
+- M3a 账本语义：REVERTED 在公售仍开放且尝试次数 <2 时允许重试（revert 证明没铸出任何东西），避免售罄/改价类 revert 被永久封存；新增 `attempts` 计数
+- M3a 长跑细节：余额不足的新目标每 5 分钟重试（充值后自动入队）；从配置移除且未执行的目标会被遗忘以便等级回升后重新入队
 - 首次回填失败（Robinhood）：扫描把 `.env` 里的私有 RPC 当作日志端点，而发送最优的私有节点常常限制日志范围（Alchemy 免费档 `eth_getLogs` 仅 10 块）。新增 **RPC 角色分离** `resolveScanRpcs`：`SCAN_RPC_URL_<CHAIN>` → 公共端点 → `.env` 私有端点；`--scan`/`--audit` 的日志与区块读取改用它，批量发送仍用私有优先的 `resolveRpcsForChain`
 - 首次回填失败（Arc）：密度错误正则不匹配 Arc 的 `query exceeds max results 2000, retry with the range A-B`，被当作瞬时错误重试 8 次。现在 `isRangeError` 覆盖 Arc/Alchemy 文案，`parseRangeHint` 采用节点建议范围；10 块级上限的端点直接判定不可用并**切换端点**
 - 确定性错误不再重试：范围/结果类错误立即抛出并交由拆分或换端点处理，只有限流与网络错误才退避重试（此前 Arc/Robinhood 各浪费 8 轮退避）

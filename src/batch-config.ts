@@ -116,7 +116,7 @@ export async function loadBatchConfig(
   raw: any,
   chain: ChainProfile,
   rpcUrls: string[],
-  options: { quiet?: boolean } = {}
+  options: { quiet?: boolean; allowEmpty?: boolean } = {}
 ): Promise<BatchConfig> {
   // Watched configs are re-read on every poll; repeating warnings for targets
   // that have not changed is noise. The runner logs changes itself.
@@ -125,7 +125,20 @@ export async function loadBatchConfig(
     throw new Error("No usable RPC endpoint — the batch would have nothing to send through.");
   }
   if (!Array.isArray(raw?.targets) || raw.targets.length === 0) {
-    throw new Error("The batch config lists no targets.");
+    // --watch starts before the scanner has exported anything, so an empty file
+    // is a valid starting state there.
+    if (!options.allowEmpty) throw new Error("The batch config lists no targets.");
+    return {
+      chainKey: chain.key,
+      walletSource: raw?.walletSource === "prompt" ? "prompt" : "env",
+      rpcUrls,
+      ...resolveGas(chain.key, raw?.gas ?? {}),
+      refreshBeforeMs: nonNegativeInt(raw?.refreshBeforeMs, DEFAULT_REFRESH_MS),
+      auditBeforeMs: nonNegativeInt(raw?.auditBeforeMs, DEFAULT_AUDIT_MS),
+      auditSkipGrades: parseSkipGrades(raw?.auditSkipGrades),
+      onFailure: raw?.onFailure === "stop" ? "stop" : "continue",
+      targets: [],
+    };
   }
 
   const apiKey = (process.env.OPENSEA_API_KEY || "").trim() || undefined;

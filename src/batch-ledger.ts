@@ -19,6 +19,7 @@ export interface LedgerEntry {
   at: string;
   quantity: number;
   slug: string | null; // original config input, reused by backfill
+  attempts: number; // sends that were started (PENDING writes)
 }
 
 export interface Ledger {
@@ -60,15 +61,23 @@ export function entryOf(ledger: Ledger, chainKey: string, contract: string): Led
   return ledger.entries[chainKey]?.[contract.toLowerCase()];
 }
 
-// Anything that may have reached the chain must not be sent again. SKIPPED and
-// REJECTED never hit the chain, so those are allowed to retry.
+// Anything that may have reached the chain must not be sent again — with one
+// deliberate exception: a REVERTED transaction provably minted nothing (a price
+// change or a sold-out stage reverts exactly this way), so while the public stage
+// is still open it may be retried a couple of times to avoid burning gas forever
+// on a target that keeps reverting.
 export function shouldSkipLedger(
   entry: LedgerEntry | undefined,
-  opts: { retryPending?: boolean } = {}
+  opts: { retryPending?: boolean; stageOpen?: boolean; maxRevertAttempts?: number } = {}
 ): boolean {
   if (!entry) return false;
+  if (entry.status === "SUCCESS" || entry.status === "TIMEOUT") return true;
+  if (entry.status === "REVERTED") {
+    const attempts = entry.attempts ?? 0;
+    return !(opts.stageOpen === true && attempts < (opts.maxRevertAttempts ?? 2));
+  }
+  // Defensive: any other status carrying a hash still touched the chain.
   if (entry.txHash !== null) return true;
-  if (entry.status === "SUCCESS" || entry.status === "REVERTED" || entry.status === "TIMEOUT") return true;
   if (entry.status === "PENDING") return !opts.retryPending;
   return false;
 }

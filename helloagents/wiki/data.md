@@ -90,6 +90,7 @@
 | entries[chain][contract].at | string | ISO 时间 |
 | entries[chain][contract].quantity | number | 每钱包数量 |
 | entries[chain][contract].slug | string \| null | 配置原始输入（供 M3c 回填复用） |
+| entries[chain][contract].attempts | number | 发送尝试次数（REVERTED 在公售开放期最多重试 2 次） |
 
 ## 发现器状态（.scan-state.json / .scan-history.jsonl，均 gitignore）
 

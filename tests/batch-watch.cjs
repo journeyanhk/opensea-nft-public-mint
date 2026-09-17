@@ -62,15 +62,21 @@ test('skip rules: anything that may have reached the chain is not sent again', (
     at: '2026-09-17T08:00:00.000Z',
     quantity: 1,
     slug: null,
+    attempts: 1,
     ...over,
   });
   assert.equal(shouldSkipLedger(undefined), false);
   assert.equal(shouldSkipLedger(entry({ status: 'SUCCESS', txHash: '0x1' })), true);
-  assert.equal(shouldSkipLedger(entry({ status: 'REVERTED', txHash: '0x1' })), true);
   assert.equal(shouldSkipLedger(entry({ status: 'TIMEOUT', txHash: '0x1' })), true);
+  // A revert minted nothing: retry while the stage is open, then stop.
+  assert.equal(shouldSkipLedger(entry({ status: 'REVERTED', txHash: '0x1', attempts: 1 }), { stageOpen: true }), false);
+  assert.equal(shouldSkipLedger(entry({ status: 'REVERTED', txHash: '0x1', attempts: 2 }), { stageOpen: true }), true);
+  assert.equal(shouldSkipLedger(entry({ status: 'REVERTED', txHash: '0x1', attempts: 1 }), { stageOpen: false }), true);
   assert.equal(shouldSkipLedger(entry({ status: 'PENDING' })), true);
   assert.equal(shouldSkipLedger(entry({ status: 'PENDING' }), { retryPending: true }), false);
   assert.equal(shouldSkipLedger(entry({ status: 'SKIPPED' })), false);
   assert.equal(shouldSkipLedger(entry({ status: 'REJECTED' })), false);
+  // Any other status that somehow carries a hash still touched the chain.
   assert.equal(shouldSkipLedger(entry({ status: 'REJECTED', txHash: '0x1' })), true);
+  assert.equal(shouldSkipLedger(entry({ status: 'PENDING', txHash: '0x1' })), true);
 });

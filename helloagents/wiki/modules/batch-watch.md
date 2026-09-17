@@ -15,13 +15,16 @@
 - 新目标经由 `loadBatchConfig` 解析校验、通过 `maxPriceEth` 护栅与**逐目标余额预检**（`mint value + gasLimit × maxFee`）后才入队；不合格只跳过该目标并记录
 - 队列按开售时间排序；配置中消失且未执行的目标移出队列并记录
 - 长时间等待期间轮询仍在进行：执行器交接前（审计窗口）按 interval 分片等待，每片后重读配置
-- 文件半写/解析失败时保留上一版队列并告警；`--watch` 后未显式给主配置时，若默认 `targets.json` 不存在则取第一个被 watch 的文件作为主配置
+- 附加（watch）文件缺失视为空配置并提示 `waiting for <file>`，不再致命；主配置文件仍需存在（链信息来自它）。watch 模式允许空队列启动
+- 文件半写/解析失败时保留上一版队列并告警；`--watch` 后未显式给主配置时，若默认 `targets.json` 不存在则取第一个存在的被 watch 文件作为主配置
+- 余额不足的新目标每 5 分钟重试一次（充值后自动入队），不写入账本
+- 从配置中移除且尚未执行的目标会被遗忘（`known` 清理），导出等级回升后可再次入队；已执行的目标保留在 `known`
 
 ### 需求: 执行账本
 **模块:** batch-ledger
 - `.batch-state.json`（`version: 1`，原子写：临时文件 + rename）：`entries[chain][contract] = { status, txHash, at, quantity, slug }`
-- 发送前先写 `PENDING`；返回后按结果更新：任一钱包有 `txHash` 则记该结果与哈希，全为 SKIPPED/REJECTED 记 SKIPPED，其余记 REJECTED
-- 跳过规则（`shouldSkipLedger`）：`txHash !== null` 一律跳过；SUCCESS/REVERTED/TIMEOUT 跳过；PENDING 跳过（除非 `--retry-pending`）；SKIPPED/REJECTED 允许重试
+- 每次发送尝试使 `attempts` 递增（发送前写 `PENDING` 时计数）；返回后按结果更新：任一钱包有 `txHash` 则记该结果与哈希，全为 SKIPPED/REJECTED 记 SKIPPED，其余记 REJECTED
+- 跳过规则（`shouldSkipLedger`）：SUCCESS/TIMEOUT 跳过；**REVERTED 在公售仍开放且 `attempts < 2` 时允许重试**（revert 证明链上什么都没铸出），否则跳过；PENDING 跳过（除非 `--retry-pending`）；SKIPPED/REJECTED 允许重试；任何其他状态若带 `txHash` 一律跳过（防御）
 - 审计判定跳过（等级命中 `auditSkipGrades`）也记账为 SKIPPED（未上链，允许后续重试）
 - 执行抛错时保持 PENDING 并提示（`--retry-pending` 才重发），避免"可能已广播"被重复发送
 - `--no-ledger` 关闭保护（不推荐）；账本路径可注入（测试用）

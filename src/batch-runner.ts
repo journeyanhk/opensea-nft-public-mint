@@ -69,7 +69,21 @@ export async function runBatch(configPath: string, options: BatchRunOptions = {}
   const retryPending = options.retryPending === true;
   const ledgerPath = options.ledgerPath ?? DEFAULT_LEDGER_PATH;
 
-  const loadMerged = (): RawConfig => mergeRawConfigs(readConfig(configPath), watchFiles.map(readConfig));
+  // Watched files may not exist yet (the scanner exports them later); a missing
+  // one is an empty config, not an error. The main file must exist.
+  const missingWatchFiles = new Set<string>();
+  const readWatchFile = (file: string): RawConfig => {
+    if (fs.existsSync(file)) {
+      if (missingWatchFiles.delete(file)) console.log(chalk.gray(`  ${file} appeared`));
+      return readConfig(file);
+    }
+    if (!missingWatchFiles.has(file)) {
+      missingWatchFiles.add(file);
+      console.log(chalk.gray(`  waiting for ${file} (not created yet)`));
+    }
+    return { targets: [] };
+  };
+  const loadMerged = (): RawConfig => mergeRawConfigs(readConfig(configPath), watchFiles.map(readWatchFile));
 
   let raw = loadMerged();
   const chain = resolveChain(raw?.chain);
@@ -110,7 +124,7 @@ export async function runBatch(configPath: string, options: BatchRunOptions = {}
 
   // ── 2. Targets ────────────────────────────────────────────────────────
   console.log(chalk.bold.white("\nTargets"));
-  let cfg = await loadBatchConfig(raw, chain, rpcUrls);
+  let cfg = await loadBatchConfig(raw, chain, rpcUrls, { allowEmpty: watch });
 
   // ── 3. Wallets ────────────────────────────────────────────────────────
   console.log(chalk.bold.white("\nWallets"));
@@ -141,12 +155,16 @@ export async function runBatch(configPath: string, options: BatchRunOptions = {}
   // ── 4. Queue ──────────────────────────────────────────────────────────
   const queue: BatchTarget[] = [];
   const known = new Set<string>(); // contracts ever considered this run
-  const done = new Set<string>(); // executed, ended, or ledger-skipped
+  const executed = new Set<string>(); // dequeued and processed (audited/attempted)
   const summary: { label: string; results: SnipeResult[] }[] = [];
 
   const keyOf = (target: BatchTarget): string => target.contract.toLowerCase();
   const ledgerSkipped = (target: BatchTarget): boolean =>
-    useLedger && shouldSkipLedger(entryOf(ledger, cfg.chainKey, target.contract), { retryPending });
+    useLedger &&
+    shouldSkipLedger(entryOf(ledger, cfg.chainKey, target.contract), {
+      retryPending,
+      stageOpen: target.plan.drop.endTime * 1000 > Date.now(),
+    });
 
   const skippedAll = (): SnipeResult[] =>
     wallets.map((w, idx) => ({ idx, address: w.address, txHash: null, status: "SKIPPED" as const }));
@@ -165,24 +183,34 @@ export async function runBatch(configPath: string, options: BatchRunOptions = {}
     return true;
   };
 
-  const enqueue = (targets: BatchTarget[], announce: boolean): number => {
+  const enqueue = async (targets: BatchTarget[], announce: boolean, checkAffordability: boolean): Promise<number> => {
     let added = 0;
     for (const target of targets) {
       const key = keyOf(target);
       if (known.has(key)) continue;
-      known.add(key);
 
       if (target.plan.drop.endTime * 1000 <= Date.now()) {
-        done.add(key);
+        known.add(key);
         if (announce) console.log(chalk.gray(`  - ${target.label} — public stage already ended`));
         continue;
       }
       if (ledgerSkipped(target)) {
-        done.add(key);
+        known.add(key);
         if (announce) console.log(chalk.gray(`  - ${target.label} — already handled (ledger)`));
         continue;
       }
+      // A wallet that is short now may be topped up later, so an unaffordable
+      // target is retried periodically instead of being forgotten.
+      if (checkAffordability) {
+        if (Date.now() < (affordabilityRetry.get(key) ?? 0)) continue;
+        if (!(await affordable(target))) {
+          affordabilityRetry.set(key, Date.now() + AFFORDABILITY_RETRY_MS);
+          continue;
+        }
+        affordabilityRetry.delete(key);
+      }
 
+      known.add(key);
       queue.push(target);
       added++;
       if (announce) {
@@ -198,9 +226,10 @@ export async function runBatch(configPath: string, options: BatchRunOptions = {}
     return added;
   };
 
-  enqueue(cfg.targets, false);
+  // The startup balance precheck already covers every initial target.
+  await enqueue(cfg.targets, false, false);
 
-  const actionable = queue.filter((target) => !done.has(keyOf(target)));
+  const actionable = [...queue];
   const ledgerCount = cfg.targets.filter(ledgerSkipped).length;
   if (ledgerCount > 0) console.log(chalk.gray(`  ${ledgerCount} target(s) already handled per the ledger`));
 
@@ -262,7 +291,7 @@ export async function runBatch(configPath: string, options: BatchRunOptions = {}
     return;
   }
 
-  if (!(await askYesNo(chalk.bold(watch ? "Run this batch unattended and watch for new targets?" : "Run this batch unattended?"), false))) {
+  if (!(await askYesNo(chalk.bold(watch ? "Watch for targets and run them unattended?" : "Run this batch unattended?"), false))) {
     console.log(chalk.yellow("\n  Cancelled — nothing was sent.\n"));
     closePrompts();
     return;
@@ -272,6 +301,8 @@ export async function runBatch(configPath: string, options: BatchRunOptions = {}
   closePrompts();
 
   // ── 7. Polling ────────────────────────────────────────────────────────
+  const affordabilityRetry = new Map<string, number>(); // key -> next affordability check
+  const AFFORDABILITY_RETRY_MS = 5 * 60_000;
   let stop = false;
   let polls = 0;
   const poll = async (): Promise<void> => {
@@ -279,7 +310,7 @@ export async function runBatch(configPath: string, options: BatchRunOptions = {}
     if (options.maxPolls !== undefined && options.maxPolls > 0 && ++polls > options.maxPolls) return;
     try {
       const merged = loadMerged();
-      const next = await loadBatchConfig(merged, chain, rpcUrls, { quiet: true });
+      const next = await loadBatchConfig(merged, chain, rpcUrls, { quiet: true, allowEmpty: true });
       cfg = next;
 
       // Drop queued targets that disappeared from the config.
@@ -291,17 +322,12 @@ export async function runBatch(configPath: string, options: BatchRunOptions = {}
           console.log(chalk.yellow(`  - ${queue[index].label} — removed from config`));
           queue.splice(index, 1);
         }
+        // A target that left the config before running is forgotten, so a later
+        // re-export (grade C rising back to B) can queue it again.
+        if (!executed.has(key)) known.delete(key);
       }
 
-      for (const target of next.targets) {
-        if (known.has(keyOf(target))) continue;
-        if (!(await affordable(target))) {
-          known.add(keyOf(target));
-          done.add(keyOf(target));
-          continue;
-        }
-      }
-      const added = enqueue(next.targets, true);
+      const added = await enqueue(next.targets, true, true);
       if (added > 0) console.log(chalk.bold(`  merged ${added} new target(s) into the queue`));
       if (options.maxPolls !== undefined && options.maxPolls > 0 && polls >= options.maxPolls) {
         console.log(chalk.gray(`  watch stopped after ${polls} poll(s)`));
@@ -330,7 +356,7 @@ export async function runBatch(configPath: string, options: BatchRunOptions = {}
 
     const target = queue.shift()!;
     const key = keyOf(target);
-    done.add(key);
+    executed.add(key);
 
     if (target.plan.drop.endTime * 1000 <= Date.now()) {
       console.log(chalk.yellow(`\n━━━ ${target.label} — public stage already ended, skipping ━━━`));
@@ -368,6 +394,7 @@ export async function runBatch(configPath: string, options: BatchRunOptions = {}
               at: new Date().toISOString(),
               quantity: target.quantity,
               slug: target.slug,
+              attempts: entryOf(ledger, cfg.chainKey, target.contract)?.attempts ?? 0,
             });
             saveLedger(ledger, ledgerPath);
           }
@@ -380,6 +407,8 @@ export async function runBatch(configPath: string, options: BatchRunOptions = {}
 
     // Once bytes may reach the chain, the ledger must already say so: a crash
     // between broadcast and receipt then blocks a duplicate send.
+    const priorAttempts = entryOf(ledger, cfg.chainKey, target.contract)?.attempts ?? 0;
+    const attempts = priorAttempts + 1;
     if (useLedger) {
       recordEntry(ledger, cfg.chainKey, target.contract, {
         status: "PENDING",
@@ -387,6 +416,7 @@ export async function runBatch(configPath: string, options: BatchRunOptions = {}
         at: new Date().toISOString(),
         quantity: target.quantity,
         slug: target.slug,
+        attempts,
       });
       saveLedger(ledger, ledgerPath);
     }
@@ -428,6 +458,7 @@ export async function runBatch(configPath: string, options: BatchRunOptions = {}
         at: new Date().toISOString(),
         quantity: target.quantity,
         slug: target.slug,
+        attempts,
       });
       saveLedger(ledger, ledgerPath);
     }
