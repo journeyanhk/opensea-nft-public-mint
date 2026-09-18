@@ -253,6 +253,46 @@ API key 仅用于将 slug 转换为合约地址。如果不想获取 key，
 - 程序会检查 chain ID、余额、单钱包上限和 mint 开放时间。
 - 在 CLI 中粘贴的私钥不会写入磁盘。自动保存在 `.env` 中的私钥为明文；RPC 只会收到已签名的 raw transaction。
 
+<details>
+<summary><strong>服务化部署：常驻扫描 + 公网看板</strong></summary>
+
+<br>
+
+把"扫描 → 回填 → 看板"做成一个常驻服务，浏览器随时可看。**服务进程不持有私钥**（`--serve` 只读 `.env.serve`，检测到私钥会拒绝启动）。
+
+前置：一台 Linux 服务器、一个指向它的域名（Caddy 自动签发 HTTPS）、只对外放行 80/443。
+
+```bash
+# 1) 代码与依赖
+git clone <repo> ~/opensea-nft-public-mint && cd ~/opensea-nft-public-mint
+npm ci --ignore-scripts && npm run build
+
+# 2) 服务环境（复制后填写 RPC 与 OpenSea key；绝不要写 PRIVATE_KEY）
+cp .env.serve.example .env.serve && vi .env.serve
+
+# 3) 先本地验证
+node dist/index.js --serve &
+curl -s http://127.0.0.1:8787/healthz   # {"ok":true}
+
+# 4) systemd 托管
+sudo useradd -r -m nft && sudo chown -R nft:nft ~/opensea-nft-public-mint
+sudo cp deploy/nft-serve.service /etc/systemd/system/
+sudo systemctl daemon-reload && sudo systemctl enable --now nft-serve
+journalctl -u nft-serve -f              # 看首轮扫描开始/结束
+
+# 5) Caddy 反代（自动 HTTPS + basic_auth）
+caddy hash-password --plaintext '你的强密码'   # 填入 deploy/Caddyfile.example
+sudo cp deploy/Caddyfile.example /etc/caddy/Caddyfile && sudo systemctl reload caddy
+```
+
+打开 `https://<你的域名>/`：顶部状态条显示扫描进度与行数，可点 **Scan now** 立即触发；表格与 `--report` 完全一致。
+
+验收要点：`journalctl` 里一轮扫描有清晰的开始/结束；页面首轮 5–10 分钟内有数据（Robinhood 1 天回填约 3–5 分钟）；`ps eww <pid>` 或 `tr '\0' '\n' < /proc/<pid>/environ | grep PRIVATE` 应无输出。
+
+安全提示：服务只绑 `127.0.0.1:8787`，请勿把 8787 暴露到公网；basic_auth 请用强密码，必要时再叠加 fail2ban 或 IP 白名单。面板导出（写 `exports/`）在下一步 M4b 提供。
+
+</details>
+
 ## 支持的链
 
 | 链 | ID | 浏览器 |

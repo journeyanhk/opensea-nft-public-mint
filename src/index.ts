@@ -5,8 +5,6 @@ import fs from "fs";
 import dotenv from "dotenv";
 import chalk from "chalk";
 
-dotenv.config({ path: path.resolve(process.cwd(), ".env") });
-
 import { runWizard } from "./wizard";
 import { closePrompts } from "./prompt";
 import { runAllowlistWizard } from "./allowlist";
@@ -14,6 +12,8 @@ import { BatchRunOptions, runBatch } from "./batch-runner";
 import { runAuditCommand } from "./audit/cli";
 import { runScanCommand } from "./scan/cli";
 import { runBackfillCommand } from "./scan/backfill-cli";
+import { assertNoPrivateKeys, serveConfig } from "./serve/config";
+import { runServe } from "./serve/server";
 
 const HELP = `
 NFT Public Mint Sniper
@@ -37,6 +37,8 @@ Usage
                                   discover new drops on-chain, audit the candidates; incremental cursor in .scan-state.json
   npm start -- --backfill [--ledger <file>] [--backfill-after 24,72] [--backfill-file <file>]
                                   settle cost and floor-price checkpoints for minted targets; idempotent
+  npm start -- --serve            run the scanner/backfill scheduler and the dashboard over http (read-only)
+                                  loads .env.serve (never .env) and refuses to start with private keys present
       --report <out.html>         also write a static dashboard from .scan-state.json, .scan-history.jsonl
                                   and .batch-state.json (works alone, or after --scan)
       --state/--history/--ledger  override the input files for --report
@@ -74,7 +76,22 @@ async function main(): Promise<void> {
     return;
   }
 
+  // Serve mode is physically separated from key material: it loads .env.serve
+  // (or the process environment) and refuses to run if a private key is present.
+  const serve = args.includes("--serve");
+  if (serve) {
+    dotenv.config({ path: process.env.SERVE_ENV_FILE ?? path.resolve(process.cwd(), ".env.serve") });
+  } else {
+    dotenv.config({ path: path.resolve(process.cwd(), ".env") });
+  }
+
   try {
+    if (serve) {
+      assertNoPrivateKeys();
+      await runServe(serveConfig());
+      closePrompts();
+      process.exit(0);
+    }
     const batchIndex = args.indexOf("--batch");
     if (args.includes("--audit")) {
       await runAuditCommand(args);

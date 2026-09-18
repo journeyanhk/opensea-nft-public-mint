@@ -1,0 +1,26 @@
+# 数据侧服务：扫描 + 回填 + 看板（只读链，不持有私钥）
+# 安装：sudo cp deploy/nft-serve.service /etc/systemd/system/
+#       sudo systemctl daemon-reload && sudo systemctl enable --now nft-serve
+[Unit]
+Description=SeaDrop scanner / backfill / dashboard
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+User=nft
+Group=nft
+WorkingDirectory=/home/nft/opensea-nft-public-mint
+EnvironmentFile=/home/nft/opensea-nft-public-mint/.env.serve
+ExecStart=/usr/bin/node dist/index.js --serve
+Restart=always
+RestartSec=10
+
+# 加固：低权限、只读系统、只允许写仓库目录（状态/缓存/导出）
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=read-only
+PrivateTmp=true
+ReadWritePaths=/home/nft/opensea-nft-public-mint
+
+[Install]
+WantedBy=multi-user.target

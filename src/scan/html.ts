@@ -184,7 +184,7 @@ export interface DashboardMeta {
   sources: string[];
 }
 
-export function renderDashboard(rows: DashboardRow[], meta: DashboardMeta): string {
+export function renderDashboard(rows: DashboardRow[], meta: DashboardMeta, opts: { serve?: boolean } = {}): string {
   const explorerTx = (chain: string, hash: string | null): string | null => {
     if (!hash) return null;
     const explorer = resolveChain(chain)?.explorer;
@@ -253,11 +253,22 @@ export function renderDashboard(rows: DashboardRow[], meta: DashboardMeta): stri
   textarea { width: 100%; min-height: 80px; font-family: ui-monospace, monospace; }
   .out { margin-top: 14px; }
   button { padding: 4px 10px; }
+  .status { display: flex; gap: 12px; align-items: center; flex-wrap: wrap; margin: 6px 0 12px; padding: 6px 8px; border: 1px solid #8883; border-radius: 6px; }
+  .status .state { font-weight: 600; }
+  .status .last { color: #888; }
 </style>
 </head>
 <body>
 <h1>Mint dashboard</h1>
 <div class="meta">generated ${escapeHtml(meta.generatedAt)} · ${rows.length} target(s) · sources: ${escapeHtml(meta.sources.join(", "))}</div>
+
+${opts.serve ? `<div class="status" id="statusBar">
+  <span class="state" id="stState">starting…</span>
+  <button id="scanNow">Scan now</button>
+  <span class="last" id="stLog"></span>
+</div>
+
+` : ""}
 
 <div class="controls">
   <label>grade
@@ -367,6 +378,34 @@ ${rowHtml}
     else { document.execCommand("copy"); done(); }
   });
   apply();
+})();
+</script>
+<script>
+(function () {
+  if (!document.getElementById("statusBar")) return;
+  var state = document.getElementById("stState");
+  var log = document.getElementById("stLog");
+  var button = document.getElementById("scanNow");
+  function refresh() {
+    fetch("/api/status", { cache: "no-store" }).then(function (r) { return r.json(); }).then(function (s) {
+      var parts = [s.running ? "scanning…" : "idle"];
+      if (s.lastScanAt) parts.push("last " + s.lastScanAt.slice(11, 16) + "Z");
+      if (s.nextScanAt) parts.push("next " + s.nextScanAt.slice(11, 16) + "Z");
+      parts.push((s.rowCount || 0) + " rows");
+      if (s.lastError) parts.push("error: " + s.lastError);
+      state.textContent = parts.join(" · ");
+      if (s.log && s.log.length) log.textContent = s.log[s.log.length - 1].slice(11, 19) + " " + s.log[s.log.length - 1].slice(30);
+    }).catch(function () { state.textContent = "status unavailable"; });
+  }
+  button.addEventListener("click", function () {
+    button.disabled = true;
+    fetch("/api/scan", { method: "POST", headers: { "content-type": "application/json" }, body: "{}" })
+      .then(function (r) { return r.json().then(function (j) { if (!r.ok) throw new Error(j.error || String(r.status)); return j; }); })
+      .catch(function (e) { alert("scan: " + e.message); })
+      .then(function () { button.disabled = false; refresh(); });
+  });
+  refresh();
+  setInterval(refresh, 15000);
 })();
 </script>
 </body>

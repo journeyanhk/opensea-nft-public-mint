@@ -20,6 +20,7 @@
 | 202609171745 | scan-rpc-role | 修复 | ✅已完成 | [链接](2026-09/202609171745_scan-rpc-role/) |
 | 202609171655 | m3-pipeline | 功能 | ✅已完成 | [链接](2026-09/202609171655_m3-pipeline/) |
 | 202609181443 | m3c-seaport-fix | 修复 | ✅已完成 | [链接](2026-09/202609181443_m3c-seaport-fix/) |
+| 202609181530 | serve-m4a | 功能 | ✅已完成 | [链接](2026-09/202609181530_serve-m4a/) |
 
 ---
 
@@ -39,3 +40,4 @@
 - [202609171745_scan-rpc-role](2026-09/202609171745_scan-rpc-role/) - review5 修复：扫描 RPC 角色分离（SCAN_RPC_URL_<CHAIN>）、范围错误采用节点提示/换端点/不重试、发现主题收窄为 PublicDropUpdated
 - [202609171655_m3-pipeline](2026-09/202609171655_m3-pipeline/) - M3：队列热加载 `--watch` + 执行账本、静态看板 `--report`、回填 `--backfill`（链上成本 + 地板价）
 - [202609181443_m3c-seaport-fix](2026-09/202609181443_m3c-seaport-fix/) - review8 修复：Seaport 1.6 五字段 OrderFulfilled 成交地板价、ERC-20 精度按 decimals 解析、净值统一 USD
+- [202609181530_serve-m4a](2026-09/202609181530_serve-m4a/) - M4a 数据侧服务化：`--serve` 常驻调度 + 公网看板、私钥 fail-closed、systemd/Caddy 部署文件

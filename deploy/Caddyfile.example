@@ -1,0 +1,23 @@
+# 数据看板反向代理：只对外开 80/443，服务本身仅绑 127.0.0.1:8787
+#
+# 1) 生成密码哈希：  caddy hash-password --plaintext '你的强密码'
+# 2) 把哈希填到 basic_auth 下，替换 $2a$14$REPLACE_WITH_HASH
+# 3) 域名 A 记录指向本机（Caddy 会自动签发 HTTPS 证书；80 端口用于 ACME 校验与跳转）
+# 4) 防火墙只放行 80/tcp 与 443/tcp，8787 不要对外
+#
+# 没有域名时：把站点地址换成 ":443" 并加一行 `tls internal`（自签证书，浏览器需信任）。
+
+mint.example.com {
+	basic_auth {
+		admin $2a$14$REPLACE_WITH_HASH
+	}
+
+	header {
+		Strict-Transport-Security "max-age=31536000; includeSubDomains"
+		X-Content-Type-Options "nosniff"
+		X-Frame-Options "DENY"
+		Referrer-Policy "no-referrer"
+	}
+
+	reverse_proxy 127.0.0.1:8787
+}

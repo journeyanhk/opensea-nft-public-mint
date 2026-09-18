@@ -7,6 +7,10 @@
 ## [Unreleased]
 
 ### 新增
+- M4a 数据侧服务化：`--serve` 常驻调度（启动即扫、按 `SCAN_INTERVAL_MIN` 定时、互斥 tick）+ 内置 `http` 看板（`/`、`/api/status`、`/api/rows`、`/api/scan`、`/healthz`），零新依赖
+- 私钥隔离（fail-closed）：`--serve` 只加载 `.env.serve` 并断言环境无 `PRIVATE_KEY(S)`，否则拒绝启动（此前入口会无条件加载 `.env`）
+- 公网安全：默认绑 `127.0.0.1`；POST 强制 JSON content-type + Origin 同源；`/api/status` 对 RPC URL 与绝对路径脱敏；`/api/scan` 5 秒节流
+- 部署文件：`deploy/nft-serve.service`（低权限 + systemd 加固）、`deploy/Caddyfile.example`（自动 HTTPS + basic_auth + 安全头）、`.env.serve.example`
 - M3b 静态看板：`--report <out.html>`（可单独用，也可接在 `--scan` 后）从 `.scan-state.json` + `.scan-history.jsonl` + `.batch-state.json`（可选 `.audit-cache/`）生成单文件 HTML：开售时间排序、等级徽标、剩余/预计、分阶段铸造、变更与风险标注、执行结果与浏览器交易链接、等级变化轨迹；支持筛选/排序/搜索与勾选生成短名单和审计导出命令；无 server、无外部资源、全字段转义
 - audit 模块导出 `readCachedScan()` 供看板离线读取缓存（不发起网络请求）
 - M3a 批量热加载：`--batch <file> --watch [file...] --watch-interval <秒>` 定期重读配置，新目标经校验与逐目标余额预检后自动入队（按开售时间排序），消失的目标移出队列

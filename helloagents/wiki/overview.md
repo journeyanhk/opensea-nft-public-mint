@@ -29,6 +29,7 @@ OpenSea SeaDrop 公售抢 mint CLI 工具（fork 自 morsyxbt/nft-public-mint）
 | scan | 发现器（单例事件扫描、游标、候选过滤、状态快照） | 稳定 | [modules/scan.md](modules/scan.md) |
 | batch-watch | 批量热加载与执行账本（--watch、.batch-state.json 防重发） | 稳定 | [modules/batch-watch.md](modules/batch-watch.md) |
 | feedback | mint 后回填（+24h/+72h 成本与地板价、.backfill.jsonl） | 稳定 | [modules/feedback.md](modules/feedback.md) |
+| serve | 常驻调度与公网看板（HTTP、私钥隔离、systemd/Caddy 部署） | 稳定 | [modules/serve.md](modules/serve.md) |
 | allowlist | OpenSea Drops API 取签名交易、校验、模拟、轮次等待 | 稳定 | [modules/allowlist.md](modules/allowlist.md) |
 | rpc | 链注册表、RPC 选择与 chainId 校验 | 稳定 | [modules/rpc.md](modules/rpc.md) |
 | keys | .env / CLI 私钥加载与校验 | 稳定 | [modules/keys.md](modules/keys.md) |

@@ -6,6 +6,9 @@ flowchart TD
     A[src/index.ts 入口] --> B[wizard 交互向导]
     A --> N[batch-runner 批量执行器]
     A --> P[audit/cli 审计命令]
+    A --> Y[serve 常驻调度 + HTTP 看板]
+    Y --> T
+    Y --> Q
     A --> T[scan/cli 发现命令]
     T --> U[scanner 单例事件扫描 + 候选过滤]
     T --> V[state .scan-state.json / .scan-history.jsonl]
@@ -71,3 +74,7 @@ sequenceDiagram
 | ADR-16 | watch 即预授权，受价格护栏与余额预检约束 | 2026-09-17 | ✅已采纳 | batch/batch-watch | [history/2026-09/202609171655_m3-pipeline/how.md](../history/2026-09/202609171655_m3-pipeline/how.md) |
 | ADR-17 | 执行账本以"是否已广播"为准，REVERTED 可重试 | 2026-09-17 | ✅已采纳 | batch-ledger | [history/2026-09/202609171655_m3-pipeline/how.md](../history/2026-09/202609171655_m3-pipeline/how.md) |
 | ADR-18 | 回填链上成本 + OpenSea 地板价，失败只降级 | 2026-09-17 | ✅已采纳 | feedback | [history/2026-09/202609171655_m3-pipeline/how.md](../history/2026-09/202609171655_m3-pipeline/how.md) |
+| ADR-19 | 单进程内置 http + 内置调度器（不引入框架与 cron） | 2026-09-18 | ✅已采纳 | serve | [history/2026-09/202609181530_serve-m4a/how.md](../history/2026-09/202609181530_serve-m4a/how.md) |
+| ADR-20 | 服务进程与私钥物理隔离（不加载 .env + 启动断言） | 2026-09-18 | ✅已采纳 | serve | [history/2026-09/202609181530_serve-m4a/how.md](../history/2026-09/202609181530_serve-m4a/how.md) |
+| ADR-21 | Caddy 终止 TLS，服务只绑 127.0.0.1 | 2026-09-18 | ✅已采纳 | serve/deploy | [history/2026-09/202609181530_serve-m4a/how.md](../history/2026-09/202609181530_serve-m4a/how.md) |
+| ADR-22 | POST 以 JSON content-type + Origin 校验替代 CSRF token | 2026-09-18 | ✅已采纳 | serve | [history/2026-09/202609181530_serve-m4a/how.md](../history/2026-09/202609181530_serve-m4a/how.md) |
