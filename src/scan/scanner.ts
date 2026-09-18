@@ -323,6 +323,9 @@ export async function runScan(
                 chain: chainKey,
                 contract,
                 grade: result.grade.grade,
+                risks: result.grade.risks,
+                reason: result.grade.reason,
+                coverage: result.scanCoverage,
                 remaining: remaining === null ? null : remaining.toString(),
                 projected: String(
                   projectedHeadroom(

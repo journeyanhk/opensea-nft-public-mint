@@ -8,6 +8,7 @@ import fs from "fs";
 import { resolveChain } from "../chains";
 import { CachedScan, readCachedScan } from "../audit/audit";
 import { Ledger, entryOf } from "../batch-ledger";
+import { BackfillRecord, formatNet } from "./backfill";
 import { ScanState } from "./state";
 import { toUtc8Time } from "../time-format";
 
@@ -19,6 +20,9 @@ export interface HistoryLine {
   remaining: string | null;
   projected: string | null;
   start: number | null;
+  risks?: string[];
+  reason?: string;
+  coverage?: number;
 }
 
 export interface GradePoint {
@@ -27,6 +31,7 @@ export interface GradePoint {
   remaining: string | null;
   projected: string | null;
   start: number | null;
+  risks?: string[];
 }
 
 export interface DashboardRow {
@@ -43,6 +48,7 @@ export interface DashboardRow {
   execution: { status: string; txHash: string | null; at: string; quantity: number } | null;
   stages: { stage: number; tokens: string; minters: number }[];
   topMinterShare: number | null;
+  nets: Record<string, string>; // checkpoint hours -> net in native units
   notes: string[];
 }
 
@@ -69,47 +75,15 @@ export function loadHistory(file: string): HistoryLine[] {
   }
 }
 
-function deriveNotes(input: {
-  soldOut: boolean;
-  pendingAudit: boolean;
-  start: number | null;
-  topMinterShare: number | null;
-  updates: { at: number | null; price: bigint; startTime: number }[];
-}): string[] {
+// Structural facts come from the state file; change and concentration labels are
+// taken verbatim from the last audit (single source — the auditor already knows
+// about scan coverage, so a partial scan cannot produce a misleading label).
+function deriveNotes(input: { soldOut: boolean; pendingAudit: boolean; auditRisks: string[] }): string[] {
   const notes: string[] = [];
   if (input.soldOut) notes.push("sold out");
   if (input.pendingAudit) notes.push("queued (over limit)");
-
-  let priceChanges = 0;
-  let startChanges = 0;
-  let lastPriceAt: number | null = null;
-  let lastStartAt: number | null = null;
-  for (let i = 1; i < input.updates.length; i++) {
-    const prev = input.updates[i - 1];
-    const next = input.updates[i];
-    if (next.price !== prev.price) {
-      priceChanges++;
-      lastPriceAt = next.at;
-    }
-    if (next.startTime !== prev.startTime) {
-      startChanges++;
-      lastStartAt = next.at;
-    }
-  }
-  if (priceChanges > 0) notes.push(`price ×${priceChanges}`);
-  if (startChanges > 0) notes.push(`start ×${startChanges}`);
-  if (input.start !== null) {
-    for (const [at, label] of [
-      [lastPriceAt, "price"],
-      [lastStartAt, "start"],
-    ] as [number | null, string][]) {
-      if (at !== null && at <= input.start && input.start - at <= 3600) {
-        notes.push(`${label} changed ${Math.round((input.start - at) / 60)}m before open`);
-      }
-    }
-  }
-  if (input.topMinterShare !== null && input.topMinterShare >= 0.5) {
-    notes.push(`top minter ${Math.round(input.topMinterShare * 100)}%`);
+  for (const risk of input.auditRisks) {
+    if (!notes.includes(risk)) notes.push(risk);
   }
   return notes;
 }
@@ -118,13 +92,29 @@ export function loadDashboardRows(
   state: ScanState,
   history: HistoryLine[],
   ledger: Ledger,
-  cacheLoader: (chain: string, contract: string) => CachedScan | null = readCachedScan
+  cacheLoader: (chain: string, contract: string) => CachedScan | null = readCachedScan,
+  backfills: BackfillRecord[] = []
 ): DashboardRow[] {
+  const netsByTarget = new Map<string, Record<string, string>>();
+  for (const record of backfills) {
+    const key = `${record.chain}|${record.contract.toLowerCase()}`;
+    const nets = netsByTarget.get(key) ?? {};
+    const net = formatNet(record);
+    if (net !== null) nets[String(record.checkpointHours)] = net;
+    netsByTarget.set(key, nets);
+  }
   const byTarget = new Map<string, GradePoint[]>();
   for (const line of history) {
     const key = `${line.chain}|${line.contract.toLowerCase()}`;
     const points = byTarget.get(key) ?? [];
-    points.push({ at: line.at, grade: line.grade, remaining: line.remaining, projected: line.projected, start: line.start ?? null });
+    points.push({
+      at: line.at,
+      grade: line.grade,
+      remaining: line.remaining,
+      projected: line.projected,
+      start: line.start ?? null,
+      risks: line.risks,
+    });
     byTarget.set(key, points);
   }
 
@@ -166,12 +156,11 @@ export function loadDashboardRows(
           minters: s.uniqueMinters,
         })),
         topMinterShare: topShare,
+        nets: netsByTarget.get(key) ?? {},
         notes: deriveNotes({
           soldOut: entry.soldOutAtBlock !== null,
           pendingAudit: entry.pendingAudit,
-          start,
-          topMinterShare: topShare,
-          updates: cached?.updates ?? [],
+          auditRisks: [...points].reverse().find((p) => p.risks && p.risks.length > 0)?.risks ?? [],
         }),
       });
     }
@@ -217,6 +206,8 @@ export function renderDashboard(rows: DashboardRow[], meta: DashboardMeta): stri
         `data-start="${row.start ?? ""}"`,
         `data-pending="${row.pendingAudit ? "1" : "0"}"`,
         `data-executed="${row.execution ? "1" : "0"}"`,
+        `data-net24="${escapeHtml(row.nets["24"] ?? "")}"`,
+        `data-net72="${escapeHtml(row.nets["72"] ?? "")}"`,
         `data-target="${escapeHtml(`${row.contract} ${row.chain}`)}"`,
       ].join(" ");
       return `<tr ${data}>
@@ -230,6 +221,8 @@ export function renderDashboard(rows: DashboardRow[], meta: DashboardMeta): stri
   <td>${escapeHtml(stages)}</td>
   <td>${escapeHtml(row.notes.join("; "))}</td>
   <td>${escapeHtml(execution ? row.execution!.status : "")}${txUrl ? ` <a href="${escapeHtml(txUrl)}" target="_blank" rel="noreferrer">tx</a>` : ""}</td>
+  <td>${escapeHtml(row.nets["24"] ?? "")}</td>
+  <td>${escapeHtml(row.nets["72"] ?? "")}</td>
   <td class="mono small">${escapeHtml(history)}</td>
 </tr>`;
     })
@@ -240,6 +233,7 @@ export function renderDashboard(rows: DashboardRow[], meta: DashboardMeta): stri
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
+<meta http-equiv="refresh" content="300">
 <title>Mint dashboard</title>
 <style>
   :root { color-scheme: light dark; }
@@ -286,7 +280,7 @@ export function renderDashboard(rows: DashboardRow[], meta: DashboardMeta): stri
 <tr>
   <th></th><th data-sort="grade">grade</th><th data-sort="chain">chain</th><th data-sort="target">contract</th>
   <th data-sort="start">start (UTC+8)</th><th data-sort="remaining">left</th><th data-sort="projected">projected</th>
-  <th>stages</th><th data-sort="notes">notes</th><th>execution</th><th>grade history</th>
+  <th>stages</th>  <th data-sort="notes">notes</th><th>execution</th><th data-sort="net24">24h net</th><th data-sort="net72">72h net</th><th>grade history</th>
 </tr>
 </thead>
 <tbody>
@@ -338,8 +332,10 @@ ${rowHtml}
     document.getElementById("shortlist").value = lines.join("\\n");
     var byChain = {};
     picked.forEach(function (p) { (byChain[p.dataset.chain] = byChain[p.dataset.chain] || []).push(p.value); });
+    // Inline the addresses: --audit takes multiple targets, so no @file is needed.
     var commands = Object.keys(byChain).map(function (c) {
-      return "npm start -- --audit @shortlist." + c + ".txt --chain " + c + " --export targets." + c + ".json --quantity 1 --max-price current --force";
+      return "npm start -- --audit " + byChain[c].join(" ") + " --chain " + c +
+        " --export targets." + c + ".json --quantity 1 --max-price current --force";
     }).join("\\n");
     document.getElementById("commands").textContent = commands;
   }

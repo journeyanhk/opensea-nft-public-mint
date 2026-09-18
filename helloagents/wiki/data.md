@@ -92,6 +92,18 @@
 | entries[chain][contract].slug | string \| null | 配置原始输入（供 M3c 回填复用） |
 | entries[chain][contract].attempts | number | 发送尝试次数（REVERTED 在公售开放期最多重试 2 次） |
 
+## 回填记录（.backfill.jsonl，gitignore）
+
+| 字段 | 类型 | 说明 |
+|------|------|------|
+| checkpointHours | number | 24 / 72（可按 `--backfill-after` 自定义） |
+| mintAt / at | string | mint 时间 / 回填时间（ISO） |
+| mintValueWei / gasCostWei / costWei | string \| null | 交易 value、燃气费、合计成本（wei） |
+| floorPriceWei / floorSymbol | string \| null | OpenSea 地板价（wei）与计价符号 |
+| volume24hWei / sales24h | string \| null / number \| null | 近 24h 成交量与笔数 |
+| netWei | string \| null | 净值 = floor × quantity − cost |
+| txHash | string \| null | 对应 mint 交易 |
+
 ## 发现器状态（.scan-state.json / .scan-history.jsonl，均 gitignore）
 
 | 字段 | 类型 | 说明 |

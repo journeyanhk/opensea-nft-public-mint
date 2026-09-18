@@ -24,8 +24,8 @@ const state = {
 };
 
 const history = [
-  { at: '2026-09-17T07:00:00.000Z', chain: 'arc', contract: '0xAbC', grade: 'C', remaining: '0', projected: '0', start },
-  { at: '2026-09-17T08:00:00.000Z', chain: 'arc', contract: '0xabc', grade: 'B', remaining: '50', projected: '20', start },
+  { at: '2026-09-17T07:00:00.000Z', chain: 'arc', contract: '0xAbC', grade: 'C', remaining: '0', projected: '0', start, risks: ['partial scan (1% of mints)'] },
+  { at: '2026-09-17T08:00:00.000Z', chain: 'arc', contract: '0xabc', grade: 'B', remaining: '50', projected: '20', start, risks: ['top minter holds 80%', 'price changed 8m before open'] },
 ];
 
 const ledger = {
@@ -81,9 +81,9 @@ test('merges state, history, ledger and cache into dashboard rows', () => {
   assert.equal(row.execution.txHash, '0xdead');
   assert.deepEqual(row.stages, [{ stage: 0, tokens: '5', minters: 2 }]);
   assert.ok(row.notes.includes('queued (over limit)'));
-  assert.ok(row.notes.includes('price ×1'));
-  assert.ok(row.notes.some(n => n.includes('before open')));
-  assert.ok(row.notes.includes('top minter 80%'));
+  // Risk labels come verbatim from the last audit, not from a second derivation.
+  assert.ok(row.notes.includes('top minter holds 80%'));
+  assert.ok(row.notes.includes('price changed 8m before open'));
 });
 
 test('rows without cache or ledger degrade instead of failing', () => {
@@ -91,7 +91,9 @@ test('rows without cache or ledger degrade instead of failing', () => {
   assert.equal(rows.length, 1);
   assert.equal(rows[0].execution, null);
   assert.deepEqual(rows[0].stages, []);
-  assert.ok(!rows[0].notes.some(n => n.includes('top minter')));
+  assert.equal(rows[0].topMinterShare, null);
+  // Risk labels are the audit's own output, so they survive a missing cache.
+  assert.ok(rows[0].notes.includes('top minter holds 80%'));
 });
 
 test('escapes every dynamic field in the rendered HTML', () => {
@@ -105,4 +107,17 @@ test('escapes every dynamic field in the rendered HTML', () => {
   assert.ok(html.includes('&lt;script&gt;alert(1)&lt;/script&gt;'));
   assert.ok(html.includes('data-grade="B"'));
   assert.ok(html.includes('0xdead'));
+});
+
+test('backfill records surface as net columns', () => {
+  const backfills = [
+    { chain: 'arc', contract: '0xABC', checkpointHours: 24, netWei: (5n * 10n ** 16n).toString() },
+    { chain: 'arc', contract: '0xabc', checkpointHours: 72, netWei: (2n * 10n ** 16n).toString() },
+    { chain: 'arc', contract: '0xabc', checkpointHours: 168, netWei: (1n * 10n ** 16n).toString() },
+  ];
+  const rows = loadDashboardRows(state, history, ledger, () => cached, backfills);
+  assert.deepEqual(rows[0].nets, { '24': '0.05', '72': '0.02', '168': '0.01' });
+  const html = renderDashboard(rows, { generatedAt: 'now', sources: [] });
+  assert.ok(html.includes('data-net24="0.05"'));
+  assert.ok(html.includes('24h net'));
 });

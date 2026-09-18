@@ -13,6 +13,7 @@ import { runAllowlistWizard } from "./allowlist";
 import { BatchRunOptions, runBatch } from "./batch-runner";
 import { runAuditCommand } from "./audit/cli";
 import { runScanCommand } from "./scan/cli";
+import { runBackfillCommand } from "./scan/backfill-cli";
 
 const HELP = `
 NFT Public Mint Sniper
@@ -34,6 +35,8 @@ Usage
                                   check supply, mint curve and late changes before queueing; read-only
   npm start -- --scan [--chain robinhood,arc] [--since-days 1] [--horizon-hours 72] [--limit 20] [--export <file>]
                                   discover new drops on-chain, audit the candidates; incremental cursor in .scan-state.json
+  npm start -- --backfill [--ledger <file>] [--backfill-after 24,72] [--backfill-file <file>]
+                                  settle cost and floor-price checkpoints for minted targets; idempotent
       --report <out.html>         also write a static dashboard from .scan-state.json, .scan-history.jsonl
                                   and .batch-state.json (works alone, or after --scan)
       --state/--history/--ledger  override the input files for --report
@@ -75,6 +78,8 @@ async function main(): Promise<void> {
     const batchIndex = args.indexOf("--batch");
     if (args.includes("--audit")) {
       await runAuditCommand(args);
+    } else if (args.includes("--backfill")) {
+      await runBackfillCommand(args);
     } else if (args.includes("--scan") || args.includes("--report")) {
       await runScanCommand(args);
     } else if (batchIndex >= 0) {

@@ -14,6 +14,9 @@ flowchart TD
     P --> R[audit 链上体检]
     U --> R
     R --> S[events SeaDrop 事件扫描]
+    A --> W[scan/backfill 回填 +24h/72h]
+    W --> X[.backfill.jsonl]
+    X --> P
     Q --> R
     O --> C
     B --> C[seadrop-public 本地构造 calldata]
@@ -65,3 +68,6 @@ sequenceDiagram
 | ADR-13 | 发现主题用 OR 一次扫描（单例不是逐合约） | 2026-09-17 | ✅已采纳 | scan/events | [history/2026-09/202609171557_scan-discovery/how.md](../history/2026-09/202609171557_scan-discovery/how.md) |
 | ADR-14 | 状态用 JSON 原子写 + JSONL 快照，不用 SQLite | 2026-09-17 | ✅已采纳 | scan/state | [history/2026-09/202609171557_scan-discovery/how.md](../history/2026-09/202609171557_scan-discovery/how.md) |
 | ADR-15 | 确认延迟 64 块 + 发现先落盘再审计 | 2026-09-17 | ✅已采纳 | scan | [history/2026-09/202609171557_scan-discovery/how.md](../history/2026-09/202609171557_scan-discovery/how.md) |
+| ADR-16 | watch 即预授权，受价格护栏与余额预检约束 | 2026-09-17 | ✅已采纳 | batch/batch-watch | [history/2026-09/202609171655_m3-pipeline/how.md](../history/2026-09/202609171655_m3-pipeline/how.md) |
+| ADR-17 | 执行账本以"是否已广播"为准，REVERTED 可重试 | 2026-09-17 | ✅已采纳 | batch-ledger | [history/2026-09/202609171655_m3-pipeline/how.md](../history/2026-09/202609171655_m3-pipeline/how.md) |
+| ADR-18 | 回填链上成本 + OpenSea 地板价，失败只降级 | 2026-09-17 | ✅已采纳 | feedback | [history/2026-09/202609171655_m3-pipeline/how.md](../history/2026-09/202609171655_m3-pipeline/how.md) |

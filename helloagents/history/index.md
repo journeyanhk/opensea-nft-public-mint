@@ -18,6 +18,7 @@
 | 202609171557 | scan-discovery | 功能 | ✅已完成 | [链接](2026-09/202609171557_scan-discovery/) |
 | 202609171654 | m2-review-fixes | 修复 | ✅已完成 | [链接](2026-09/202609171654_m2-review-fixes/) |
 | 202609171745 | scan-rpc-role | 修复 | ✅已完成 | [链接](2026-09/202609171745_scan-rpc-role/) |
+| 202609171655 | m3-pipeline | 功能 | ✅已完成 | [链接](2026-09/202609171655_m3-pipeline/) |
 
 ---
 
@@ -35,3 +36,4 @@
 - [202609171557_scan-discovery](2026-09/202609171557_scan-discovery/) - `--scan` 发现器（单例事件 OR 扫描、每链游标 + 确认延迟、候选过滤、JSONL 快照、Arc 限流适配）
 - [202609171654_m2-review-fixes](2026-09/202609171654_m2-review-fixes/) - M2 review 修复：发现窗口自适应二分与 10k 窗口、全链串行扫描、超限候选积压队列（pendingAudit）、局部扫描的覆盖率标注
 - [202609171745_scan-rpc-role](2026-09/202609171745_scan-rpc-role/) - review5 修复：扫描 RPC 角色分离（SCAN_RPC_URL_<CHAIN>）、范围错误采用节点提示/换端点/不重试、发现主题收窄为 PublicDropUpdated
+- [202609171655_m3-pipeline](2026-09/202609171655_m3-pipeline/) - M3：队列热加载 `--watch` + 执行账本、静态看板 `--report`、回填 `--backfill`（链上成本 + OpenSea 地板价）

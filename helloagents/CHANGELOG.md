@@ -39,7 +39,13 @@
 - CLI 界面文案由中文翻译为英语（README 等文档保持中文）
 - 时区语义由越南时间 UTC+7 切换为 UTC+8（展示与输入均按 UTC+8；`time-format.ts` 符号重命名为 toUtc8Time/utc8TimeToDate）
 
+### 新增
+- M3c 回填与反馈闭环：`--backfill [--ledger file] [--backfill-after 24,72] [--backfill-file file]` 对账本中 SUCCESS 的目标结算 +24h/+72h 成本（链上 `tx.value + gasUsed × effectiveGasPrice`）与 OpenSea 地板价（有 key 时），净值写入 `.backfill.jsonl`；幂等、可注入网络实现、无 key 只降级
+- 看板：新增 `24h net / 72h net` 两列（读取 `.backfill.jsonl`，`--backfill-file` 可覆盖）、每 5 分钟自动刷新
+
 ### 修复
+- 看板风险标注改为**直接读取最近一次审计的 `risks`**（审计结果现写入 `.scan-history.jsonl`，含 `risks`/`reason`/`coverage`），删除看板内重复推导：与 `--audit` 输出单一来源，局部扫描不会再误标 "top minter 80%"
+- 看板短名单命令改为**内联地址**（`--audit 0x… 0x… --chain X`），不再引用不存在的 `@shortlist.<chain>.txt`
 - M3a 启动条件：watch 文件缺失不再致命（视为空配置并提示 waiting），watch 模式允许空队列启动——修好"批量先于扫描器启动"这个核心场景
 - M3a 账本语义：REVERTED 在公售仍开放且尝试次数 <2 时允许重试（revert 证明没铸出任何东西），避免售罄/改价类 revert 被永久封存；新增 `attempts` 计数
 - M3a 长跑细节：余额不足的新目标每 5 分钟重试（充值后自动入队）；从配置移除且未执行的目标会被遗忘以便等级回升后重新入队

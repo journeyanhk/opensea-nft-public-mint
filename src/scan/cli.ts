@@ -9,6 +9,7 @@ import { Grade } from "../audit/score";
 import { DEFAULT_LEDGER_PATH, loadLedger } from "../batch-ledger";
 import { DEFAULT_HISTORY_PATH, DEFAULT_STATE_PATH, loadState } from "./state";
 import { loadDashboardRows, loadHistory, renderDashboard } from "./html";
+import { DEFAULT_BACKFILL_PATH, loadBackfill } from "./backfill";
 import { exportByChain, renderAuditDetail, renderAuditTable, renderJson } from "../audit/report";
 import { DEFAULT_SCAN_CHAINS, runScan } from "./scanner";
 
@@ -18,6 +19,7 @@ interface Args {
   statePath: string;
   historyPath: string;
   ledgerPath: string;
+  backfillPath: string;
   chains: string[];
   sinceDays: number;
   horizonHours: number;
@@ -45,6 +47,7 @@ export function parseScanArgs(args: string[]): Args {
     statePath: process.env.SCAN_STATE_PATH ?? DEFAULT_STATE_PATH,
     historyPath: process.env.SCAN_HISTORY_PATH ?? DEFAULT_HISTORY_PATH,
     ledgerPath: process.env.BATCH_LEDGER_PATH ?? DEFAULT_LEDGER_PATH,
+    backfillPath: process.env.BACKFILL_PATH ?? DEFAULT_BACKFILL_PATH,
     chains: [],
     sinceDays: 1,
     horizonHours: 72,
@@ -76,6 +79,7 @@ export function parseScanArgs(args: string[]): Args {
     else if (arg === "--state") parsed.statePath = rest[++i] ?? parsed.statePath;
     else if (arg === "--history") parsed.historyPath = rest[++i] ?? parsed.historyPath;
     else if (arg === "--ledger") parsed.ledgerPath = rest[++i] ?? parsed.ledgerPath;
+    else if (arg === "--backfill-file") parsed.backfillPath = rest[++i] ?? parsed.backfillPath;
     else if (arg === "--quantity") parsed.quantity = Math.max(1, parseInt(rest[++i] ?? "1", 10) || 1);
     else if (arg === "--max-price") parsed.maxPrice = rest[++i] ?? "current";
     else if (arg === "--grade") {
@@ -99,13 +103,19 @@ export function parseScanArgs(args: string[]): Args {
 
 function writeDashboard(parsed: Args): void {
   const { state } = loadState(parsed.statePath);
-  const rows = loadDashboardRows(state, loadHistory(parsed.historyPath), loadLedger(parsed.ledgerPath));
+  const rows = loadDashboardRows(
+    state,
+    loadHistory(parsed.historyPath),
+    loadLedger(parsed.ledgerPath),
+    undefined,
+    loadBackfill(parsed.backfillPath)
+  );
   if (rows.length === 0) {
     throw new Error(`No targets in ${parsed.statePath} — run --scan first.`);
   }
   const html = renderDashboard(rows, {
     generatedAt: new Date().toISOString(),
-    sources: [parsed.statePath, parsed.historyPath, parsed.ledgerPath],
+    sources: [parsed.statePath, parsed.historyPath, parsed.ledgerPath, parsed.backfillPath],
   });
   fs.writeFileSync(parsed.reportPath!, html);
   console.log(chalk.bold(`\nDashboard: ${parsed.reportPath} (${rows.length} target(s))`));

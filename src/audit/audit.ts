@@ -83,6 +83,7 @@ export interface AuditResult {
   mintScan: MintScan;
   recentWindowMinutes: number;
   sampleMinutes: number;
+  scanCoverage: number; // observed mints / total minted (1 when nothing minted)
   updates: (DropUpdate & { at: number | null })[];
   changes: ChangeSummary;
   apiStages: ApiStage[] | null;
@@ -280,6 +281,7 @@ export async function auditTarget(input: AuditInput, opts: AuditOptions = {}): P
       mintScan: EMPTY_SCAN,
       recentWindowMinutes: RECENT_WINDOW_MINUTES,
       sampleMinutes: 0,
+      scanCoverage: 0,
       updates: [],
       changes: summarizeChanges([]),
       apiStages: null,
@@ -449,6 +451,7 @@ export async function auditTarget(input: AuditInput, opts: AuditOptions = {}): P
     mintScan,
     recentWindowMinutes: RECENT_WINDOW_MINUTES,
     sampleMinutes,
+    scanCoverage: totalMinted > 0n ? Number((mintScan.totalTokens * 10_000n) / totalMinted) / 10_000 : 1,
     updates,
     changes,
     apiStages,
