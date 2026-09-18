@@ -27,6 +27,11 @@ export interface ContractEntry {
   pendingAudit: boolean; // was a candidate but beyond --limit; audited first next run
   lastMintedTotal: string | null; // totalMinted at the previous audit (velocity series)
   quietStreak: number; // consecutive audits with no new mints; slows re-audits down
+  slug: string | null; // OpenSea collection slug; resolves once and never changes
+  name: string | null; // token name()
+  endTime: number | null; // public drop end, unix seconds
+  maxSupply: string | null; // getMintStats max, as a string to stay JSON-safe
+  totalMinted: string | null; // cumulative minted at the last read
 }
 
 export interface ScanState {
@@ -97,6 +102,11 @@ export function recordContracts(
         pendingAudit: false,
         lastMintedTotal: null,
         quietStreak: 0,
+        slug: null,
+        name: null,
+        endTime: null,
+        maxSupply: null,
+        totalMinted: null,
       };
       added.push(key);
     } else {

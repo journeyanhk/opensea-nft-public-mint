@@ -23,6 +23,12 @@
 - 历史记录写入审计事实：名称/owner/价格/每钱包上限/结束时间/供应与已铸/15m 与 1h 铸造量/独立地址/集中度/阶段数（见 data.md）——面板据此展示需求信号
 - 发现结果先落盘再审计；审计失败只记录，下次扫描会自动重试（`eventSinceAudit` 仍为真）
 
+### 需求: 状态补齐（--refresh-targets）
+**模块:** scan
+- 对 `.scan-state.json` 中缺 slug/name/endTime/totalMinted 的合约做轻量刷新：`buildLocalMintPlan` + `getMintStats` +（有 key 时）OpenSea 反查 slug + `name()`
+- 幂等、可重复执行；`--limit` 控制单次数量，结束时报告 `remaining`；典型数百合约一两分钟跑完
+- 面板 phase 判定即依赖这些字段：`upcoming`（未开售）、`live-fresh`（开售 ≤24h）、`live`、`stale`、`sold-out`、`ended`、`unaudited`
+
 ### 需求: 状态与快照
 **模块:** scan
 - `.scan-state.json`（`version: 1`）：`chains[chain] = { cursorBlock, blockTimeSec, updatedAt }`；`contracts[chain][contract] = { firstSeenBlock, lastSeenBlock, lastAuditedBlock, lastAuditedAt, lastGrade, soldOutAtBlock, publicStart, pendingAudit }`

@@ -117,6 +117,7 @@ export function createServer(options: ServerOptions): http.Server {
           chains: scheduler.status.chains,
           cursors: scheduler.status.cursors,
           rowCount: scheduler.status.rowCount,
+          openseaKey: (process.env.OPENSEA_API_KEY || "").trim().length > 0 ? "set" : "unset",
           lastReports: scheduler.status.lastReports,
           backfill: scheduler.status.backfill,
           log: sanitizeLog(scheduler.status.log.slice(-20)),

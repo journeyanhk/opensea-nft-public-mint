@@ -23,6 +23,7 @@
 | 202609181530 | serve-m4a | 功能 | ✅已完成 | [链接](2026-09/202609181530_serve-m4a/) |
 | 202609181634 | m5a-panel-facts | 功能 | ✅已完成 | [链接](2026-09/202609181634_m5a-panel-facts/) |
 | 202609181730 | m5a-review-fixes | 修复 | ✅已完成 | [链接](2026-09/202609181730_m5a-review-fixes/) |
+| 202609181815 | m5a1-phase-slug | 修复 | ✅已完成 | [链接](2026-09/202609181815_m5a1-phase-slug/) |
 
 ---
 
@@ -45,3 +46,4 @@
 - [202609181530_serve-m4a](2026-09/202609181530_serve-m4a/) - M4a 数据侧服务化：`--serve` 常驻调度 + 公网看板、私钥 fail-closed、systemd/Caddy 部署文件
 - [202609181634_m5a-panel-facts](2026-09/202609181634_m5a-panel-facts/) - M5a 面板基础事实与需求信号：历史字段扩充、开售 72h 复审与速度序列、FREE/陈旧/链接列与预设筛选
 - [202609181730_m5a-review-fixes](2026-09/202609181730_m5a-review-fixes/) - review9 修复：表头 20 列对齐与排序键、复审让位于新发现并静默降频、slug 链接与价格未知提示
+- [202609181815_m5a1-phase-slug](2026-09/202609181815_m5a1-phase-slug/) - review10 修复：slug/名称持久化与 `--refresh-targets`、phase 生命周期与默认视图（upcoming + live-fresh）、结束超一周不再渲染

@@ -51,6 +51,9 @@
 - 看板：新增 `24h net / 72h net` 两列（读取 `.backfill.jsonl`，`--backfill-file` 可覆盖）、每 5 分钟自动刷新
 
 ### 修复
+- 面板链接指向 item 页：slug 此前只存在于审计历史（且升级前的行没有），无 slug 时兜底成 `opensea.io/assets/...`（会跳到 item）。现在 `ContractEntry` 持久化 `slug/name`（每个合约只解析一次），面板优先 `/collection/<slug>`，未解析时只给浏览器链接并标 `slug?`；新增 `--refresh-targets` 一次性补齐（幂等，可重复执行）
+- 已结束/长期开放项目混入面板：引入 **phase 模型**（`upcoming` / `live-fresh` / `live` / `stale` / `sold-out` / `ended` / `unaudited`），由合约状态与廉价的链上事实判定；面板默认只显示 upcoming + live-fresh，其余分阶段隐藏并计数，开售超过一周且已结束的行不再渲染（状态保留供创作者历史）；`live`（开售 >24h）与 `unaudited` 不再靠陈旧规则放行
+- 状态补充 `endTime/maxSupply/totalMinted`：候选过滤与审计都会顺手落盘，`--refresh-targets` 对历史遗留合约补齐；`/api/status` 增加 `openseaKey: set|unset` 便于排查 slug 为何为空
 - M5a 表头错位：`<thead>` 仍是旧的 13 列而每行渲染 19 个单元格（价格/上限/已铸/15m·1h/地址数/预售/速度/陈旧/链接无表头，left/projected 表头对应错位且排序键失效）。表头改为与行一一对应的 20 列，恢复 **left** 独立列，`data-sort` 全部改为行上真实存在的属性（`mintprice/mintedpct/remaining/velocity/stale/notes/net24usd/net72usd`），并新增「表头数 = 每行单元格数」的断言
 - M5a 复审挤占新发现：候选选择改为**新工作（积压 + 新发现）优先、复审填充余量**（此前复审排在前，开售 72h 内的目标会吃满 `--limit`）；开售 72h 内但连续两次审计无新增铸造的目标，复审间隔放宽到 2 小时（`quietStreak`，记录到状态文件）
 - M5a 链接与过滤：OpenSea 链接在已知 slug 时用 `/collection/<slug>`（slug 随历史记录保存），否则用可落地的 `/assets/<chain>/<contract>/1`；`free only` 过滤保留价格未知的行并提示 `N price unknown`，避免过渡期误判没有免费项目

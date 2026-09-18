@@ -288,6 +288,7 @@ export async function runScan(
         return;
       }
       entry.publicStart = plan.drop.startTime;
+      entry.endTime = plan.drop.endTime;
       const nowSec = Math.floor(nowMs / 1000);
       if (!isCandidateDrop(plan.drop, nowSec, opts.horizonHours)) {
         if (plan.drop.endTime <= nowSec) report.skipped.ended++;
@@ -297,6 +298,10 @@ export async function runScan(
       }
 
       const stats = await fetchMintStats(rpcUrl, contract, "0x0000000000000000000000000000000000000000");
+      if (stats) {
+        entry.maxSupply = stats.maxSupply > 0n ? stats.maxSupply.toString() : null;
+        entry.totalMinted = stats.totalMinted.toString();
+      }
       if (stats && stats.maxSupply > 0n && stats.totalMinted >= stats.maxSupply) {
         // Mark it processed up to the last event so it is not re-checked until
         // something actually happens again.
@@ -358,6 +363,11 @@ export async function runScan(
           entry.lastAuditedAt = new Date().toISOString();
           entry.lastGrade = result.grade.grade;
           entry.publicStart = result.publicDrop?.startTime ?? entry.publicStart;
+          entry.endTime = result.publicDrop?.endTime ?? entry.endTime;
+          entry.maxSupply = result.maxSupply?.toString() ?? entry.maxSupply;
+          entry.totalMinted = result.totalMinted.toString();
+          entry.slug = result.slug ?? entry.slug;
+          entry.name = result.name ?? entry.name;
           entry.pendingAudit = false;
           const mintedNow = result.totalMinted.toString();
           entry.quietStreak = entry.lastMintedTotal === mintedNow ? (entry.quietStreak ?? 0) + 1 : 0;

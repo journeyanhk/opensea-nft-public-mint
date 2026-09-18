@@ -240,7 +240,9 @@ test('new history facts surface as dashboard row fields and render', () => {
   assert.equal(row.velocitySource, 'differential');
   assert.equal(row.velocity24h, '1000');
   assert.equal(row.stale, false);
-  assert.equal(row.links.opensea, 'https://opensea.io/assets/arc/0xfeed/1');
+  // No slug yet: no fake item link, just the explorer link and a hint.
+  assert.equal(row.links.opensea, '');
+  assert.equal(row.phase, 'live-fresh');
   assert.ok(row.links.explorer.includes('/address/0xfeed'));
 
   const html = renderDashboard(rows, { generatedAt: 'now', sources: [] });
@@ -249,6 +251,8 @@ test('new history facts surface as dashboard row fields and render', () => {
   assert.ok(html.includes('data-stale="0"'));
   assert.ok(html.includes('id="presetFresh"'));
   assert.ok(html.includes('Feed Token'));
+  assert.ok(html.includes('slug?'));
+  assert.ok(html.includes('data-phase="live-fresh"'));
 });
 
 test('the table header and every row have the same number of columns', () => {
@@ -314,4 +318,58 @@ test('a known slug is preferred for the OpenSea link', () => {
   assert.equal(rows[0].links.opensea, 'https://opensea.io/collection/stock-salesman');
   const html = renderDashboard(rows, { generatedAt: 'now', sources: [] });
   assert.ok(html.includes('https://opensea.io/collection/stock-salesman'));
+});
+
+test('classifyPhase covers the whole lifecycle', () => {
+  const { classifyPhase } = require('../dist/scan/html');
+  const now = 1_000_000;
+  const base = { nowSec: now, startSec: now - 3600, endSec: now + 86_400, minted: 0n, maxSupply: 100n, stale: false, soldOut: false };
+  assert.equal(classifyPhase({ ...base, startSec: now + 3600 }), 'upcoming');
+  assert.equal(classifyPhase(base), 'live-fresh');
+  assert.equal(classifyPhase({ ...base, startSec: now - 25 * 3600 }), 'live');
+  assert.equal(classifyPhase({ ...base, startSec: now - 25 * 3600, stale: true }), 'stale');
+  assert.equal(classifyPhase({ ...base, minted: 100n }), 'sold-out');
+  assert.equal(classifyPhase({ ...base, soldOut: true }), 'sold-out');
+  assert.equal(classifyPhase({ ...base, endSec: now - 1 }), 'ended');
+  // Missing facts are never treated as healthy.
+  assert.equal(classifyPhase({ ...base, minted: null }), 'unaudited');
+  assert.equal(classifyPhase({ ...base, maxSupply: null }), 'unaudited');
+  assert.equal(classifyPhase({ ...base, startSec: null }), 'unaudited');
+});
+
+test('ended stages stop rendering after a week', () => {
+  const now = Math.floor(Date.now() / 1000);
+  const makeState = (endTime) => ({
+    version: 1,
+    chains: {},
+    contracts: {
+      arc: {
+        '0xold': {
+          firstSeenBlock: 1,
+          lastSeenBlock: 1,
+          lastAuditedBlock: 1,
+          lastAuditedAt: new Date().toISOString(),
+          lastGrade: 'A',
+          soldOutAtBlock: null,
+          publicStart: now - 40 * 86_400,
+          pendingAudit: false,
+          endTime,
+          maxSupply: '1000',
+          totalMinted: '10',
+        },
+      },
+    },
+  });
+  const recent = loadDashboardRows(makeState(now - 86_400), [], { version: 1, entries: {} }, () => null, []);
+  assert.equal(recent.length, 1);
+  assert.equal(recent[0].phase, 'ended');
+  const ancient = loadDashboardRows(makeState(now - 8 * 86_400), [], { version: 1, entries: {} }, () => null, []);
+  assert.equal(ancient.length, 0);
+});
+
+test('refresh bookkeeping picks entries that still need facts', () => {
+  const { needsRefresh } = require('../dist/scan/refresh');
+  assert.equal(needsRefresh({ slug: null, name: null, endTime: null, totalMinted: null }), true);
+  assert.equal(needsRefresh({ slug: 'x', name: 'X', endTime: 1, totalMinted: '0' }), false);
+  assert.equal(needsRefresh({ slug: 'x', name: 'X', endTime: 1, totalMinted: '0', maxSupply: null }), false);
 });

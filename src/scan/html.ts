@@ -94,6 +94,7 @@ export interface DashboardRow {
   velocitySource: "differential" | "bucket" | null;
   sellOutEtaHours: number | null;
   stale: boolean;
+  phase: Phase;
   links: { opensea: string; explorer: string };
 }
 
@@ -194,10 +195,13 @@ export function loadDashboardRows(
           }
         : null;
       const start = entry.publicStart ?? latest?.start ?? null;
+      const endTime = entry.endTime ?? latest?.endTime ?? null;
+      const slug = entry.slug ?? latest?.slug ?? null;
+      const name = entry.name ?? latest?.name ?? null;
       const topShare = cached?.mintScan.topMinterShare ?? null;
 
-      const minted = latest?.minted != null ? BigInt(latest.minted) : null;
-      const maxSupply = latest?.maxSupply != null ? BigInt(latest.maxSupply) : null;
+      const minted = entry.totalMinted != null ? BigInt(entry.totalMinted) : latest?.minted != null ? BigInt(latest.minted) : null;
+      const maxSupply = entry.maxSupply != null ? BigInt(entry.maxSupply) : latest?.maxSupply != null ? BigInt(latest.maxSupply) : null;
       const remainingNow = latest?.remaining != null ? BigInt(latest.remaining) : null;
       const fallbackPerHour =
         latest?.recent1h != null
@@ -214,6 +218,18 @@ export function loadDashboardRows(
         maxSupply,
         velocityPer24h: velocity.per24h,
       });
+      const phase = classifyPhase({
+        startSec: start,
+        endSec: endTime,
+        nowSec,
+        minted,
+        maxSupply,
+        stale,
+        soldOut: entry.soldOutAtBlock !== null,
+      });
+      // Keep the state for creator history, but stop rendering rows whose stage
+      // closed more than a week ago.
+      if (phase === 'ended' && endTime !== null && endTime + 7 * 86_400 < nowSec) continue;
       const explorer = resolveChain(chain)?.explorer ?? "";
 
       rows.push({
@@ -240,14 +256,14 @@ export function loadDashboardRows(
           pendingAudit: entry.pendingAudit,
           auditRisks: [...points].reverse().find((p) => p.risks && p.risks.length > 0)?.risks ?? [],
         }),
-        slug: latest?.slug ?? null,
-        name: latest?.name ?? null,
+        slug,
+        name,
         owner: latest?.owner ?? null,
         mintPriceWei: latest?.mintPriceWei ?? null,
         capPerWallet: latest?.capPerWallet ?? null,
-        endTime: latest?.endTime ?? null,
-        maxSupply: latest?.maxSupply ?? null,
-        minted: latest?.minted ?? null,
+        endTime,
+        maxSupply: maxSupply === null ? null : maxSupply.toString(),
+        minted: minted === null ? null : minted.toString(),
         recent15m: latest?.recent15m ?? null,
         recent1h: latest?.recent1h ?? null,
         uniqueMinters: latest?.uniqueMinters ?? null,
@@ -256,10 +272,9 @@ export function loadDashboardRows(
         velocitySource: velocity.source,
         sellOutEtaHours: sellOutEtaHours(remainingNow, velocity.per24h),
         stale,
+        phase,
         links: {
-          opensea: latest?.slug
-            ? `https://opensea.io/collection/${latest.slug}`
-            : `https://opensea.io/assets/${chain}/${contract}/1`,
+          opensea: slug ? `https://opensea.io/collection/${slug}` : "",
           explorer: explorer ? `${explorer}/address/${contract}` : "",
         },
       });
@@ -353,6 +368,29 @@ export function staleVerdict(input: {
   return (input.velocityPer24h ?? 0n) < quietFloor;
 }
 
+export type Phase = 'upcoming' | 'live-fresh' | 'live' | 'stale' | 'sold-out' | 'ended' | 'unaudited';
+
+// One definition of the target's lifecycle, shared by the table, the filters and
+// the default preset. Missing facts mean 'unaudited', never 'fine'.
+export function classifyPhase(input: {
+  startSec: number | null;
+  endSec: number | null;
+  nowSec: number;
+  minted: bigint | null;
+  maxSupply: bigint | null;
+  stale: boolean;
+  soldOut: boolean;
+}): Phase {
+  const { startSec, endSec, nowSec, minted, maxSupply, stale, soldOut } = input;
+  if (startSec === null || minted === null || maxSupply === null) return 'unaudited';
+  if (soldOut || (maxSupply > 0n && minted >= maxSupply)) return 'sold-out';
+  if (endSec !== null && endSec <= nowSec) return 'ended';
+  if (startSec > nowSec) return 'upcoming';
+  if (nowSec - startSec <= 24 * 3_600) return 'live-fresh';
+  if (stale) return 'stale';
+  return 'live';
+}
+
 export function sellOutEtaHours(remaining: bigint | null, velocityPer24h: bigint | null): number | null {
   if (remaining === null || velocityPer24h === null || velocityPer24h <= 0n || remaining < 0n) return null;
   const hours = Number((remaining * 24n) / velocityPer24h);
@@ -409,6 +447,7 @@ export function renderDashboard(rows: DashboardRow[], meta: DashboardMeta, opts:
         `data-net24usd="${escapeHtml(row.nets["24"] ?? "")}"`,
         `data-net72usd="${escapeHtml(row.nets["72"] ?? "")}"`,
         `data-stale="${row.stale ? "1" : "0"}"`,
+        `data-phase="${escapeHtml(row.phase)}"`,
         `data-free="${price === null ? "" : price === 0n ? "1" : "0"}"`,
         `data-name="${escapeHtml(row.name ?? "")}"`,
         `data-velocity="${escapeHtml(row.velocity24h ?? "")}"`,
@@ -419,14 +458,17 @@ export function renderDashboard(rows: DashboardRow[], meta: DashboardMeta, opts:
         `data-target="${escapeHtml(`${row.name ?? ""} ${row.contract} ${row.chain}`)}"`,
       ].join(" ");
       const links = [
-        row.links.opensea ? `<a href="${escapeHtml(row.links.opensea)}" target="_blank" rel="noreferrer">OS</a>` : "",
+        row.links.opensea
+          ? `<a href="${escapeHtml(row.links.opensea)}" target="_blank" rel="noreferrer">OS</a>`
+          : `<span class="small" title="run --refresh-targets to resolve the collection slug">slug?</span>`,
         row.links.explorer ? `<a href="${escapeHtml(row.links.explorer)}" target="_blank" rel="noreferrer">scan</a>` : "",
       ]
         .filter(Boolean)
         .join(" ");
       return `<tr ${data}>
   <td><input type="checkbox" class="pick" value="${escapeHtml(row.contract)}" data-chain="${escapeHtml(row.chain)}"></td>
-  <td><span class="grade g-${escapeHtml(row.grade ?? "?")}">${escapeHtml(row.grade ?? "?")}</span></td>
+  <td>${row.phase === "unaudited" ? `<span class="grade g-?">?</span>` : `<span class="grade g-${escapeHtml(row.grade ?? "?")}">${escapeHtml(row.grade ?? "?")}</span>`}</td>
+  <td>${escapeHtml(row.phase)}</td>
   <td>${escapeHtml(row.chain)}</td>
   <td>${escapeHtml(row.name ?? "")}<div class="mono small">${escapeHtml(row.contract)}</div></td>
   <td>${startSec === null ? "" : escapeHtml(startText)}<div class="small">${escapeHtml(window)}</div></td>
@@ -508,9 +550,21 @@ ${opts.serve ? `<div class="status" id="statusBar">
   <label><input type="checkbox" id="freeOnly"> free only</label>
   <label><input type="checkbox" id="onlyPending"> queued only</label>
   <label><input type="checkbox" id="onlyExecuted"> executed only</label>
-  <label><input type="checkbox" id="showStale"> show stale</label>
-  <button id="presetFresh">FREE · A/B · fresh</button>
-  <span id="staleCount" class="small"></span>
+  <label>phase
+    <select id="phaseFilter">
+      <option value="focus">upcoming + live-fresh</option>
+      <option value="">all</option>
+      <option value="upcoming">upcoming</option>
+      <option value="live-fresh">live-fresh</option>
+      <option value="live">live</option>
+      <option value="stale">stale</option>
+      <option value="sold-out">sold-out</option>
+      <option value="ended">ended</option>
+      <option value="unaudited">unaudited</option>
+    </select>
+  </label>
+  <button id="presetFresh">FREE · A/B · upcoming</button>
+  <span id="hiddenCount" class="small"></span>
   <span id="freeNote" class="small"></span>
   <label>search <input id="search" type="search" placeholder="contract / chain"></label>
   <span id="count"></span>
@@ -519,7 +573,7 @@ ${opts.serve ? `<div class="status" id="statusBar">
 <table id="table">
 <thead>
 <tr>
-  <th></th><th data-sort="grade">grade</th><th data-sort="chain">chain</th><th data-sort="target">name / contract</th>
+  <th></th><th data-sort="grade">grade</th><th data-sort="phase">phase</th><th data-sort="chain">chain</th><th data-sort="target">name / contract</th>
   <th data-sort="start">start (UTC+8) / window</th><th data-sort="mintprice">price</th><th>cap</th>
   <th data-sort="mintedpct">minted (%)</th><th data-sort="remaining">left</th><th data-sort="velocity">15m / 1h</th>
   <th>minters (top%)</th><th>pre</th><th data-sort="velocity">24h vel → eta</th><th data-sort="stale">stale</th><th>links</th>
@@ -555,10 +609,10 @@ ${rowHtml}
     var pending = document.getElementById("onlyPending").checked;
     var executed = document.getElementById("onlyExecuted").checked;
     var freeOnly = document.getElementById("freeOnly").checked;
-    var showStale = document.getElementById("showStale").checked;
+    var phaseFilter = document.getElementById("phaseFilter").value;
     var q = document.getElementById("search").value.toLowerCase();
     var visible = 0;
-    var staleHidden = 0;
+    var hiddenByPhase = {};
     rows.forEach(function (r) {
       var matches = (!grade || r.dataset.grade === grade || (grade === "AB" && (r.dataset.grade === "A" || r.dataset.grade === "B")))
         && (!chain || r.dataset.chain === chain)
@@ -566,14 +620,17 @@ ${rowHtml}
         && (!executed || r.dataset.executed === "1")
         && (!freeOnly || r.dataset.free === "1" || r.dataset.free === "")
         && (!q || r.dataset.target.toLowerCase().indexOf(q) >= 0);
-      var staleBlocked = matches && !showStale && r.dataset.stale === "1";
-      if (staleBlocked) staleHidden++;
-      var ok = matches && !staleBlocked;
+      var phase = r.dataset.phase;
+      var phaseOk = !phaseFilter
+        || (phaseFilter === "focus" ? (phase === "upcoming" || phase === "live-fresh") : phase === phaseFilter);
+      if (matches && !phaseOk) hiddenByPhase[phase] = (hiddenByPhase[phase] || 0) + 1;
+      var ok = matches && phaseOk;
       r.style.display = ok ? "" : "none";
       if (ok) visible++;
     });
     document.getElementById("count").textContent = visible + " shown";
-    document.getElementById("staleCount").textContent = staleHidden > 0 ? staleHidden + " stale hidden" : "";
+    var hiddenText = Object.keys(hiddenByPhase).map(function (p) { return hiddenByPhase[p] + " " + p; }).join(" · ");
+    document.getElementById("hiddenCount").textContent = hiddenText ? "hidden: " + hiddenText : "";
     var unknownPrice = freeOnly ? rows.filter(function (r) { return r.dataset.free === ""; }).length : 0;
     document.getElementById("freeNote").textContent = unknownPrice > 0 ? unknownPrice + " price unknown" : "";
     updateShortlist();
@@ -593,13 +650,13 @@ ${rowHtml}
     document.getElementById("commands").textContent = commands;
   }
 
-  ["gradeFilter", "chainFilter", "onlyPending", "onlyExecuted", "freeOnly", "showStale"].forEach(function (id) {
+  ["gradeFilter", "chainFilter", "onlyPending", "onlyExecuted", "freeOnly", "phaseFilter"].forEach(function (id) {
     document.getElementById(id).addEventListener("change", apply);
   });
   document.getElementById("presetFresh").addEventListener("click", function () {
     document.getElementById("gradeFilter").value = "AB";
     document.getElementById("freeOnly").checked = true;
-    document.getElementById("showStale").checked = false;
+    document.getElementById("phaseFilter").value = "focus";
     document.getElementById("onlyPending").checked = false;
     document.getElementById("onlyExecuted").checked = false;
     apply();

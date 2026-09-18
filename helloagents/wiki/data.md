@@ -132,5 +132,7 @@
 | contracts[chain][addr].publicStart | number \| null | 最近一次读到的公售开始时间（unix 秒） |
 | contracts[chain][addr].pendingAudit | boolean | 曾是候选但超出 `--limit`，下次运行优先审计 |
 | contracts[chain][addr].lastMintedTotal / quietStreak | string \| null / number | 上次审计的累计铸造量与连续「无新增」次数；≥2 时复审间隔放宽到 2 小时 |
+| contracts[chain][addr].slug / name | string \| null | OpenSea slug 与代币名称；slug 一经解析永久缓存（`--refresh-targets` 补齐） |
+| contracts[chain][addr].endTime / maxSupply / totalMinted | number \| null / string \| null | 公售结束时间、供应上限、最近一次读到的累计铸造（面板 phase 判定用） |
 
 `scan-history.jsonl` 每行：`{ at, chain, contract, grade, remaining, projected, start }`。

@@ -12,6 +12,7 @@ import { BatchRunOptions, runBatch } from "./batch-runner";
 import { runAuditCommand } from "./audit/cli";
 import { runScanCommand } from "./scan/cli";
 import { runBackfillCommand } from "./scan/backfill-cli";
+import { runRefreshCommand } from "./scan/refresh";
 import { assertNoPrivateKeys, serveConfig } from "./serve/config";
 import { runServe } from "./serve/server";
 
@@ -24,6 +25,7 @@ const KNOWN_FLAGS = new Set([
   "--scan", "--since-days", "--horizon-hours", "--limit", "--no-audit", "--include-mints",
   "--report", "--state", "--history", "--ledger", "--backfill-file",
   "--backfill", "--backfill-after",
+  "--refresh-targets",
   "--serve",
 ]);
 
@@ -49,6 +51,8 @@ Usage
                                   discover new drops on-chain, audit the candidates; incremental cursor in .scan-state.json
   npm start -- --backfill [--ledger <file>] [--backfill-after 24,72] [--backfill-file <file>]
                                   settle cost and floor-price checkpoints for minted targets; idempotent
+  npm start -- --refresh-targets [--limit N] [--chain <key>] [--state <file>]
+                                  resolve slugs/names and cheap chain facts for the state file (run until "all entries")
   npm start -- --serve            run the scanner/backfill scheduler and the dashboard over http (read-only)
                                   loads .env.serve (never .env) and refuses to start with private keys present
       --report <out.html>         also write a static dashboard from .scan-state.json, .scan-history.jsonl
@@ -116,6 +120,8 @@ async function main(): Promise<void> {
     const batchIndex = args.indexOf("--batch");
     if (args.includes("--audit")) {
       await runAuditCommand(args);
+    } else if (args.includes("--refresh-targets")) {
+      await runRefreshCommand(args);
     } else if (args.includes("--backfill")) {
       await runBackfillCommand(args);
     } else if (args.includes("--scan") || args.includes("--report")) {
