@@ -19,6 +19,22 @@ const row = (contract, chain = 'arc', grade = 'A') => ({
   topMinterShare: null,
   nets: {},
   notes: [],
+  name: null,
+  owner: null,
+  mintPriceWei: null,
+  capPerWallet: null,
+  endTime: null,
+  maxSupply: null,
+  minted: null,
+  recent15m: null,
+  recent1h: null,
+  uniqueMinters: null,
+  presaleStages: null,
+  velocity24h: null,
+  velocitySource: null,
+  sellOutEtaHours: null,
+  stale: false,
+  links: { opensea: "", explorer: "" },
 });
 
 function stubScheduler() {

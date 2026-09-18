@@ -7,6 +7,9 @@
 ## [Unreleased]
 
 ### 新增
+- M5a 面板基础事实与需求信号：审计记录写入名称/owner/价格/每钱包上限/结束时间/供应与已铸/15m 与 1h 铸造量/独立地址/集中度/阶段数；面板新增对应列、**FREE** 徽标、窗口倒计时、已铸进度、24h 速度（审计差分，不足回退 1h 估算并标注）与售罄预计、陈旧标记、OpenStreet 链接与预设按钮 `FREE · A/B · fresh`
+- 复审策略扩展：开售 72 小时内（含已开售）的目标每 30 分钟复审一次（`REAUDIT_OPENED_HOURS`），候选按"积压 > 最久未审的已开售 > 新发现"排序；`/api/rows` 支持 `?stale=0|1` 过滤
+- 陈旧判定（纯函数）：开售 >24h 且 已铸 <10% 且 24h 铸造 < max(5, 0.1%×supply)；面板默认隐藏并显示隐藏计数
 - M4a 数据侧服务化：`--serve` 常驻调度（启动即扫、按 `SCAN_INTERVAL_MIN` 定时、互斥 tick）+ 内置 `http` 看板（`/`、`/api/status`、`/api/rows`、`/api/scan`、`/healthz`），零新依赖
 - 私钥隔离（fail-closed）：`--serve` 只加载 `.env.serve` 并断言环境无 `PRIVATE_KEY(S)`，否则拒绝启动（此前入口会无条件加载 `.env`）
 - 公网安全：默认绑 `127.0.0.1`；POST 强制 JSON content-type + Origin 同源；`/api/status` 对 RPC URL 与绝对路径脱敏；`/api/scan` 5 秒节流

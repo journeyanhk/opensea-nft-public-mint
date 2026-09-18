@@ -37,7 +37,7 @@
 - `npm start -- --audit <link|slug|地址|@file>... [--chain <key>] [--wallets 0x..,0x..] [--lookback-days 7] [--quantity N] [--max-price <eth|current>] [--grade A,B] [--export <path>] [--json]`
 
 ## 数据模型
-- `AuditResult`: 链/合约/名称、公售参数、`totalMinted`/`maxSupply`、逐钱包已铸、`mintScan`（分阶段聚合）、`updates`+`changes`、`grade`（含 upper/projected 与 risks）、`social`/`apiStages`（可选）、`errors`
+- `AuditResult`: 链/合约/名称、**owner**、公售参数、`totalMinted`/`maxSupply`、逐钱包已铸、`mintScan`（分阶段聚合 + **recentByWindow** 15m/1h 日志分桶）、`updates`+`changes`、`grade`（含 upper/projected 与 risks）、`social`/`apiStages`（可选）、`errors`
 - `StageMint`: `{ stage, txs, tokens, uniqueMinters, topMinterTokens, firstBlock, lastBlock, price }`
 - 缓存: `{ scannedToBlock, scannedAt, data: { mintScan, updates } }`（`.audit-cache/`，已 gitignore）
 

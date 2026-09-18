@@ -44,7 +44,7 @@ test('aggregates mints per stage with unique minters and top share', () => {
     log(A, W2, FEE, W2, 2, 0, 1000, 0, 101),
     log(A, W1, FEE, W1, 1, 10n ** 16n, 1000, 1, 105),
   ];
-  const scan = aggregateMints(logs, 102);
+  const scan = aggregateMints(logs, 102, [{ label: "1h", fromBlock: 100 }]);
   assert.equal(scan.totalTxs, 3);
   assert.equal(scan.totalTokens, 5n);
   assert.equal(scan.uniqueMinters, 2);
@@ -52,6 +52,7 @@ test('aggregates mints per stage with unique minters and top share', () => {
   assert.equal(scan.firstBlock, 100);
   assert.equal(scan.lastBlock, 105);
   assert.equal(scan.recentTokens, 1n);
+  assert.deepEqual(scan.recentByWindow, { "15m": 1n, "1h": 5n });
   assert.deepEqual(scan.stages.map(s => [s.stage, s.tokens, s.uniqueMinters]), [[0, 4n, 2], [1, 1n, 1]]);
 });
 

@@ -10,7 +10,7 @@ const {
   recordContracts,
   advanceCursor,
 } = require('../dist/scan/state');
-const { isCandidateDrop, shouldAudit, discoveryTopics, CONFIRMATIONS, selectAuditBatch } = require('../dist/scan/scanner');
+const { isCandidateDrop, shouldAudit, discoveryTopics, CONFIRMATIONS, selectAuditBatch, REAUDIT_OPENED_HOURS } = require('../dist/scan/scanner');
 const { PUBLIC_DROP_UPDATED_TOPIC, SEADROP_MINT_TOPIC } = require('../dist/audit/events');
 
 const A = '0xaaa0000000000000000000000000000000000001';
@@ -228,6 +228,16 @@ test('range errors are not retried', async () => {
   } finally {
     globalThis.fetch = realFetch;
   }
+});
+
+test('opened targets are re-audited on the 30-minute cadence for 72 hours', () => {
+  const now = 1_000_000_000_000;
+  const base = { nowMs: now, horizonMs: 72 * 3600_000, eventSinceAudit: false };
+  const opened = now - 2 * 3600_000;
+  assert.equal(shouldAudit({ ...base, entry: entry({ lastAuditedAt: new Date(now - 10 * 60_000).toISOString() }), startAtMs: opened }), false);
+  assert.equal(shouldAudit({ ...base, entry: entry({ lastAuditedAt: new Date(now - 45 * 60_000).toISOString() }), startAtMs: opened }), true);
+  const longOpened = now - (REAUDIT_OPENED_HOURS + 1) * 3600_000;
+  assert.equal(shouldAudit({ ...base, entry: entry({ lastAuditedAt: new Date(now - 45 * 60_000).toISOString() }), startAtMs: longOpened }), false);
 });
 
 test('pending candidates are audited before fresh discoveries', () => {

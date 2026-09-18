@@ -121,3 +121,132 @@ test('backfill records surface as net columns', () => {
   assert.ok(html.includes('data-net24="$0.0500"'));
   assert.ok(html.includes('24h net'));
 });
+
+const {
+  velocityPer24h,
+  staleVerdict,
+  sellOutEtaHours,
+} = require('../dist/scan/html');
+
+test('24h velocity uses the audit differential when the series is long enough', () => {
+  const now = Date.parse('2026-09-18T12:00:00.000Z');
+  const points = [
+    { at: '2026-09-17T12:00:00.000Z', minted: '100' },
+    { at: '2026-09-18T12:00:00.000Z', minted: '500' },
+  ];
+  assert.deepEqual(velocityPer24h(points, null), { per24h: 400n, source: 'differential' });
+
+  // Too short a series falls back to the 1h bucket, labelled as an estimate.
+  const short = [
+    { at: '2026-09-18T10:00:00.000Z', minted: '100' },
+    { at: '2026-09-18T12:00:00.000Z', minted: '500' },
+  ];
+  assert.deepEqual(velocityPer24h(short, 10n), { per24h: 240n, source: 'bucket' });
+  assert.deepEqual(velocityPer24h([], null), { per24h: null, source: null });
+  // A mint-count going backwards is not a velocity.
+  const backwards = [
+    { at: '2026-09-17T12:00:00.000Z', minted: '500' },
+    { at: '2026-09-18T12:00:00.000Z', minted: '100' },
+  ];
+  assert.deepEqual(velocityPer24h(backwards, 1n), { per24h: 24n, source: 'bucket' });
+});
+
+test('stale verdict catches opened-but-dead targets only', () => {
+  const now = 1_000_000_000;
+  const base = { nowSec: now, maxSupply: 10_000n, velocityPer24h: 0n };
+  assert.equal(staleVerdict({ ...base, startSec: now - 25 * 3600, minted: 500n }), true);
+  assert.equal(staleVerdict({ ...base, startSec: now - 25 * 3600, minted: 2_000n }), false);
+  assert.equal(staleVerdict({ ...base, startSec: now - 3600, minted: 100n }), false);
+  assert.equal(staleVerdict({ ...base, startSec: now - 25 * 3600, minted: 100n, velocityPer24h: 100n }), false);
+  assert.equal(staleVerdict({ ...base, startSec: null, minted: 100n }), false);
+  assert.equal(staleVerdict({ ...base, startSec: now - 25 * 3600, minted: null }), false);
+});
+
+test('sell-out ETA needs a positive velocity', () => {
+  assert.equal(sellOutEtaHours(240n, 240n), 24);
+  assert.equal(sellOutEtaHours(240n, 0n), null);
+  assert.equal(sellOutEtaHours(null, 240n), null);
+  assert.equal(sellOutEtaHours(100n, 10_000n), 0);
+});
+
+test('new history facts surface as dashboard row fields and render', () => {
+  const nowSec = Math.floor(Date.now() / 1000);
+  const richState = {
+    version: 1,
+    chains: {},
+    contracts: {
+      arc: {
+        '0xfeed': {
+          firstSeenBlock: 1,
+          lastSeenBlock: 10,
+          lastAuditedBlock: 10,
+          lastAuditedAt: new Date().toISOString(),
+          lastGrade: 'A',
+          soldOutAtBlock: null,
+          publicStart: nowSec - 7200,
+          pendingAudit: false,
+        },
+      },
+    },
+  };
+  const richHistory = [
+    {
+      at: new Date((nowSec - 24 * 3600) * 1000).toISOString(),
+      chain: 'arc',
+      contract: '0xfeed',
+      grade: 'B',
+      remaining: '9000',
+      projected: '8000',
+      start: nowSec - 7200,
+      totalMinted: '1000',
+      maxSupply: '10000',
+      mintPriceWei: '0',
+      capPerWallet: 2,
+      endTime: nowSec + 86_400,
+      name: 'Feed Token',
+      owner: '0xowner',
+      recent15m: '5',
+      recent1h: '20',
+      uniqueMinters: 42,
+      presaleStages: 1,
+    },
+    {
+      at: new Date().toISOString(),
+      chain: 'arc',
+      contract: '0xfeed',
+      grade: 'A',
+      remaining: '8000',
+      projected: '7000',
+      start: nowSec - 7200,
+      totalMinted: '2000',
+      maxSupply: '10000',
+      mintPriceWei: '0',
+      capPerWallet: 2,
+      endTime: nowSec + 86_400,
+      name: 'Feed Token',
+      owner: '0xowner',
+      recent15m: '10',
+      recent1h: '40',
+      uniqueMinters: 60,
+      presaleStages: 1,
+    },
+  ];
+  const rows = loadDashboardRows(richState, richHistory, { version: 1, entries: {} }, () => null, []);
+  const row = rows[0];
+  assert.equal(row.name, 'Feed Token');
+  assert.equal(row.mintPriceWei, '0');
+  assert.equal(row.capPerWallet, 2);
+  assert.equal(row.minted, '2000');
+  assert.equal(row.velocitySource, 'differential');
+  assert.equal(row.velocity24h, '1000');
+  assert.equal(row.stale, false);
+  assert.equal(row.links.opensea, 'https://opensea.io/assets/arc/0xfeed');
+  assert.ok(row.links.explorer.includes('/address/0xfeed'));
+
+  const html = renderDashboard(rows, { generatedAt: 'now', sources: [] });
+  assert.ok(html.includes('>FREE<'));
+  assert.ok(html.includes('data-free="1"'));
+  assert.ok(html.includes('data-stale="0"'));
+  assert.ok(html.includes('id="presetFresh"'));
+  assert.ok(html.includes('Feed Token'));
+});

@@ -126,8 +126,12 @@ export function createServer(options: ServerOptions): http.Server {
       if (req.method === "GET" && url.pathname === "/api/rows") {
         const chain = url.searchParams.get("chain");
         const grade = url.searchParams.get("grade");
+        const stale = url.searchParams.get("stale"); // "0" hides, "1" shows only stale
         const rows = scheduler.rows.filter(
-          (row) => (!chain || row.chain === chain) && (!grade || row.grade === grade)
+          (row) =>
+            (!chain || row.chain === chain) &&
+            (!grade || row.grade === grade) &&
+            (stale === null || (stale === "0" ? !row.stale : row.stale))
         );
         return sendJson(res, 200, rows);
       }

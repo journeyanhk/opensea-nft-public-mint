@@ -33,6 +33,9 @@ import {
 export const DEFAULT_SCAN_CHAINS = ["robinhood", "arc"];
 export const CONFIRMATIONS = 64;
 const REAUDIT_MS = 30 * 60_000;
+// Opened targets keep being re-audited for this long so the dashboard gets a
+// minted-over-time series (24h velocity, sell-out ETA).
+export const REAUDIT_OPENED_HOURS = 72;
 const CANDIDATE_CONCURRENCY = 3;
 const RECENT_WINDOW_MINUTES = 15;
 
@@ -77,8 +80,13 @@ export function shouldAudit(input: ShouldAuditInput): boolean {
   if (entry.soldOutAtBlock !== null && !eventSinceAudit) return false;
   if (eventSinceAudit) return true;
   if (entry.lastAuditedAt === null) return true;
+
+  const sinceAuditMs = nowMs - Date.parse(entry.lastAuditedAt);
+  if (startAtMs !== null && startAtMs <= nowMs && nowMs - startAtMs <= REAUDIT_OPENED_HOURS * 3_600_000) {
+    return sinceAuditMs > reauditMs;
+  }
   if (startAtMs !== null && startAtMs > nowMs && startAtMs - nowMs <= horizonMs) {
-    return nowMs - Date.parse(entry.lastAuditedAt) > reauditMs;
+    return sinceAuditMs > reauditMs;
   }
   return false;
 }
@@ -250,6 +258,7 @@ export async function runScan(
     const pendingSet = new Set(pendingSeeds);
 
     const pendingCandidates: string[] = [];
+    const reauditCandidates: { contract: string; lastAuditedAt: string | null }[] = [];
     const freshCandidates: string[] = [];
     await pool([...pendingSeeds, ...freshSeeds], CANDIDATE_CONCURRENCY, async (contract) => {
       const entry = state.contracts[chainKey][contract];
@@ -289,10 +298,21 @@ export async function runScan(
         report.skipped.known++;
         return;
       }
-      (pendingSet.has(contract) ? pendingCandidates : freshCandidates).push(contract);
+      const openedAtMs = plan.drop.startTime * 1000;
+      const openedRecently = openedAtMs <= nowMs && nowMs - openedAtMs <= REAUDIT_OPENED_HOURS * 3_600_000;
+      if (pendingSet.has(contract)) pendingCandidates.push(contract);
+      else if (openedRecently) reauditCandidates.push({ contract, lastAuditedAt: entry.lastAuditedAt });
+      else freshCandidates.push(contract);
     });
 
-    const { audit: toAudit, overflow } = selectAuditBatch(pendingCandidates, freshCandidates, opts.limit);
+    // Least recently audited opened targets first, so the velocity series stays
+    // as continuous as --limit allows.
+    reauditCandidates.sort((a, b) => String(a.lastAuditedAt).localeCompare(String(b.lastAuditedAt)));
+    const { audit: toAudit, overflow } = selectAuditBatch(
+      pendingCandidates,
+      [...reauditCandidates.map((c) => c.contract), ...freshCandidates],
+      opts.limit
+    );
     report.candidates = toAudit;
     report.skipped.limited = overflow.length;
     if (opts.audit) {
@@ -336,6 +356,21 @@ export async function runScan(
                   )
                 ),
                 start: result.publicDrop?.startTime ?? null,
+                // Facts below are already read by the auditor; persisting them is
+                // what lets the dashboard show "worth it" instead of just "in stock".
+                name: result.name,
+                owner: result.owner,
+                mintPriceWei: result.publicDrop?.mintPrice?.toString() ?? null,
+                capPerWallet: result.publicDrop?.maxTotalMintableByWallet ?? null,
+                endTime: result.publicDrop?.endTime ?? null,
+                maxSupply: result.maxSupply?.toString() ?? null,
+                totalMinted: result.totalMinted.toString(),
+                recent15m: (result.mintScan.recentByWindow["15m"] ?? result.mintScan.recentTokens).toString(),
+                recent1h: result.mintScan.recentByWindow["1h"]?.toString() ?? null,
+                uniqueMinters: result.mintScan.uniqueMinters,
+                topMinterShare: result.mintScan.topMinterShare,
+                stageCount: result.mintScan.stages.length,
+                presaleStages: result.mintScan.stages.filter((stage) => stage.stage !== 0).length,
               },
             ],
             historyPath

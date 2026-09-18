@@ -71,6 +71,7 @@ export interface AuditResult {
   contract: string;
   slug: string | null;
   name: string | null;
+  owner: string | null;
   applicable: boolean;
   notApplicableReason?: string;
   publicDrop: PublicDrop | null;
@@ -101,6 +102,7 @@ const EMPTY_SCAN: MintScan = {
   firstBlock: null,
   lastBlock: null,
   recentTokens: 0n,
+  recentByWindow: {},
 };
 
 function apiKey(): string | null {
@@ -138,6 +140,7 @@ function serializeScan(scan: MintScan): unknown {
     ...scan,
     totalTokens: scan.totalTokens.toString(),
     recentTokens: scan.recentTokens.toString(),
+    recentByWindow: Object.fromEntries(Object.entries(scan.recentByWindow ?? {}).map(([label, value]) => [label, value.toString()])),
     stages: scan.stages.map((s) => ({
       ...s,
       tokens: s.tokens.toString(),
@@ -152,6 +155,9 @@ function deserializeScan(raw: any): MintScan {
     ...raw,
     totalTokens: BigInt(raw.totalTokens ?? 0),
     recentTokens: BigInt(raw.recentTokens ?? 0),
+    recentByWindow: Object.fromEntries(
+      Object.entries(raw.recentByWindow ?? {}).map(([label, value]) => [label, BigInt(String(value))])
+    ),
     stages: (raw.stages ?? []).map((s: any) => ({
       ...s,
       tokens: BigInt(s.tokens ?? 0),
@@ -253,13 +259,17 @@ export async function auditTarget(input: AuditInput, opts: AuditOptions = {}): P
     seadrop.getSigners(contract).catch(() => null),
     seadrop.getAllowedFeeRecipients(contract).catch(() => null),
   ]);
-  if (name === null) {
-    try {
-      const token = new Contract(getAddress(contract.toLowerCase()), ["function name() view returns (string)"], provider);
-      name = (await token.name()) as string;
-    } catch {
-      // name is cosmetic
-    }
+  let owner: string | null = null;
+  try {
+    const token = new Contract(
+      getAddress(contract.toLowerCase()),
+      ["function name() view returns (string)", "function owner() view returns (address)"],
+      provider
+    );
+    if (name === null) name = ((await token.name().catch(() => null)) as string | null) ?? null;
+    owner = ((await token.owner().catch(() => null)) as string | null) ?? null;
+  } catch {
+    // name and owner are best-effort
   }
 
   if (!plan) {
@@ -269,6 +279,7 @@ export async function auditTarget(input: AuditInput, opts: AuditOptions = {}): P
       contract,
       slug,
       name,
+      owner: null,
       applicable: false,
       notApplicableReason: "no SeaDrop 1.0 public drop found (not SeaDrop, or a newer variant)",
       publicDrop: null,
@@ -308,6 +319,10 @@ export async function auditTarget(input: AuditInput, opts: AuditOptions = {}): P
   const fromBlock = Math.max(0, latestBlock - lookbackBlocks);
   const recentFromBlock = Math.max(fromBlock, latestBlock - Math.ceil((RECENT_WINDOW_MINUTES * 60) / secondsPerBlock));
   const paddedContract = "0x" + "0".repeat(24) + contract.slice(2).toLowerCase();
+  const blockBefore = (minutes: number): number =>
+    Math.max(fromBlock, latestBlock - Math.ceil((minutes * 60) / secondsPerBlock));
+  const recent15mFrom = Math.max(fromBlock, recentFromBlock);
+  const recent1hFrom = blockBefore(60);
 
   const cacheDir = opts.cacheDir ?? DEFAULT_CACHE_DIR;
   const cacheTtlMs = opts.cacheTtlMs ?? CACHE_TTL_MS;
@@ -334,7 +349,7 @@ export async function auditTarget(input: AuditInput, opts: AuditOptions = {}): P
         onProgress: progress,
       }),
     ]);
-    mintScan = aggregateMints(mintLogs, recentFromBlock);
+    mintScan = aggregateMints(mintLogs, recent15mFrom, [{ label: "1h", fromBlock: recent1hFrom }]);
     const decoded = decodeDropUpdates(updateLogs);
     const times = await fetchBlockTimestamps(rpcUrl, decoded.map((u) => u.block));
     updates = decoded.map((u) => ({ ...u, at: times.get(u.block) ?? null }));
@@ -440,6 +455,7 @@ export async function auditTarget(input: AuditInput, opts: AuditOptions = {}): P
     contract,
     slug,
     name,
+    owner,
     applicable: true,
     publicDrop: plan.drop,
     feeRecipient: plan.feeRecipient,

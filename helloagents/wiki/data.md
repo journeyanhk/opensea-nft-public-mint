@@ -105,6 +105,20 @@
 | lowAtomic / salesCount / uniqueBuyers | string \| null / number \| null | 近 24h 链上最低成交价、笔数与独立买家数 |
 | txHash | string \| null | 对应 mint 交易 |
 
+## 审计历史记录（.scan-history.jsonl）字段
+
+| 字段 | 说明 |
+|------|------|
+| at / chain / contract / grade / risks / reason / coverage | 审计时间、目标、等级、风险标签与原因、扫描覆盖率 |
+| remaining / projected / start | 当前剩余、预计余量、公售开始时间 |
+| name / owner | 代币名称与 owner()（失败为 null） |
+| mintPriceWei / capPerWallet / endTime | 单价（0=FREE）、每钱包上限（0=不限）、结束时间 |
+| maxSupply / totalMinted | 供应上限与审计当刻累计铸造（构成速度差分序列） |
+| recent15m / recent1h | 日志分桶的 15 分钟与 1 小时铸造量 |
+| uniqueMinters / topMinterShare / stageCount / presaleStages | 独立铸造地址、最大地址占比、阶段数与预售阶段数（stage != 0） |
+
+> 24h 速度由相邻历史点的差分计算（不足 6 小时回退 1h×24 并在面板标注 bucket）；开售 72h 内的目标每 30 分钟复审以维持序列。
+
 ## 发现器状态（.scan-state.json / .scan-history.jsonl，均 gitignore）
 
 | 字段 | 类型 | 说明 |

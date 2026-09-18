@@ -21,6 +21,7 @@
 | 202609171655 | m3-pipeline | 功能 | ✅已完成 | [链接](2026-09/202609171655_m3-pipeline/) |
 | 202609181443 | m3c-seaport-fix | 修复 | ✅已完成 | [链接](2026-09/202609181443_m3c-seaport-fix/) |
 | 202609181530 | serve-m4a | 功能 | ✅已完成 | [链接](2026-09/202609181530_serve-m4a/) |
+| 202609181634 | m5a-panel-facts | 功能 | ✅已完成 | [链接](2026-09/202609181634_m5a-panel-facts/) |
 
 ---
 
@@ -41,3 +42,4 @@
 - [202609171655_m3-pipeline](2026-09/202609171655_m3-pipeline/) - M3：队列热加载 `--watch` + 执行账本、静态看板 `--report`、回填 `--backfill`（链上成本 + 地板价）
 - [202609181443_m3c-seaport-fix](2026-09/202609181443_m3c-seaport-fix/) - review8 修复：Seaport 1.6 五字段 OrderFulfilled 成交地板价、ERC-20 精度按 decimals 解析、净值统一 USD
 - [202609181530_serve-m4a](2026-09/202609181530_serve-m4a/) - M4a 数据侧服务化：`--serve` 常驻调度 + 公网看板、私钥 fail-closed、systemd/Caddy 部署文件
+- [202609181634_m5a-panel-facts](2026-09/202609181634_m5a-panel-facts/) - M5a 面板基础事实与需求信号：历史字段扩充、开售 72h 复审与速度序列、FREE/陈旧/链接列与预设筛选

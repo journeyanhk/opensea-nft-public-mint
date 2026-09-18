@@ -256,7 +256,8 @@ export interface MintScan {
   topMinterShare: number; // 0..1
   firstBlock: number | null;
   lastBlock: number | null;
-  recentTokens: bigint; // tokens minted in blocks >= recentFromBlock
+  recentTokens: bigint; // tokens minted in blocks >= recentFromBlock (the 15m window)
+  recentByWindow: Record<string, bigint>; // labelled windows, e.g. { "15m": …, "1h": … }
 }
 
 export interface DecodedMint {
@@ -291,10 +292,16 @@ export function decodeMintLog(log: RawLog): DecodedMint | null {
   }
 }
 
-export function aggregateMints(logs: RawLog[], recentFromBlock: number): MintScan {
+export function aggregateMints(
+  logs: RawLog[],
+  recentFromBlock: number,
+  extraCutoffs: { label: string; fromBlock: number }[] = []
+): MintScan {
   const stages = new Map<number, StageMint>();
   const stageMinters = new Map<number, Map<string, bigint>>();
   const globalMinters = new Map<string, bigint>();
+  const recentByWindow: Record<string, bigint> = { "15m": 0n };
+  for (const cutoff of extraCutoffs) recentByWindow[cutoff.label] = 0n;
   let totalTxs = 0;
   let totalTokens = 0n;
   let recentTokens = 0n;
@@ -308,6 +315,9 @@ export function aggregateMints(logs: RawLog[], recentFromBlock: number): MintSca
     totalTxs++;
     totalTokens += mint.quantity;
     if (mint.block >= recentFromBlock) recentTokens += mint.quantity;
+    for (const cutoff of extraCutoffs) {
+      if (mint.block >= cutoff.fromBlock) recentByWindow[cutoff.label] += mint.quantity;
+    }
     firstBlock = firstBlock === null ? mint.block : Math.min(firstBlock, mint.block);
     lastBlock = lastBlock === null ? mint.block : Math.max(lastBlock, mint.block);
 
@@ -341,6 +351,7 @@ export function aggregateMints(logs: RawLog[], recentFromBlock: number): MintSca
   }
 
   const topTokens = [...globalMinters.values()].reduce((max, v) => (v > max ? v : max), 0n);
+  recentByWindow["15m"] = recentTokens;
   return {
     stages: [...stages.values()].sort((a, b) => a.stage - b.stage),
     totalTxs,
@@ -350,6 +361,7 @@ export function aggregateMints(logs: RawLog[], recentFromBlock: number): MintSca
     firstBlock,
     lastBlock,
     recentTokens,
+    recentByWindow,
   };
 }
 
