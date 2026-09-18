@@ -8,7 +8,7 @@ import fs from "fs";
 import { resolveChain } from "../chains";
 import { CachedScan, readCachedScan } from "../audit/audit";
 import { Ledger, entryOf } from "../batch-ledger";
-import { BackfillRecord, formatNet } from "./backfill";
+import { BackfillRecord, formatNetUsd } from "./backfill";
 import { ScanState } from "./state";
 import { toUtc8Time } from "../time-format";
 
@@ -99,7 +99,7 @@ export function loadDashboardRows(
   for (const record of backfills) {
     const key = `${record.chain}|${record.contract.toLowerCase()}`;
     const nets = netsByTarget.get(key) ?? {};
-    const net = formatNet(record);
+    const net = formatNetUsd(record);
     if (net !== null) nets[String(record.checkpointHours)] = net;
     netsByTarget.set(key, nets);
   }

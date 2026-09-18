@@ -111,13 +111,13 @@ test('escapes every dynamic field in the rendered HTML', () => {
 
 test('backfill records surface as net columns', () => {
   const backfills = [
-    { chain: 'arc', contract: '0xABC', checkpointHours: 24, netWei: (5n * 10n ** 16n).toString() },
-    { chain: 'arc', contract: '0xabc', checkpointHours: 72, netWei: (2n * 10n ** 16n).toString() },
-    { chain: 'arc', contract: '0xabc', checkpointHours: 168, netWei: (1n * 10n ** 16n).toString() },
+    { chain: 'arc', contract: '0xABC', checkpointHours: 24, netUsd: 0.05 },
+    { chain: 'arc', contract: '0xabc', checkpointHours: 72, netUsd: 0.02 },
+    { chain: 'arc', contract: '0xabc', checkpointHours: 168, netUsd: 0.01 },
   ];
   const rows = loadDashboardRows(state, history, ledger, () => cached, backfills);
-  assert.deepEqual(rows[0].nets, { '24': '0.05', '72': '0.02', '168': '0.01' });
+  assert.deepEqual(rows[0].nets, { '24': '$0.0500', '72': '$0.0200', '168': '$0.0100' });
   const html = renderDashboard(rows, { generatedAt: 'now', sources: [] });
-  assert.ok(html.includes('data-net24="0.05"'));
+  assert.ok(html.includes('data-net24="$0.0500"'));
   assert.ok(html.includes('24h net'));
 });

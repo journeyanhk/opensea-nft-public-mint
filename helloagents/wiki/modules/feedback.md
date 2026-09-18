@@ -11,9 +11,12 @@ mint 后反馈闭环：对账本中成功 mint 的目标，在 +24h / +72h 结�
 ## 规范
 ### 需求: 地板价回填
 **模块:** feedback
-- 数据源选择：**链上只提供成本**；Robinhood 与 Arc **没有二级市场可读**——实测 Seaport 1.6（`0x0000000000000068F116a894984e2DB1123eB395`）在 Robinhood 7 天（600 万块）与 Arc 1 天（17 万块）内 **0 条 `OrderFulfilled`**，因此地板价只能来自 OpenSea stats
+- 数据源：**Seaport 1.6 成交为主**（无需 key），OpenSea stats 为辅。注意 Seaport 1.6 的 `OrderFulfilled` consideration 是 **5 字段**（多了 `recipient`），topic0 = `0x9d9af8e3…f31`；用 1.1–1.5 的 4 字段签名会**永远匹配 0 条**（本模块曾因此误判"链上无二级市场"）。NFT 合约不在 topics 里（topic1=offerer），必须解码 offer 过滤
+- 成交价按 consideration itemType 0/1（原生/ERC-20）**分币种求和**，取最近 N 笔（默认 50）中主导币种的最低/中位价；扫描失败**必须显式报错**，不得当作"无成交"
 - 成本 = `tx.value + gasUsed × effectiveGasPrice`（从回执取；缺 `effectiveGasPrice` 时回退 `tx.gasPrice`）
-- 地板价：`OPENSEA_API_KEY` 存在时读 `collections/{slug}/stats`（`total.floor_price` 与 `intervals[one_day]`），账本已存 slug 则免去反查；无 key / 401 / 429 只降级（`floorPriceWei = null`），不报错
+- 币种与精度：成交币可能是原生币或 ERC-20（Robinhood 上实测 USDG 6 位、WETH 18 位）。ERC-20 的 `decimals()/symbol()` 走链上 `eth_call`；价格一律按各自 `decimals` 用 `parseUnits` 解析，**不假设 18 位**
+- USD 换算：`collections/{slug}`（无 key）的 `pricing_currencies` 给出 `decimals`/`usd_price`/`eth_price`；ETH/USD 由任一侧推导（`usd_price / eth_price`，如 USDG 的 0.999874/0.0004027 ≈ 2483）。无 pricing（地址且无 key）时只记原子价与币种，`netUsd = null`
+- 净值 = `floorUsd × quantity − costUsd`；**只有两边都换算成 USD 才计算**（USDG 地板价减 ETH 成本是无意义的）
 - 记录字段：`{ at, chain, contract, slug, checkpointHours, mintAt, quantity, mintValueWei, gasCostWei, costWei, floorPriceWei, floorSymbol, volume24hWei, sales24h, netWei, txHash }`
 - 净值 = `floorPriceWei × quantity − costWei`（两者都有才算）
 - 幂等：同一 `(chain, contract, checkpointHours)` 已记录则跳过；成本与地板价都取不到时不写记录，下次重试

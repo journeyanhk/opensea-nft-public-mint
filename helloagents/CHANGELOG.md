@@ -44,6 +44,8 @@
 - 看板：新增 `24h net / 72h net` 两列（读取 `.backfill.jsonl`，`--backfill-file` 可覆盖）、每 5 分钟自动刷新
 
 ### 修复
+- M3c 主数据源修正：Seaport 1.6 的 `OrderFulfilled` consideration 为 **5 字段**（多 `recipient`），此前用 4 字段签名导致扫描恒为 0 条，并据此误判"Robinhood/Arc 没有二级市场"。现以**链上成交为主数据源**（实测 HoodMiners 24h 46 笔、Stock Salesman 25 笔、Catonchain 以 USDG 计价），OpenSea stats 降为补充；扫描失败显式报错、不再静默为空
+- M3c 币种修正：ERC-20 计价按链上 `decimals()` 用 `parseUnits` 解析（USDG 为 6 位），不再假设 18；净值统一换算 USD（`collections` 无 key 提供 `usd_price/eth_price`，ETH/USD 由任一侧推导），无法换算时 `netUsd = null` 而不是混币种相减；看板净值列显示 USD
 - 看板风险标注改为**直接读取最近一次审计的 `risks`**（审计结果现写入 `.scan-history.jsonl`，含 `risks`/`reason`/`coverage`），删除看板内重复推导：与 `--audit` 输出单一来源，局部扫描不会再误标 "top minter 80%"
 - 看板短名单命令改为**内联地址**（`--audit 0x… 0x… --chain X`），不再引用不存在的 `@shortlist.<chain>.txt`
 - M3a 启动条件：watch 文件缺失不再致命（视为空配置并提示 waiting），watch 模式允许空队列启动——修好"批量先于扫描器启动"这个核心场景

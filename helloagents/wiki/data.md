@@ -99,9 +99,10 @@
 | checkpointHours | number | 24 / 72（可按 `--backfill-after` 自定义） |
 | mintAt / at | string | mint 时间 / 回填时间（ISO） |
 | mintValueWei / gasCostWei / costWei | string \| null | 交易 value、燃气费、合计成本（wei） |
-| floorPriceWei / floorSymbol | string \| null | OpenSea 地板价（wei）与计价符号 |
-| volume24hWei / sales24h | string \| null / number \| null | 近 24h 成交量与笔数 |
-| netWei | string \| null | 净值 = floor × quantity − cost |
+| floorSource | string \| null | seaport（链上成交）或 opensea（stats） |
+| floorAtomic / floorDecimals / floorSymbol | string \| null / number \| null / string \| null | 地板价原子单位、币种精度与符号（USDG 为 6） |
+| floorUsd / costUsd / netUsd | number \| null | 换算成 USD 的地板价、成本与净值（仅两边币种均可换算时计算） |
+| lowAtomic / salesCount / uniqueBuyers | string \| null / number \| null | 近 24h 链上最低成交价、笔数与独立买家数 |
 | txHash | string \| null | 对应 mint 交易 |
 
 ## 发现器状态（.scan-state.json / .scan-history.jsonl，均 gitignore）

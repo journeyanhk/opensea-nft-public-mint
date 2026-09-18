@@ -9,7 +9,7 @@ import { DEFAULT_LEDGER_PATH, loadLedger } from "../batch-ledger";
 import {
   DEFAULT_BACKFILL_PATH,
   DEFAULT_CHECKPOINTS_HOURS,
-  formatNet,
+  formatNetUsd,
   loadBackfill,
   runBackfill,
 } from "./backfill";
@@ -64,7 +64,7 @@ export async function runBackfillCommand(args: string[]): Promise<void> {
   } else {
     console.log(
       chalk.gray(
-        `  due ${summary.due} | written ${summary.written} | without floor stats ${summary.withoutStats} | records ${parsed.file}`
+        `  due ${summary.due} | written ${summary.written} | without floor ${summary.withoutFloor} | records ${parsed.file}`
       )
     );
   }
@@ -74,7 +74,8 @@ export async function runBackfillCommand(args: string[]): Promise<void> {
     console.log(
       chalk.gray(
         `  ${record.chain}/${record.contract} @${record.checkpointHours}h ` +
-          `cost ${record.costWei ?? "?"} floor ${record.floorPriceWei ?? "?"} net ${formatNet(record) ?? "?"}`
+          `cost ${record.costUsd !== null ? "$" + record.costUsd.toFixed(4) : record.costWei ?? "?"} ` +
+          `floor ${record.floorAtomic ?? "?"} ${record.floorSymbol ?? ""} (${record.floorSource ?? "-"}) net ${formatNetUsd(record) ?? "?"}`
       )
     );
   }
