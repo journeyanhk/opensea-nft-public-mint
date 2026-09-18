@@ -240,6 +240,21 @@ test('opened targets are re-audited on the 30-minute cadence for 72 hours', () =
   assert.equal(shouldAudit({ ...base, entry: entry({ lastAuditedAt: new Date(now - 45 * 60_000).toISOString() }), startAtMs: longOpened }), false);
 });
 
+test('quiet opened targets fall back to a two-hour re-audit cadence', () => {
+  const now = 1_000_000_000_000;
+  const base = { nowMs: now, horizonMs: 72 * 3600_000, eventSinceAudit: false };
+  const opened = now - 2 * 3600_000;
+  const lastAudited = new Date(now - 45 * 60_000).toISOString();
+  // No quiet streak: the 30-minute cadence fires.
+  assert.equal(shouldAudit({ ...base, entry: entry({ lastAuditedAt: lastAudited }), startAtMs: opened }), true);
+  // Two flat audits in a row: 45 minutes is not enough any more.
+  assert.equal(shouldAudit({ ...base, entry: entry({ lastAuditedAt: lastAudited }), startAtMs: opened, quietStreak: 2 }), false);
+  assert.equal(
+    shouldAudit({ ...base, entry: entry({ lastAuditedAt: new Date(now - 2.5 * 3600_000).toISOString() }), startAtMs: opened, quietStreak: 2 }),
+    true
+  );
+});
+
 test('pending candidates are audited before fresh discoveries', () => {
   assert.deepEqual(selectAuditBatch(['p1', 'p2'], ['f1', 'f2'], 3), { audit: ['p1', 'p2', 'f1'], overflow: ['f2'] });
   assert.deepEqual(selectAuditBatch([], ['f1'], 5), { audit: ['f1'], overflow: [] });

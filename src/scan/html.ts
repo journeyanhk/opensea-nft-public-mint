@@ -24,6 +24,7 @@ export interface HistoryLine {
   risks?: string[];
   reason?: string;
   coverage?: number;
+  slug?: string | null;
   name?: string | null;
   owner?: string | null;
   mintPriceWei?: string | null;
@@ -47,6 +48,7 @@ export interface GradePoint {
   start: number | null;
   risks?: string[];
   minted?: string | null;
+  slug?: string | null;
   name?: string | null;
   owner?: string | null;
   mintPriceWei?: string | null;
@@ -76,6 +78,7 @@ export interface DashboardRow {
   topMinterShare: number | null;
   nets: Record<string, string>; // checkpoint hours -> net in native units
   notes: string[];
+  slug: string | null;
   name: string | null;
   owner: string | null;
   mintPriceWei: string | null;
@@ -157,6 +160,7 @@ export function loadDashboardRows(
       start: line.start ?? null,
       risks: line.risks,
       minted: line.totalMinted ?? null,
+      slug: line.slug ?? null,
       name: line.name ?? null,
       owner: line.owner ?? null,
       mintPriceWei: line.mintPriceWei ?? null,
@@ -236,6 +240,7 @@ export function loadDashboardRows(
           pendingAudit: entry.pendingAudit,
           auditRisks: [...points].reverse().find((p) => p.risks && p.risks.length > 0)?.risks ?? [],
         }),
+        slug: latest?.slug ?? null,
         name: latest?.name ?? null,
         owner: latest?.owner ?? null,
         mintPriceWei: latest?.mintPriceWei ?? null,
@@ -252,7 +257,9 @@ export function loadDashboardRows(
         sellOutEtaHours: sellOutEtaHours(remainingNow, velocity.per24h),
         stale,
         links: {
-          opensea: `https://opensea.io/assets/${chain}/${contract}`,
+          opensea: latest?.slug
+            ? `https://opensea.io/collection/${latest.slug}`
+            : `https://opensea.io/assets/${chain}/${contract}/1`,
           explorer: explorer ? `${explorer}/address/${contract}` : "",
         },
       });
@@ -402,9 +409,12 @@ export function renderDashboard(rows: DashboardRow[], meta: DashboardMeta, opts:
         `data-net24usd="${escapeHtml(row.nets["24"] ?? "")}"`,
         `data-net72usd="${escapeHtml(row.nets["72"] ?? "")}"`,
         `data-stale="${row.stale ? "1" : "0"}"`,
-        `data-free="${price === 0n ? "1" : "0"}"`,
+        `data-free="${price === null ? "" : price === 0n ? "1" : "0"}"`,
         `data-name="${escapeHtml(row.name ?? "")}"`,
         `data-velocity="${escapeHtml(row.velocity24h ?? "")}"`,
+        `data-mintprice="${escapeHtml(row.mintPriceWei ?? "")}"`,
+        `data-remaining="${escapeHtml(row.remaining ?? "")}"`,
+        `data-notes="${escapeHtml(row.notes.join("; "))}"`,
         `data-mintedpct="${mintedPct === null ? "" : mintedPct}"`,
         `data-target="${escapeHtml(`${row.name ?? ""} ${row.contract} ${row.chain}`)}"`,
       ].join(" ");
@@ -423,6 +433,7 @@ export function renderDashboard(rows: DashboardRow[], meta: DashboardMeta, opts:
   <td>${price !== null && price === 0n ? `<span class="free">FREE</span>` : escapeHtml(priceText)}</td>
   <td>${escapeHtml(capText)}</td>
   <td>${row.minted ?? ""}${mintedPct === null ? "" : ` <span class="small">(${mintedPct.toFixed(1)}%)</span>`}</td>
+  <td>${escapeHtml(row.remaining ?? "")}</td>
   <td>${escapeHtml(row.recent15m ?? "")} / ${escapeHtml(row.recent1h ?? "")}</td>
   <td>${row.uniqueMinters ?? ""}${row.topMinterShare === null ? "" : ` <span class="small">top ${Math.round(row.topMinterShare * 100)}%</span>`}</td>
   <td>${row.presaleStages === null || row.presaleStages === 0 ? "" : "yes"}</td>
@@ -500,6 +511,7 @@ ${opts.serve ? `<div class="status" id="statusBar">
   <label><input type="checkbox" id="showStale"> show stale</label>
   <button id="presetFresh">FREE · A/B · fresh</button>
   <span id="staleCount" class="small"></span>
+  <span id="freeNote" class="small"></span>
   <label>search <input id="search" type="search" placeholder="contract / chain"></label>
   <span id="count"></span>
 </div>
@@ -507,9 +519,11 @@ ${opts.serve ? `<div class="status" id="statusBar">
 <table id="table">
 <thead>
 <tr>
-  <th></th><th data-sort="grade">grade</th><th data-sort="chain">chain</th><th data-sort="target">contract</th>
-  <th data-sort="start">start (UTC+8)</th><th data-sort="remaining">left</th><th data-sort="projected">projected</th>
-  <th>stages</th>  <th data-sort="notes">notes</th><th>execution</th><th data-sort="net24">24h net</th><th data-sort="net72">72h net</th><th>grade history</th>
+  <th></th><th data-sort="grade">grade</th><th data-sort="chain">chain</th><th data-sort="target">name / contract</th>
+  <th data-sort="start">start (UTC+8) / window</th><th data-sort="mintprice">price</th><th>cap</th>
+  <th data-sort="mintedpct">minted (%)</th><th data-sort="remaining">left</th><th data-sort="velocity">15m / 1h</th>
+  <th>minters (top%)</th><th>pre</th><th data-sort="velocity">24h vel → eta</th><th data-sort="stale">stale</th><th>links</th>
+  <th data-sort="notes">notes</th><th>execution</th><th data-sort="net24usd">24h net</th><th data-sort="net72usd">72h net</th><th>grade history</th>
 </tr>
 </thead>
 <tbody>
@@ -550,7 +564,7 @@ ${rowHtml}
         && (!chain || r.dataset.chain === chain)
         && (!pending || r.dataset.pending === "1")
         && (!executed || r.dataset.executed === "1")
-        && (!freeOnly || r.dataset.free === "1")
+        && (!freeOnly || r.dataset.free === "1" || r.dataset.free === "")
         && (!q || r.dataset.target.toLowerCase().indexOf(q) >= 0);
       var staleBlocked = matches && !showStale && r.dataset.stale === "1";
       if (staleBlocked) staleHidden++;
@@ -560,6 +574,8 @@ ${rowHtml}
     });
     document.getElementById("count").textContent = visible + " shown";
     document.getElementById("staleCount").textContent = staleHidden > 0 ? staleHidden + " stale hidden" : "";
+    var unknownPrice = freeOnly ? rows.filter(function (r) { return r.dataset.free === ""; }).length : 0;
+    document.getElementById("freeNote").textContent = unknownPrice > 0 ? unknownPrice + " price unknown" : "";
     updateShortlist();
   }
 

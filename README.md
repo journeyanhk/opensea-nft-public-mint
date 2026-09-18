@@ -157,7 +157,7 @@ npm start -- --backfill                                # 结算已成功 mint �
 - 注意币种：Robinhood 部分收藏以 **USDG（6 位小数）**计价，而成本是 ETH——净值只有两边都能换算成 USD 时才计算，避免混币种相减。Seaport 扫描走 `SCAN_RPC_URL_<CHAIN>` / 公共端点；OpenSea stats 与地址→slug 反查需要你的长期 key（Settings → Developer）
 - 面板列（M5a 起）：名称/合约、开售时间与窗口（"opens in 3h"、"opened 2d ago · ends in 5d"）、价格（免费显示 **FREE**）、每钱包上限、已铸进度、15m/1h 铸造量、独立地址与集中度、是否有预售阶段、24h 速度（审计差分；不足 6 小时用 1h 估算并标注）与售罄预计、陈旧标记、OpenSea 与浏览器链接；预设按钮 **FREE · A/B · fresh** 一键收窄，陈旧默认隐藏并显示隐藏计数
 - 陈旧规则：开售 >24h 且 已铸 <10% 且 24h 铸造 < max(5, 0.1%×supply)；开售 72 小时内的目标每 30 分钟复审，形成速度序列
-- 旧历史记录没有新字段（显示为空），新审计会逐步补齐；活跃目标优先
+- 旧历史记录没有新字段（显示为空），新审计会逐步补齐；活跃目标优先。勾选 `free only` 时价格未知的行会保留并计数（`N price unknown`）
 - `--report <out.html>` 生成单文件静态看板（无 server、无外部资源、file:// 直接打开）：按开售时间排序，显示等级、剩余/预计、分阶段铸造、变更与风险标注、执行结果（含浏览器交易链接）与等级变化轨迹；支持按等级/链筛选、排序、搜索，勾选后一键复制短名单与审计/导出命令（可另行保存成 `@shortlist.<chain>.txt`）
 - 建议 crontab 示例：`*/20 * * * * cd <repo> && npm start -- --scan --limit 10 >> scan.log 2>&1`
 

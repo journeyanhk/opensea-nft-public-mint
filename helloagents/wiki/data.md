@@ -111,7 +111,7 @@
 |------|------|
 | at / chain / contract / grade / risks / reason / coverage | 审计时间、目标、等级、风险标签与原因、扫描覆盖率 |
 | remaining / projected / start | 当前剩余、预计余量、公售开始时间 |
-| name / owner | 代币名称与 owner()（失败为 null） |
+| name / owner / slug | 代币名称、owner()（失败为 null）与 OpenSea slug（已知时用于 `/collection/<slug>` 链接） |
 | mintPriceWei / capPerWallet / endTime | 单价（0=FREE）、每钱包上限（0=不限）、结束时间 |
 | maxSupply / totalMinted | 供应上限与审计当刻累计铸造（构成速度差分序列） |
 | recent15m / recent1h | 日志分桶的 15 分钟与 1 小时铸造量 |
@@ -131,5 +131,6 @@
 | contracts[chain][addr].soldOutAtBlock | number \| null | 判定售罄时的 `lastSeenBlock`（此后无新事件则不再重查） |
 | contracts[chain][addr].publicStart | number \| null | 最近一次读到的公售开始时间（unix 秒） |
 | contracts[chain][addr].pendingAudit | boolean | 曾是候选但超出 `--limit`，下次运行优先审计 |
+| contracts[chain][addr].lastMintedTotal / quietStreak | string \| null / number | 上次审计的累计铸造量与连续「无新增」次数；≥2 时复审间隔放宽到 2 小时 |
 
 `scan-history.jsonl` 每行：`{ at, chain, contract, grade, remaining, projected, start }`。

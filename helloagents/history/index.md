@@ -22,6 +22,7 @@
 | 202609181443 | m3c-seaport-fix | 修复 | ✅已完成 | [链接](2026-09/202609181443_m3c-seaport-fix/) |
 | 202609181530 | serve-m4a | 功能 | ✅已完成 | [链接](2026-09/202609181530_serve-m4a/) |
 | 202609181634 | m5a-panel-facts | 功能 | ✅已完成 | [链接](2026-09/202609181634_m5a-panel-facts/) |
+| 202609181730 | m5a-review-fixes | 修复 | ✅已完成 | [链接](2026-09/202609181730_m5a-review-fixes/) |
 
 ---
 
@@ -43,3 +44,4 @@
 - [202609181443_m3c-seaport-fix](2026-09/202609181443_m3c-seaport-fix/) - review8 修复：Seaport 1.6 五字段 OrderFulfilled 成交地板价、ERC-20 精度按 decimals 解析、净值统一 USD
 - [202609181530_serve-m4a](2026-09/202609181530_serve-m4a/) - M4a 数据侧服务化：`--serve` 常驻调度 + 公网看板、私钥 fail-closed、systemd/Caddy 部署文件
 - [202609181634_m5a-panel-facts](2026-09/202609181634_m5a-panel-facts/) - M5a 面板基础事实与需求信号：历史字段扩充、开售 72h 复审与速度序列、FREE/陈旧/链接列与预设筛选
+- [202609181730_m5a-review-fixes](2026-09/202609181730_m5a-review-fixes/) - review9 修复：表头 20 列对齐与排序键、复审让位于新发现并静默降频、slug 链接与价格未知提示

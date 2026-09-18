@@ -240,7 +240,7 @@ test('new history facts surface as dashboard row fields and render', () => {
   assert.equal(row.velocitySource, 'differential');
   assert.equal(row.velocity24h, '1000');
   assert.equal(row.stale, false);
-  assert.equal(row.links.opensea, 'https://opensea.io/assets/arc/0xfeed');
+  assert.equal(row.links.opensea, 'https://opensea.io/assets/arc/0xfeed/1');
   assert.ok(row.links.explorer.includes('/address/0xfeed'));
 
   const html = renderDashboard(rows, { generatedAt: 'now', sources: [] });
@@ -249,4 +249,69 @@ test('new history facts surface as dashboard row fields and render', () => {
   assert.ok(html.includes('data-stale="0"'));
   assert.ok(html.includes('id="presetFresh"'));
   assert.ok(html.includes('Feed Token'));
+});
+
+test('the table header and every row have the same number of columns', () => {
+  const rows = loadDashboardRows(state, history, ledger, () => cached);
+  const html = renderDashboard(rows, { generatedAt: 'now', sources: [] });
+  const head = html.slice(html.indexOf('<thead>'), html.indexOf('</thead>'));
+  const headerCount = (head.match(/<th( |>)/g) || []).length;
+  const body = html.slice(html.indexOf('<tbody>'), html.indexOf('</tbody>'));
+  const rowCounts = (body.match(/<tr data-chain[\s\S]*?<\/tr>/g) || []).map(
+    (tr) => (tr.match(/<td/g) || []).length
+  );
+  assert.ok(rowCounts.length > 0);
+  for (const count of rowCounts) assert.equal(count, headerCount);
+  // Left (remaining) is its own column, and every sort key exists on the rows.
+  assert.ok(head.includes('data-sort="remaining"'));
+  assert.ok(body.includes('data-remaining='));
+  for (const key of ['grade', 'chain', 'target', 'start', 'mintprice', 'mintedpct', 'remaining', 'velocity', 'stale', 'notes', 'net24usd', 'net72usd']) {
+    assert.ok(head.includes(`data-sort="${key}"`), `missing sort key ${key}`);
+    assert.ok(body.includes(`data-${key}=`), `missing data attribute ${key}`);
+  }
+});
+
+test('fresh discoveries keep at least half the audit slots', () => {
+  const { selectAuditBatch } = require('../dist/scan/scanner');
+  const fresh = ['f1', 'f2', 'f3', 'f4', 'f5', 'f6', 'f7', 'f8', 'f9', 'f10'];
+  const reaudit = ['r1', 'r2', 'r3', 'r4', 'r5', 'r6', 'r7', 'r8', 'r9', 'r10'];
+  // New work is served first; re-audits fill only what is left.
+  const mixed = selectAuditBatch([], fresh, 4, reaudit);
+  assert.deepEqual(mixed.audit, ['f1', 'f2', 'f3', 'f4']);
+  assert.equal(mixed.overflow.length, 6);
+  // When nothing new is waiting, re-audits may use the whole batch.
+  assert.deepEqual(selectAuditBatch([], [], 4, reaudit).audit, ['r1', 'r2', 'r3', 'r4']);
+  // Pending backlog keeps its priority inside the new-work group.
+  assert.deepEqual(selectAuditBatch(['p1', 'p2', 'p3'], ['f1'], 4, ['r1', 'r2']).audit, ['p1', 'p2', 'p3', 'f1']);
+  // Without re-audits the previous behaviour is unchanged.
+  assert.deepEqual(selectAuditBatch(['p1'], ['f1', 'f2'], 2, []), { audit: ['p1', 'f1'], overflow: ['f2'] });
+});
+
+test('a known slug is preferred for the OpenSea link', () => {
+  const nowSec = Math.floor(Date.now() / 1000);
+  const slugState = {
+    version: 1,
+    chains: {},
+    contracts: {
+      robinhood: {
+        '0xslug': {
+          firstSeenBlock: 1,
+          lastSeenBlock: 1,
+          lastAuditedBlock: 1,
+          lastAuditedAt: new Date().toISOString(),
+          lastGrade: 'A',
+          soldOutAtBlock: null,
+          publicStart: nowSec - 3600,
+          pendingAudit: false,
+        },
+      },
+    },
+  };
+  const slugHistory = [
+    { at: new Date().toISOString(), chain: 'robinhood', contract: '0xslug', grade: 'A', remaining: '5', projected: '5', start: nowSec - 3600, slug: 'stock-salesman' },
+  ];
+  const rows = loadDashboardRows(slugState, slugHistory, { version: 1, entries: {} }, () => null, []);
+  assert.equal(rows[0].links.opensea, 'https://opensea.io/collection/stock-salesman');
+  const html = renderDashboard(rows, { generatedAt: 'now', sources: [] });
+  assert.ok(html.includes('https://opensea.io/collection/stock-salesman'));
 });

@@ -25,6 +25,8 @@ export interface ContractEntry {
   soldOutAtBlock: number | null;
   publicStart: number | null; // unix seconds, latest known
   pendingAudit: boolean; // was a candidate but beyond --limit; audited first next run
+  lastMintedTotal: string | null; // totalMinted at the previous audit (velocity series)
+  quietStreak: number; // consecutive audits with no new mints; slows re-audits down
 }
 
 export interface ScanState {
@@ -93,6 +95,8 @@ export function recordContracts(
         soldOutAtBlock: null,
         publicStart: null,
         pendingAudit: false,
+        lastMintedTotal: null,
+        quietStreak: 0,
       };
       added.push(key);
     } else {

@@ -33,6 +33,9 @@ import {
 export const DEFAULT_SCAN_CHAINS = ["robinhood", "arc"];
 export const CONFIRMATIONS = 64;
 const REAUDIT_MS = 30 * 60_000;
+// Opened targets that produced nothing twice in a row no longer need 30-minute
+// attention; their series is flat and the slots are better spent elsewhere.
+const QUIET_REAUDIT_MS = 2 * 60 * 60_000;
 // Opened targets keep being re-audited for this long so the dashboard gets a
 // minted-over-time series (24h velocity, sell-out ETA).
 export const REAUDIT_OPENED_HOURS = 72;
@@ -41,13 +44,22 @@ const RECENT_WINDOW_MINUTES = 15;
 
 // Pending candidates go first so a run that hit --limit does not starve behind
 // next run's fresh discoveries.
+// New work (backlog + fresh discoveries) is served first so a large population
+// of opened targets cannot starve incoming drops; re-audits fill whatever slots
+// remain. Overflow here is backlog only — re-audits that miss out are simply
+// reconsidered next cycle, ordered by how long ago they were last seen.
 export function selectAuditBatch(
   pending: string[],
   fresh: string[],
-  limit: number
+  limit: number,
+  reaudit: string[] = []
 ): { audit: string[]; overflow: string[] } {
-  const ordered = [...pending, ...fresh];
-  return { audit: ordered.slice(0, limit), overflow: ordered.slice(limit) };
+  const core = [...pending, ...fresh];
+  const coreTaken = Math.min(core.length, limit);
+  const reauditTaken = Math.min(reaudit.length, limit - coreTaken);
+  const audit = [...core.slice(0, coreTaken), ...reaudit.slice(0, reauditTaken)];
+  const overflow = core.slice(coreTaken);
+  return { audit, overflow };
 }
 
 // A drop the script can mint always publishes its public schedule, so the config
@@ -71,6 +83,7 @@ export interface ShouldAuditInput {
   nowMs: number;
   horizonMs: number;
   reauditMs?: number;
+  quietStreak?: number;
 }
 
 export function shouldAudit(input: ShouldAuditInput): boolean {
@@ -82,11 +95,12 @@ export function shouldAudit(input: ShouldAuditInput): boolean {
   if (entry.lastAuditedAt === null) return true;
 
   const sinceAuditMs = nowMs - Date.parse(entry.lastAuditedAt);
+  const cadence = (input.quietStreak ?? 0) >= 2 ? QUIET_REAUDIT_MS : reauditMs;
   if (startAtMs !== null && startAtMs <= nowMs && nowMs - startAtMs <= REAUDIT_OPENED_HOURS * 3_600_000) {
-    return sinceAuditMs > reauditMs;
+    return sinceAuditMs > cadence;
   }
   if (startAtMs !== null && startAtMs > nowMs && startAtMs - nowMs <= horizonMs) {
-    return sinceAuditMs > reauditMs;
+    return sinceAuditMs > cadence;
   }
   return false;
 }
@@ -293,7 +307,16 @@ export async function runScan(
         return;
       }
 
-      if (!shouldAudit({ entry, eventSinceAudit, startAtMs: plan.drop.startTime * 1000, nowMs, horizonMs })) {
+      if (
+        !shouldAudit({
+          entry,
+          eventSinceAudit,
+          startAtMs: plan.drop.startTime * 1000,
+          nowMs,
+          horizonMs,
+          quietStreak: entry.quietStreak,
+        })
+      ) {
         entry.pendingAudit = false;
         report.skipped.known++;
         return;
@@ -310,8 +333,9 @@ export async function runScan(
     reauditCandidates.sort((a, b) => String(a.lastAuditedAt).localeCompare(String(b.lastAuditedAt)));
     const { audit: toAudit, overflow } = selectAuditBatch(
       pendingCandidates,
-      [...reauditCandidates.map((c) => c.contract), ...freshCandidates],
-      opts.limit
+      freshCandidates,
+      opts.limit,
+      reauditCandidates.map((c) => c.contract)
     );
     report.candidates = toAudit;
     report.skipped.limited = overflow.length;
@@ -335,6 +359,9 @@ export async function runScan(
           entry.lastGrade = result.grade.grade;
           entry.publicStart = result.publicDrop?.startTime ?? entry.publicStart;
           entry.pendingAudit = false;
+          const mintedNow = result.totalMinted.toString();
+          entry.quietStreak = entry.lastMintedTotal === mintedNow ? (entry.quietStreak ?? 0) + 1 : 0;
+          entry.lastMintedTotal = mintedNow;
           const remaining = remainingSupply(result.maxSupply, result.totalMinted);
           appendHistory(
             [
@@ -358,6 +385,7 @@ export async function runScan(
                 start: result.publicDrop?.startTime ?? null,
                 // Facts below are already read by the auditor; persisting them is
                 // what lets the dashboard show "worth it" instead of just "in stock".
+                slug: result.slug,
                 name: result.name,
                 owner: result.owner,
                 mintPriceWei: result.publicDrop?.mintPrice?.toString() ?? null,
