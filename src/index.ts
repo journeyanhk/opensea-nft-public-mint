@@ -15,6 +15,18 @@ import { runBackfillCommand } from "./scan/backfill-cli";
 import { assertNoPrivateKeys, serveConfig } from "./serve/config";
 import { runServe } from "./serve/server";
 
+const KNOWN_FLAGS = new Set([
+  "--help", "-h",
+  "--check-allowlist", "--allowlist",
+  "--batch", "--watch", "--watch-interval", "--no-ledger", "--retry-pending",
+  "--audit", "--chain", "--wallets", "--lookback-days", "--quantity", "--max-price", "--grade",
+  "--export", "--force", "--json",
+  "--scan", "--since-days", "--horizon-hours", "--limit", "--no-audit", "--include-mints",
+  "--report", "--state", "--history", "--ledger", "--backfill-file",
+  "--backfill", "--backfill-after",
+  "--serve",
+]);
+
 const HELP = `
 NFT Public Mint Sniper
 
@@ -86,6 +98,15 @@ async function main(): Promise<void> {
   }
 
   try {
+    // A flag this build does not know (usually a stale dist after git pull)
+    // must fail loudly instead of silently falling through to the wizard.
+    const unknown = args.filter((arg) => arg.startsWith("--") && !KNOWN_FLAGS.has(arg));
+    if (unknown.length > 0) {
+      throw new Error(
+        `Unknown option ${unknown.join(", ")} — if this flag is new, run "npm run build" after "git pull".`
+      );
+    }
+
     if (serve) {
       assertNoPrivateKeys();
       await runServe(serveConfig());
