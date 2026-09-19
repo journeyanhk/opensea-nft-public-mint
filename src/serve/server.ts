@@ -10,6 +10,16 @@
 import http from "http";
 import { maskRpc } from "../rpc-resolver";
 import { renderDashboard } from "../scan/html";
+import {
+  DEFAULT_FAVORITES_PATH,
+  FavoriteSnapshot,
+  FavoriteStatus,
+  loadFavorites,
+  removeFavorite,
+  saveFavorites,
+  toJsonl,
+  upsertFavorite,
+} from "../scan/favorites";
 import { ServeConfig } from "./config";
 import { Scheduler } from "./scheduler";
 
@@ -19,6 +29,7 @@ const SCAN_THROTTLE_MS = 5_000;
 export interface ServerOptions {
   scheduler: Scheduler;
   exportsDir: string;
+  favoritesPath?: string;
 }
 
 function sendJson(res: http.ServerResponse, status: number, body: unknown): void {
@@ -69,6 +80,7 @@ export function sanitizeLog(lines: string[]): string[] {
 
 export function createServer(options: ServerOptions): http.Server {
   const { scheduler } = options;
+  const favoritesPath = options.favoritesPath ?? DEFAULT_FAVORITES_PATH;
   let lastScanRequest = 0;
 
   return http.createServer(async (req, res) => {
@@ -91,6 +103,64 @@ export function createServer(options: ServerOptions): http.Server {
         }
       }
 
+      if (url.pathname === "/api/favorites") {
+        if (req.method === "GET") {
+          const store = loadFavorites(favoritesPath);
+          if (url.searchParams.get("format") === "jsonl") {
+            // The analysis export: one labelled row per favorite, snapshot
+            // included, ready to join with ledger and backfill outcomes.
+            const body = toJsonl(store);
+            res.writeHead(200, {
+              "content-type": "application/x-ndjson; charset=utf-8",
+              "content-disposition": 'attachment; filename="favorites.jsonl"',
+              "cache-control": "no-store",
+            });
+            return res.end(body);
+          }
+          return sendJson(res, 200, store);
+        }
+        if (req.method === "POST") {
+          const body = (await readJsonBody(req)) as {
+            action?: string;
+            chain?: string;
+            contract?: string;
+            slug?: string | null;
+            name?: string | null;
+            status?: FavoriteStatus;
+            note?: string;
+            snapshot?: FavoriteSnapshot | null;
+          };
+          if (!body?.chain || !body?.contract) return sendJson(res, 400, { error: "chain and contract are required" });
+          const store = loadFavorites(favoritesPath);
+          const at = new Date().toISOString();
+
+          if (body.action === "remove") {
+            const removed = removeFavorite(store, body.chain, body.contract);
+            if (removed) saveFavorites(store, favoritesPath);
+            return sendJson(res, 200, { removed });
+          }
+          if (body.action !== "add" && body.action !== "update") {
+            return sendJson(res, 400, { error: "action must be add, update or remove" });
+          }
+          const favorite = upsertFavorite(
+            store,
+            {
+              chain: body.chain,
+              contract: body.contract,
+              slug: body.slug,
+              name: body.name,
+              status: body.status,
+              note: body.note,
+              snapshot: body.snapshot,
+            },
+            at
+          );
+          saveFavorites(store, favoritesPath);
+          return sendJson(res, 200, { favorite });
+        }
+        return sendJson(res, 405, { error: "method not allowed" });
+      }
+
       if (req.method === "GET" && url.pathname === "/healthz") {
         return sendJson(res, 200, { ok: true });
       }
@@ -99,7 +169,7 @@ export function createServer(options: ServerOptions): http.Server {
         const html = renderDashboard(
           scheduler.rows,
           { generatedAt: new Date().toISOString(), sources: ["local state files"] },
-          { serve: true }
+          { serve: true, favorites: loadFavorites(favoritesPath) }
         );
         res.writeHead(200, {
           "content-type": "text/html; charset=utf-8",

@@ -34,3 +34,6 @@ keys.txt
 
 # Auto-derived smart-minter set (local state)
 .smart-minters.json
+
+# User favorites (local decisions, not scan state)
+.favorites.json

@@ -27,6 +27,8 @@ const KNOWN_FLAGS = new Set([
   "--backfill", "--backfill-after",
   "--refresh-targets",
   "--serve",
+  "--export-favorites",
+  "--favorites",
 ]);
 
 const HELP = `
@@ -51,6 +53,8 @@ Usage
                                   discover new drops on-chain, audit the candidates; incremental cursor in .scan-state.json
   npm start -- --backfill [--ledger <file>] [--backfill-after 24,72] [--backfill-file <file>]
                                   settle cost and floor-price checkpoints for minted targets; idempotent
+  npm start -- --export-favorites [<file.jsonl>] [--favorites <file>]
+                                  dump every favorite with the signals seen when it was starred (analysis input)
   npm start -- --refresh-targets [--limit N] [--chain <key>] [--state <file>]
                                   resolve slugs/names/owner and read collections (socials, image) for the state file
                                   (run until "all entries"); set ENABLE_X_METRICS=1 to also cache X follower counts
@@ -121,6 +125,9 @@ async function main(): Promise<void> {
     const batchIndex = args.indexOf("--batch");
     if (args.includes("--audit")) {
       await runAuditCommand(args);
+    } else if (args.includes("--export-favorites")) {
+      const { runExportFavoritesCommand } = await import("./scan/favorites-cli");
+      await runExportFavoritesCommand(args);
     } else if (args.includes("--refresh-targets")) {
       await runRefreshCommand(args);
     } else if (args.includes("--backfill")) {

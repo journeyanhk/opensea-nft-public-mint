@@ -142,6 +142,8 @@
 | ScanState.calendar | object \| undefined | `{ fetchedAt, counts, warnings? }`：上次成功抓取时间（节流）、**配置链**的条目数（金丝雀基线）与最近一次金丝雀告警；`/api/status` 直接暴露 |
 | contracts[chain][addr].xFollowers / xCheckedAt | number \| null / string \| null | X 粉丝数与读取时间；仅 `ENABLE_X_METRICS=1` 时抓取（`api.fxtwitter.com/<handle>`），24 小时缓存，失败静默 |
 
+M7/C 的收藏存储：`.favorites.json`（`version: 1, updatedAt, favorites: { "chain|contract": { chain, contract, slug, name, addedAt, updatedAt, status: watching|ready|dismissed, note, snapshot } }`）。`snapshot` 记录**收藏那一刻**的信号（grade/q/confidence/phase/start/mintPriceWei/remaining/maxSupply/minted/velocity24h/uniqueMinters/topMinterShare/smartMinters/batchMint/penalties/calendarListed/creatorDropCount），供日后与账本/回填按 `chain|contract` 关联分析；编辑只改传入字段、不覆盖首个快照，缺失/损坏/未来版本的文件一律按空处理。面板筛选/排序/tab 存 URL hash（`nftPanelState` 仅作无 hash 时的默认值）。
+
 M7/A2 的流动性派生（不落盘）：`liquidity { level, label }`（`traded/thin/stale-evidence/unknown`，取自最近一次回填检查点的 `salesCount/uniqueBuyers/at`）与创作者 `withSales`（其它 drop 中 `salesCount ≥ 3` 的数量，作有界加分）。
 
 M7/A3 的铸造结构字段（审计写入历史）：`maxTxTokens`（单笔交易最多铸出的 token 数，按 transactionHash 归组）、`payerDiffers`（付款人≠铸造人的日志笔数）、`smartMinters`（目标 Top20 铸造地址命中聪明铸造者集合的数量）。本地派生文件：`.smart-minters.json`（`{ version, updatedAt, minters: { addr: { appearances, drops[] } } }`，出现 ≥2 次视为合格，上限 5000 条按出现次数淘汰）。

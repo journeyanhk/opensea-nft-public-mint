@@ -178,3 +178,66 @@ test('http surface: a busy scheduler answers 409', async () => {
     await new Promise((resolve) => server.close(resolve));
   }
 });
+
+test('favorites api: round-trip, jsonl export and the same guards', async () => {
+  const fs = require('fs');
+  const os = require('os');
+  const path = require('path');
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'fav-api-'));
+  const favoritesPath = path.join(dir, '.favorites.json');
+  const scheduler = stubScheduler();
+  const server = createServer({ scheduler, exportsDir: '/tmp/exports', favoritesPath });
+  const port = await listen(server);
+  const base = `http://127.0.0.1:${port}`;
+  try {
+    const empty = await (await fetch(`${base}/api/favorites`)).json();
+    assert.equal(Object.keys(empty.favorites).length, 0);
+
+    const added = await fetch(`${base}/api/favorites`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ action: 'add', chain: 'robinhood', contract: '0xabc', name: 'A', snapshot: { q: 76, grade: 'A', penalties: [] } }),
+    });
+    assert.equal(added.status, 200);
+    assert.equal((await added.json()).favorite.status, 'watching');
+
+    const updated = await fetch(`${base}/api/favorites`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ action: 'update', chain: 'robinhood', contract: '0xabc', status: 'ready', note: 'good' }),
+    });
+    const record = (await updated.json()).favorite;
+    assert.equal(record.note, 'good');
+    assert.equal(record.snapshot.q, 76, 'an edit keeps the snapshot');
+
+    const jsonl = await (await fetch(`${base}/api/favorites?format=jsonl`)).text();
+    assert.equal(jsonl.trim().split('\n').length, 1);
+    assert.equal(JSON.parse(jsonl.trim()).key, 'robinhood|0xabc');
+
+    // The page embeds the store.
+    const page = await (await fetch(`${base}/`)).text();
+    assert.ok(page.includes('0xabc'));
+
+    const badType = await fetch(`${base}/api/favorites`, {
+      method: 'POST', headers: { 'content-type': 'text/plain' }, body: 'x',
+    });
+    assert.equal(badType.status, 415);
+    const crossOrigin = await fetch(`${base}/api/favorites`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', origin: 'https://evil.example' },
+      body: JSON.stringify({ action: 'add', chain: 'a', contract: 'b' }),
+    });
+    assert.equal(crossOrigin.status, 403);
+
+    const removed = await fetch(`${base}/api/favorites`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ action: 'remove', chain: 'robinhood', contract: '0xabc' }),
+    });
+    assert.equal((await removed.json()).removed, true);
+    const after = await (await fetch(`${base}/api/favorites`)).json();
+    assert.equal(Object.keys(after.favorites).length, 0);
+  } finally {
+    server.close();
+  }
+});

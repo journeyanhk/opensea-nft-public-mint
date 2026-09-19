@@ -7,6 +7,7 @@
 ## [Unreleased]
 
 ### 新增
+- M7/C 收藏与筛选保持：星标 → `.favorites.json`（原子写）+ `GET/POST /api/favorites` + `?format=jsonl` 分析导出；收藏写入**信号快照**（人工确认过的标注数据，日后与账本/回填关联）；tab「全部/收藏」与「已不在板面」分区；明细可改观察/准备/放弃与备注；一键导出 `targets.json`（接批量执行）与 `favorites.jsonl`；`--export-favorites` CLI；筛选/排序/tab 持久化到 URL hash（`复制筛选链接`），静态页回退 localStorage 并提示
 - M7/A2 保守估值与流动性：新增 `src/scan/valuation.ts`（买家中位数等权、lowerQuartile×0.8 折扣、`min(floor, 下四分位×0.8, topOffer)`、地板偏离标记、证据门槛 ≥3 笔/≥2 买家/近 6h）；面板流动性标签（未开售行不给地板与利润暗示）；创作者维度 `withSales` 有界加成
 - M7/A3+A4 铸造结构与聪明铸造者：`aggregateMints` 新增 `maxTxTokens`（按 `transactionHash` 归组）、`payerDiffers`、`topMinters`；新增 `src/scan/smart-minters.ts`（售罄 drop 的吃满/重复铸造地址自动进入 `.smart-minters.json`，≥2 次合格）与 `AuditResult.smartMinters`；面板加「批量痕迹」徽标（单笔 ≥10 个）+ Q 分惩罚 `batch-mint`、明细「铸造结构」行、参与维度 `smartMinters` 加成
 - M7/A1 OpenSea 日历第二信息源：新增 `src/scan/calendar.ts`（`urql_transport` 解析 + 固定 UA/跟随 307/15s 超时 + fail-loud + 金丝雀）与 `refreshCalendar`（按 `CALENDAR_INTERVAL_MIN` 节流，失败沿用旧快照）；upcoming 的 slug/名称/合约/开售时间/地板/认证/禁用/stages 落 `ContractEntry.calendar` 与 `sources`；面板新增「日历/未认证/平台禁用」徽标与明细、`schedule mismatch`；`classifyPhase` 允许"未来开售但缺链上事实"判为 upcoming。真链验证：一次抓取解析出 7 条（robinhood 3 / ethereum 3 / base 1），1.9s

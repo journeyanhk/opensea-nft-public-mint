@@ -9,6 +9,7 @@ import { Grade } from "../audit/score";
 import { DEFAULT_LEDGER_PATH, loadLedger } from "../batch-ledger";
 import { DEFAULT_HISTORY_PATH, DEFAULT_STATE_PATH, loadState } from "./state";
 import { loadDashboardRows, loadHistory, renderDashboard } from "./html";
+import { DEFAULT_FAVORITES_PATH, loadFavorites } from "./favorites";
 import { DEFAULT_BACKFILL_PATH, loadBackfill } from "./backfill";
 import { exportByChain, renderAuditDetail, renderAuditTable, renderJson } from "../audit/report";
 import { DEFAULT_SCAN_CHAINS, runScan } from "./scanner";
@@ -27,6 +28,7 @@ interface Args {
   lookbackDays: number;
   grades: Grade[];
   exportPath: string | null;
+  favoritesPath: string;
   force: boolean;
   quantity: number;
   maxPrice: string | "current";
@@ -48,6 +50,7 @@ export function parseScanArgs(args: string[]): Args {
     historyPath: process.env.SCAN_HISTORY_PATH ?? DEFAULT_HISTORY_PATH,
     ledgerPath: process.env.BATCH_LEDGER_PATH ?? DEFAULT_LEDGER_PATH,
     backfillPath: process.env.BACKFILL_PATH ?? DEFAULT_BACKFILL_PATH,
+    favoritesPath: process.env.FAVORITES_PATH ?? DEFAULT_FAVORITES_PATH,
     chains: [],
     sinceDays: 1,
     horizonHours: 72,
@@ -80,6 +83,7 @@ export function parseScanArgs(args: string[]): Args {
     else if (arg === "--history") parsed.historyPath = rest[++i] ?? parsed.historyPath;
     else if (arg === "--ledger") parsed.ledgerPath = rest[++i] ?? parsed.ledgerPath;
     else if (arg === "--backfill-file") parsed.backfillPath = rest[++i] ?? parsed.backfillPath;
+    else if (arg === "--favorites") parsed.favoritesPath = rest[++i] ?? parsed.favoritesPath;
     else if (arg === "--quantity") parsed.quantity = Math.max(1, parseInt(rest[++i] ?? "1", 10) || 1);
     else if (arg === "--max-price") parsed.maxPrice = rest[++i] ?? "current";
     else if (arg === "--grade") {
@@ -113,10 +117,14 @@ function writeDashboard(parsed: Args): void {
   if (rows.length === 0) {
     throw new Error(`No targets in ${parsed.statePath} — run --scan first.`);
   }
-  const html = renderDashboard(rows, {
-    generatedAt: new Date().toISOString(),
-    sources: [parsed.statePath, parsed.historyPath, parsed.ledgerPath, parsed.backfillPath],
-  });
+  const html = renderDashboard(
+    rows,
+    {
+      generatedAt: new Date().toISOString(),
+      sources: [parsed.statePath, parsed.historyPath, parsed.ledgerPath, parsed.backfillPath],
+    },
+    { favorites: loadFavorites(parsed.favoritesPath ?? DEFAULT_FAVORITES_PATH) }
+  );
   fs.writeFileSync(parsed.reportPath!, html);
   console.log(chalk.bold(`\nDashboard: ${parsed.reportPath} (${rows.length} target(s))`));
   console.log(chalk.gray(`  open ${parsed.reportPath}`));

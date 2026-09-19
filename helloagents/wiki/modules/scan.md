@@ -54,6 +54,13 @@
 - 面板：流动性标签进明细；**upcoming 行不显示地板与参考价**（无二级成交，不做利润暗示）；创作者维度用 `withSales`（其它 drop 中回填 `salesCount ≥ 3` 的数量）做有界加成
 - 后续（未做）：页面 `collectionActivity` 的真实 Sale 样本采集（现值只覆盖"汇总证据"层，逐笔样本留给 A2+）
 
+### 需求: 收藏与分析样本（M7/C）
+**模块:** scan / serve
+- `src/scan/favorites.ts`：`favoriteKey`（chain|contract 归一化）、`upsertFavorite`（只改传入字段；首快照不可覆盖）、`removeFavorite`、`toJsonl`（分析导出，一行一条）、`loadFavorites`/`saveFavorites`（原子）
+- `src/scan/panel-client.ts`：星标/收藏 tab/备注编辑/导出/URL hash 持久化的客户端脚本（字符串常量，静态页与 serve 共用；无外部资源、无模板字符串）
+- server：`GET /api/favorites`（`?format=jsonl` 带下载头）、`POST /api/favorites`（add/update/remove，JSON + 同源守卫）
+- CLI：`--export-favorites <file>`（`--favorites <store>` 指定输入）；`--report` / `--scan --report` 读取收藏并嵌入页面
+
 ### 需求: 状态与快照
 **模块:** scan
 - `.scan-state.json`（`version: 1`）：`chains[chain] = { cursorBlock, blockTimeSec, updatedAt }`；`contracts[chain][contract] = { firstSeenBlock, lastSeenBlock, lastAuditedBlock, lastAuditedAt, lastGrade, soldOutAtBlock, publicStart, pendingAudit }`

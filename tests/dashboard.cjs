@@ -562,3 +562,55 @@ test('liquidity evidence is labelled and never flirts with a profit claim for up
   assert.ok(html.includes('流动性：有成交'));
   assert.ok(!html.includes('利润'), 'no profit claim on the board');
 });
+
+test('the favorites surface: stars, tabs, snapshot, missing block and persisted filters', () => {
+  const now = Math.floor(Date.now() / 1000);
+  const favState = {
+    version: 1,
+    chains: {},
+    contracts: {
+      arc: {
+        '0xaaa': {
+          firstSeenBlock: 1, lastSeenBlock: 10, lastAuditedBlock: 10, lastAuditedAt: '2026-09-19T08:00:00.000Z',
+          lastGrade: 'A', soldOutAtBlock: null, publicStart: now + 3600, pendingAudit: false, slug: 'mine',
+          name: 'Mine', endTime: now + 86_400, maxSupply: '1000', totalMinted: '0', owner: '0xOwner',
+          socialCheckedAt: '2026-09-19T08:00:00.000Z',
+        },
+      },
+    },
+  };
+  const favorites = {
+    version: 1,
+    updatedAt: '2026-09-19T09:00:00.000Z',
+    favorites: {
+      'arc|0xaaa': {
+        chain: 'arc', contract: '0xaaa', slug: 'mine', name: 'Mine', addedAt: '2026-09-19T09:00:00.000Z',
+        updatedAt: '2026-09-19T09:00:00.000Z', status: 'ready', note: 'creator sold out twice', snapshot: { q: 70 },
+      },
+      'arc|0xdead': {
+        chain: 'arc', contract: '0xdead', slug: 'gone', name: 'Gone', addedAt: '2026-09-01T09:00:00.000Z',
+        updatedAt: '2026-09-01T09:00:00.000Z', status: 'watching', note: '', snapshot: null,
+      },
+    },
+  };
+  const rows = loadDashboardRows(favState, [], { version: 1, entries: {} }, () => null);
+  const html = renderDashboard(rows, { generatedAt: 'now', sources: [] }, { favorites });
+
+  assert.ok(html.includes('data-favorite="1"'), 'the favorited row is marked');
+  assert.match(html, /data-snapshot="[^"]*&quot;q&quot;/, 'the snapshot travels with the row');
+  assert.ok(html.includes('window.__FAVORITES__'), 'the store is embedded for the client');
+  assert.ok(html.includes('window.__SERVE__ = false'));
+  assert.ok(html.includes('id="tabFavs"') && html.includes('收藏 (2)'));
+  assert.ok(html.includes('id="missingFavs"') && html.includes('已不在板面'));
+  assert.ok(html.includes('Gone'), 'a favorite that left the board is still listed');
+  assert.ok(html.includes('data-remove-fav="arc|0xdead"'));
+  assert.ok(html.includes('导出 targets.json（收藏）') && html.includes('导出 favorites.jsonl（分析）'));
+  assert.ok(html.includes('复制筛选链接'));
+  assert.ok(html.includes('location.hash'), 'filters are mirrored into the URL');
+  assert.ok(html.includes('静态页面：收藏与筛选保存在本浏览器'), 'file:// mode says where the data lives');
+
+  // A favorites store without the target is not an error.
+  const empty = renderDashboard(rows, { generatedAt: 'now', sources: [] }, {});
+  assert.ok(empty.includes('data-favorite="0"'));
+  assert.ok(empty.includes('收藏 (0)'));
+});

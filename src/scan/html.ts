@@ -15,6 +15,8 @@ import { ContractEntry, ScanState } from "./state";
 import { creatorStatsFor, qualityScore, safeImageUrl, safeLinkUrl } from "./quality";
 import type { CreatorFact, CreatorStats, Phase, Penalty, QualityDimension, QualityResult, QualitySignals, SocialFact } from "./quality";
 import type { CalendarFacts } from "./calendar";
+import { emptyFavorites, favoriteKey, FavoritesStore } from "./favorites";
+import { FAVORITES_CLIENT } from "./panel-client";
 import { toUtc8Time } from "../time-format";
 
 export type { Phase };
@@ -595,7 +597,14 @@ function mintedBar(pct: number | null): string {
   return `<div class="bar"><span style="width:${width}%"></span></div>`;
 }
 
-export function renderDashboard(rows: DashboardRow[], meta: DashboardMeta, opts: { serve?: boolean } = {}): string {
+export function renderDashboard(
+  rows: DashboardRow[],
+  meta: DashboardMeta,
+  opts: { serve?: boolean; favorites?: FavoritesStore } = {}
+): string {
+  const favorites = opts.favorites ?? emptyFavorites();
+  const favoriteRows = new Set(rows.map((row) => favoriteKey(row.chain, row.contract)));
+  const missingFavorites = Object.entries(favorites.favorites).filter(([key]) => !favoriteRows.has(key));
   const explorerTx = (chain: string, hash: string | null): string | null => {
     if (!hash) return null;
     const explorer = resolveChain(chain)?.explorer;
@@ -674,8 +683,35 @@ export function renderDashboard(rows: DashboardRow[], meta: DashboardMeta, opts:
               quality.confidence * 100
             )}%</span>`;
 
+      const favorite = favorites.favorites[favoriteKey(row.chain, row.contract)] ?? null;
+      // The snapshot is what the user saw when starring the target: the whole
+      // point is to compare those signals with the outcome later.
+      const snapshot = JSON.stringify({
+        at: new Date().toISOString(),
+        grade: row.grade,
+        q: qScore,
+        confidence: quality.confidence,
+        phase: row.phase,
+        start: row.start,
+        mintPriceWei: row.mintPriceWei,
+        remaining: row.remaining,
+        maxSupply: row.maxSupply,
+        minted: row.minted,
+        velocity24h: row.velocity24h,
+        uniqueMinters: row.uniqueMinters,
+        topMinterShare: row.topMinterShare,
+        smartMinters: row.smartMinters,
+        batchMint: row.batchMint,
+        penalties: quality.penalties,
+        calendarListed: row.calendar !== null,
+        creatorDropCount: row.creator?.dropCount ?? null,
+      });
       const data = [
         `data-chain="${escapeHtml(row.chain)}"`,
+        `data-favorite="${favorite ? "1" : "0"}"`,
+        `data-slug="${escapeHtml(row.slug ?? "")}"`,
+        `data-name="${escapeHtml(row.name ?? "")}"`,
+        `data-snapshot="${escapeHtml(snapshot)}"`,
         `data-grade="${escapeHtml(row.grade ?? "")}"`,
         `data-q="${qScore === null ? "" : qScore}"`,
         `data-instant="${instant ? "1" : "0"}"`,
@@ -774,6 +810,7 @@ export function renderDashboard(rows: DashboardRow[], meta: DashboardMeta, opts:
         mismatchLine,
         batchLine,
         liquidityLine,
+        `<span class="fav-editor"></span>`,
         socialBits.length > 0 ? `<span>社交：${socialBits.join(" · ")}</span>` : "",
         row.creator ? `<span>${creatorText}</span>` : "",
         qBreakdown ? `<span>${qBreakdown}</span>` : "",
@@ -964,6 +1001,14 @@ export function renderDashboard(rows: DashboardRow[], meta: DashboardMeta, opts:
   .pill.unverified { background: var(--warn-soft); color: var(--warn); }
   .pill.disabled { background: var(--danger-soft); color: var(--danger); }
   .warn-text { color: var(--warn); }
+  .tabs { display: flex; gap: 8px; align-items: center; margin: 0 0 10px; }
+  .tabs button.on { background: var(--primary); border-color: var(--primary); color: var(--on-primary); font-weight: 600; }
+  .star { background: none; border: 0; padding: 0 4px 0 0; font-size: 15px; line-height: 1; color: var(--fg-muted); cursor: pointer; }
+  .star.on { color: var(--warn); }
+  tr.main-row.tab-hidden { display: none !important; }
+  .missing { margin: 0 0 12px; padding: 10px 12px; border: 1px solid var(--outline-soft); border-radius: var(--radius); background: var(--bg-soft); }
+  .missing-item { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; padding: 3px 0; }
+  .fav-editor { display: inline-flex; gap: 6px; align-items: center; flex-wrap: wrap; }
   .g-A { background: var(--ok-soft); color: var(--ok); }
   .g-B { background: var(--warn-soft); color: var(--warn); }
   .g-C { background: var(--danger-soft); color: var(--danger); }
@@ -998,6 +1043,27 @@ export function renderDashboard(rows: DashboardRow[], meta: DashboardMeta, opts:
 ${serveBar}
 <div class="cards">${cards}</div>
 <div class="next-open">最近开售：${nextOpenText}</div>
+
+<div class="tabs">
+  <button type="button" data-tab="all" id="tabAll" class="on">全部</button>
+  <button type="button" data-tab="favs" id="tabFavs">收藏 (${Object.keys(favorites.favorites).length})</button>
+  <span id="favHint" class="muted"></span>
+</div>
+
+<div id="missingFavs" class="missing" hidden>
+  <div><strong>已不在板面</strong> <span class="muted">收藏仍在，只是这些目标已从当前视图移除（结束超一周或不再符合阶段）</span></div>
+  ${missingFavorites
+    .map(
+      ([key, record]) => `<div class="missing-item">
+    <span class="mono muted">${escapeHtml(record.chain)}|${escapeHtml(record.contract)}</span>
+    <span class="name-main">${escapeHtml(record.name ?? record.slug ?? "—")}</span>
+    <span class="muted">收藏于 ${escapeHtml((record.addedAt ?? "").slice(0, 16).replace("T", " "))}Z · ${escapeHtml(record.status)}</span>
+    ${record.note ? `<span class="muted">备注：${escapeHtml(record.note)}</span>` : ""}
+    <button type="button" data-remove-fav="${escapeHtml(key)}">移除</button>
+  </div>`
+    )
+    .join("")}
+</div>
 
 <div class="controls">
   <label>等级
@@ -1061,10 +1127,21 @@ ${rowHtml}
 <div class="out">
   <div><strong>短名单</strong> <span class="muted">勾选的目标，每行一个合约地址（可存为 @shortlist.txt）</span></div>
   <textarea id="shortlist" readonly></textarea>
-  <div style="margin-top:6px"><button id="copy">复制</button> <span id="copyNote" class="muted"></span></div>
+  <div style="margin-top:6px">
+    <button id="copy">复制</button>
+    <button id="exportTargets">导出 targets.json（收藏）</button>
+    <button id="exportFavorites">导出 favorites.jsonl（分析）</button>
+    <button id="copyFilterLink">复制筛选链接</button>
+    <span id="copyNote" class="muted"></span>
+    <span id="favNote" class="muted"></span>
+  </div>
   <pre id="commands" class="muted"></pre>
 </div>
 
+<script>
+window.__SERVE__ = ${opts.serve ? "true" : "false"};
+window.__FAVORITES__ = ${JSON.stringify({ version: 1, favorites: favorites.favorites }).replace(/</g, "\\u003c")};
+</script>
 <script>
 (function () {
   var table = document.getElementById("table");
@@ -1166,6 +1243,7 @@ ${rowHtml}
       if (detail && detail.classList.contains("detail")) detail.hidden = !r.classList.contains("open");
     });
   });
+  window.__PANEL__ = { apply: apply, rows: rows };
   document.querySelectorAll(".pick").forEach(function (p) { p.addEventListener("change", updateShortlist); });
   document.getElementById("copy").addEventListener("click", function () {
     var area = document.getElementById("shortlist");
@@ -1178,6 +1256,9 @@ ${rowHtml}
 })();
 </script>
 ${serveScript}
+<script>
+${FAVORITES_CLIENT}
+</script>
 </body>
 </html>
 `;
