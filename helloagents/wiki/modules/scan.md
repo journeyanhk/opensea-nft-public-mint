@@ -37,7 +37,8 @@
 ### 需求: OpenSea 日历第二信息源（M7/A1）
 **模块:** scan
 - `src/scan/calendar.ts`：`parseCalendar`（只读页面中含 `urql_transport` 的 script push JSON，找 `dropCalendar.items`；**解析不到即 throw**）、`fetchCalendar`（固定浏览器 UA、跟随 307、15s 超时）、`calendarVerdict`（金丝雀：某链由有变 0 / 总量骤降 >80%）、`upsertCalendar`（只补日历字段，slug 已存在不覆盖）
-- `refreshCalendar`（scanner）：每 `CALENDAR_INTERVAL_MIN`（默认 15）抓一次；失败记 `calendar unavailable` 并沿用旧快照（绝不静默清空）；成功更新 `state.calendar.counts` 作为下次金丝雀基线
+- `refreshCalendar`（scanner）：每 `CALENDAR_INTERVAL_MIN`（默认 15）抓一次；**只保留 `opts.chains` 里的链**（否则 Ethereum/Base 条目会永久停在 unaudited 并浪费 OpenSea 配额），金丝雀基线同样只看配置链；失败记 `calendar unavailable` 并沿用旧快照（绝不静默清空）；成功更新 `state.calendar.{counts,warnings}`（warnings 经 `/api/status` 可见）
+- 日历新建条目置 `pendingAudit=true`：它既不在本次日志窗口里也没有 `publicStart`，不置位就永远不会被审计
 - 面板：`日历/未认证/平台禁用` 徽标 + 明细（收录时间/开售/地板/最高报价/供应/阶段数）；`classifyPhase` 对「未来开售但尚无链上事实」的条目判 `upcoming` 而不是 `unaudited`
 
 ### 需求: 聪明铸造者集合与批量痕迹（M7/A3+A4）

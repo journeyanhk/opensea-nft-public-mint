@@ -56,7 +56,7 @@ export interface ScanState {
   contracts: Record<string, Record<string, ContractEntry>>;
   // Last successful calendar read: used to throttle the 1 MB page and to run
   // the canary (a chain that goes from listed to empty is a parser problem).
-  calendar?: { fetchedAt: string; counts: Record<string, number> };
+  calendar?: { fetchedAt: string; counts: Record<string, number>; warnings?: string[] };
 }
 
 export function emptyState(): ScanState {

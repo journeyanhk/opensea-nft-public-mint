@@ -60,6 +60,7 @@
 - 看板：新增 `24h net / 72h net` 两列（读取 `.backfill.jsonl`，`--backfill-file` 可覆盖）、每 5 分钟自动刷新
 
 ### 修复
+- review12（阶段 A 部署前）：① `refreshCalendar` 改为只保留本次扫描配置的链（原按「已注册链」过滤，Ethereum/Base 条目会长期占着状态且永远不审计），金丝雀基线同样按配置链计算；② 日历新建条目置 `pendingAudit=true`（原状态既无事件又无 `publicStart`，不在任何候选种子列表里，永远不会被审计）；③ 日历新增 `publicStartTime`（最后阶段＝公售猜测），面板开售回退与 `schedule mismatch` 只与它比较（最早阶段通常只是预售波次），明细标注「最早为预售阶段」；④ `ScanState.calendar.warnings` 持久化并经 `/api/status` 暴露
 - review11 四项（M5b 运营与评分边界）：
   1) **OpenSea 限速与 429**：新增共享令牌桶 `RateLimiter`（`OPENSEA_RPS`，默认 2 req/s）与 `limitedFetch`（429 读 `retry-after` 退避重试一次、其余非 2xx 计 `rateLimited` 并在结尾提示；所有请求 15s 超时、X 10s），修掉"900+ 合约迁移大面积静默失败、反复重跑"的问题
   2) **状态并发写**：刷新改为字段级合并写（`saveStateMerged`），不再整文件覆盖；`--serve` 每轮用 `REFRESH_PER_TICK`（默认 20）自行消化积压，首次迁移无需停服

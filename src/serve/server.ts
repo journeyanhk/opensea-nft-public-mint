@@ -121,6 +121,7 @@ export function createServer(options: ServerOptions): http.Server {
           lastReports: scheduler.status.lastReports,
           backfill: scheduler.status.backfill,
           refresh: scheduler.status.refresh,
+          calendar: scheduler.status.calendar,
           log: sanitizeLog(scheduler.status.log.slice(-20)),
         });
       }

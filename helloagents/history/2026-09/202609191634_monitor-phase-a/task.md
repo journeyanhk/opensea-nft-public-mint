@@ -44,3 +44,13 @@
 - A4-lite 采用自动派生（售罄 drop 的吃满/重复铸造地址，≥2 次合格），无需人工名单；第一版只做铸造侧，Seaport 买卖与转账分类留待后续。
 - 批量痕迹用 `maxTxTokens`（按 transactionHash 归组，单笔 ≥10 个即命中）+ `payerDiffers`；原设计中的"caller 为合约抽样"未做——需要 events 扫描保留样本 tx hash 再补 RPC，已记录为后续项。
 - A2 的逐笔 Sale 样本（页面 collectionActivity）未做：当前用回填汇总证据给出流动性标签，`conservativeValuation` 纯函数已按护栏实现并测好，接入真实样本即可产出参考价。
+
+## review12 修复（部署前，同日）
+
+- [√] `refreshCalendar` 只保留 `opts.chains` 里的链；金丝雀基线同样按配置链过滤（原实现会把 Ethereum/Base 条目写进状态，永远 unaudited 并浪费 OpenSea 配额）
+- [√] 日历新建条目 `pendingAudit=true`——原状态下它既不在日志窗口也没有 `publicStart`，不在任何候选种子列表里，**永远不会被审计**（比 review 描述更严重）
+- [√] 新增 `calendar.publicStartTime`（最后阶段＝公售猜测）：面板开售回退与 `schedule mismatch` 只与它比较，最早阶段只是预售波次；明细标注「最早为预售阶段」
+- [√] `state.calendar.warnings` 持久化 + `/api/status.calendar` 暴露（日历失败/金丝雀告警可见）
+- [√] 真链验证：`chains: ["robinhood"]` 抓取后状态只有 robinhood（3 条、全部 `pendingAudit=true`），`publicStartTime` 与首阶段相差数天（证明对比基准修正的必要）；测试 126/126
+
+**未做（如实记录）：** 无地址条目的 `calendarPending` 暂存（OpenSea 可能对未部署合约返回空地址）；逐笔 Sale 样本采集；caller-为合约的抽样判定。

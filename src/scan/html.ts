@@ -262,11 +262,14 @@ export function loadDashboardRows(
         : null;
       const chainStart = entry.publicStart ?? latest?.start ?? null;
       const calendar = entry.calendar ?? null;
-      const start = chainStart ?? calendar?.startTime ?? null;
+      // The last stage is the public sale; the first is usually a presale wave,
+      // so the fallback and the reschedule check both use the public guess.
+      const calendarPublicStart = calendar?.publicStartTime ?? calendar?.startTime ?? null;
+      const start = chainStart ?? calendarPublicStart;
       const endTime = entry.endTime ?? latest?.endTime ?? calendar?.endTime ?? null;
       // A start the project moved without updating the calendar (or vice versa).
       const calendarMismatch =
-        calendar?.startTime != null && chainStart != null && Math.abs(chainStart - calendar.startTime) > 60;
+        calendarPublicStart != null && chainStart != null && Math.abs(chainStart - calendarPublicStart) > 60;
       const slug = entry.slug ?? latest?.slug ?? null;
       const name = entry.name ?? latest?.name ?? null;
       const owner = entry.owner ?? latest?.owner ?? null;
@@ -718,6 +721,10 @@ export function renderDashboard(rows: DashboardRow[], meta: DashboardMeta, opts:
       const calendarLine = row.calendar
         ? `<span>日历：收录 ${escapeHtml(row.calendar.listedAt.slice(0, 16).replace("T", " "))}Z${
             row.calendar.startTime ? ` · 开售 ${escapeHtml(toUtc8Time(new Date(row.calendar.startTime * 1000)))}` : ""
+          }${
+            row.calendar.publicStartTime != null && row.calendar.startTime != null && row.calendar.publicStartTime !== row.calendar.startTime
+              ? "（最早为预售阶段）"
+              : ""
           }${
             row.calendar.floorValue != null
               ? ` · 地板 ${escapeHtml(String(row.calendar.floorValue))} ${escapeHtml(row.calendar.floorSymbol ?? "")}${

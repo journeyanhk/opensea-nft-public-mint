@@ -20,7 +20,8 @@ export interface CalendarStage {
 
 export interface CalendarFacts {
   listedAt: string;
-  startTime: number | null; // earliest stage
+  startTime: number | null; // earliest stage (often a presale wave)
+  publicStartTime: number | null; // last stage: the public-sale guess
   endTime: number | null; // latest stage
   floorUsd: number | null;
   floorValue: number | null;
@@ -126,6 +127,7 @@ export function parseCalendar(html: string): CalendarEntry[] {
         chain,
         address: str(raw.identifier?.contractAddress),
         startTime: starts.length > 0 ? Math.min(...starts) : null,
+        publicStartTime: starts.length > 0 ? Math.max(...starts) : null,
         endTime: ends.length > 0 ? Math.max(...ends) : null,
         floorUsd: num(floor?.usd),
         floorValue: num(floor?.token?.unit),
@@ -208,6 +210,7 @@ export function upsertCalendar(state: ScanState, entries: CalendarEntry[], at: s
     const facts: CalendarFacts = {
       listedAt: at,
       startTime: entry.startTime,
+      publicStartTime: entry.publicStartTime,
       endTime: entry.endTime,
       floorUsd: entry.floorUsd,
       floorValue: entry.floorValue,
@@ -233,6 +236,7 @@ export function upsertCalendar(state: ScanState, entries: CalendarEntry[], at: s
         name: entry.name,
         sources: ["opensea-calendar"],
         calendar: facts,
+        pendingAudit: true,
       };
       added++;
     }

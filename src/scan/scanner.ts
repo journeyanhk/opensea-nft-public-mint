@@ -168,15 +168,26 @@ export async function refreshCalendar(state: ScanState, opts: CalendarOptions = 
   const last = state.calendar?.fetchedAt ? Date.parse(state.calendar.fetchedAt) : NaN;
   if (Number.isFinite(last) && now.getTime() - last < interval) return null;
 
+  const scoped = opts.chains;
   try {
     const snapshot = await (opts.calendarFn ?? (() => fetchCalendar()))();
-    const supported = snapshot.entries.filter((entry) => resolveChain(entry.chain));
+    const supported = snapshot.entries.filter(
+      (entry) => resolveChain(entry.chain) && (scoped === undefined || scoped.includes(entry.chain))
+    );
     const counts: Record<string, number> = {};
     for (const entry of supported) counts[entry.chain] = (counts[entry.chain] ?? 0) + 1;
 
-    const { warnings } = calendarVerdict(state.calendar?.counts ?? null, counts);
+    // The canary baseline only covers chains we scan, otherwise a chain that is
+    // simply not configured would look like a parser regression every run.
+    const previous =
+      state.calendar?.counts === undefined
+        ? null
+        : Object.fromEntries(
+            Object.entries(state.calendar.counts).filter(([chain]) => scoped === undefined || scoped.includes(chain))
+          );
+    const { warnings } = calendarVerdict(previous, counts);
     const result = upsertCalendar(state, supported, snapshot.fetchedAt);
-    state.calendar = { fetchedAt: snapshot.fetchedAt, counts };
+    state.calendar = { fetchedAt: snapshot.fetchedAt, counts, warnings };
     for (const warning of warnings) opts.onProgress?.(`calendar canary: ${warning}`);
     return { ...result, counts, warnings };
   } catch (err) {
@@ -189,6 +200,7 @@ export interface CalendarOptions {
   calendarFn?: () => Promise<CalendarSnapshot>;
   intervalMs?: number;
   now?: () => Date;
+  chains?: string[]; // only these chains land in the state; others are dropped
   onProgress?: (message: string) => void;
 }
 
@@ -230,6 +242,7 @@ export async function runScan(
     calendarFn: opts.calendarFn,
     intervalMs: opts.calendarIntervalMs,
     now: opts.now,
+    chains: opts.chains,
     onProgress,
   });
   if (calendarUpdate && (calendarUpdate.added > 0 || calendarUpdate.updated > 0)) saveState(state, statePath);

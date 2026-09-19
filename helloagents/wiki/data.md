@@ -138,8 +138,8 @@
 | contracts[chain][addr].imageUrl / twitter / discord / website / createdDate / safelist | string \| null | `collections/<slug>`（**无需 key**）读取的合集身份字段；`--refresh-targets` 补齐 |
 | contracts[chain][addr].socialCheckedAt | string \| null | collections 已读时间；即使合集没有社交链接也会写入，避免反复请求（404 视为已读，限流/网络失败不写、下次重试） |
 | contracts[chain][addr].sources | string[] | 条目的发现来源：`onchain` / `opensea-calendar`（可并存） |
-| contracts[chain][addr].calendar | object \| null | OpenSea 日历事实：`listedAt/startTime/endTime/floorUsd/floorValue/floorSymbol/topOfferValue/volume24h*/isVerified/disabledReason/maxSupply/totalSupply/stages[]`；只补齐、不覆盖链上事实（链上开售时间优先，相差 >1 分钟标 `schedule mismatch`） |
-| ScanState.calendar | object \| undefined | `{ fetchedAt, counts }`：上次成功抓取时间（节流）与各链条目数（金丝雀基线） |
+| contracts[chain][addr].calendar | object \| null | OpenSea 日历事实：`listedAt/startTime（最早阶段）/publicStartTime（最后阶段＝公售猜测）/endTime/floorUsd/floorValue/floorSymbol/topOfferValue/volume24h*/isVerified/disabledReason/maxSupply/totalSupply/stages[]`；只补齐、不覆盖链上事实（链上开售时间优先，与 `publicStartTime` 相差 >1 分钟标 `schedule mismatch`）；日历新建条目置 `pendingAudit=true` |
+| ScanState.calendar | object \| undefined | `{ fetchedAt, counts, warnings? }`：上次成功抓取时间（节流）、**配置链**的条目数（金丝雀基线）与最近一次金丝雀告警；`/api/status` 直接暴露 |
 | contracts[chain][addr].xFollowers / xCheckedAt | number \| null / string \| null | X 粉丝数与读取时间；仅 `ENABLE_X_METRICS=1` 时抓取（`api.fxtwitter.com/<handle>`），24 小时缓存，失败静默 |
 
 M7/A2 的流动性派生（不落盘）：`liquidity { level, label }`（`traded/thin/stale-evidence/unknown`，取自最近一次回填检查点的 `salesCount/uniqueBuyers/at`）与创作者 `withSales`（其它 drop 中 `salesCount ≥ 3` 的数量，作有界加分）。

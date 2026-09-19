@@ -26,6 +26,7 @@ export interface SchedulerStatus {
     | null;
   backfill: BackfillSummary | null;
   refresh: RefreshSummary | null;
+  calendar: { fetchedAt: string; counts: Record<string, number>; warnings?: string[] } | null;
   rowCount: number;
 }
 
@@ -47,6 +48,7 @@ export class Scheduler {
       lastReports: null,
       backfill: null,
       refresh: null,
+      calendar: null,
       rowCount: 0,
     };
   }
@@ -157,6 +159,7 @@ export class Scheduler {
         loadBackfill(this.config.backfillPath)
       );
       this.status.rowCount = this.rows.length;
+      this.status.calendar = state.calendar ?? null;
     } catch (err) {
       this.log(`rows rebuild failed: ${(err as Error).message}`);
     }

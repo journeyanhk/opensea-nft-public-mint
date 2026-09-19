@@ -24,6 +24,9 @@ test('parseCalendar reads the urql_transport dropCalendar payload', () => {
   assert.equal(rare.totalSupply, '1024');
   assert.equal(rare.stages.length, 3);
   assert.equal(rare.startTime, Math.floor(Date.parse('2026-09-14T18:00:20.000Z') / 1000));
+  // The last stage is the public sale; the first is usually a presale wave, so
+  // schedule comparisons must not use it.
+  assert.equal(rare.publicStartTime, Math.floor(Date.parse('2026-09-14T19:30:20.000Z') / 1000));
 
   const eth = entries.find((e) => e.slug === '2o1-patrons');
   assert.equal(eth.chain, 'ethereum');
@@ -73,6 +76,9 @@ test('upsertCalendar fills calendar facts without clobbering chain facts', () =>
   assert.equal(fresh.slug, 'opencatz-by-dizcorvus');
   assert.deepEqual(fresh.sources, ['opensea-calendar']);
   assert.equal(fresh.firstSeenBlock, 0);
+  // Without this the entry is in neither candidate seed list (no events, no
+  // publicStart yet) and would never be audited.
+  assert.equal(fresh.pendingAudit, true, 'a calendar discovery must be queued for audit');
 });
 
 test('fetchCalendar sends a browser UA and a timeout', async () => {
@@ -114,7 +120,8 @@ test('a calendar-only target is upcoming, not unaudited, and renders its calenda
         disabledReason: null,
         maxSupply: '5000',
         totalSupply: '5000',
-        stages: [{ startTime: start - 7200, endTime: null }],
+        publicStartTime: start,
+        stages: [{ startTime: start, endTime: null }],
       },
     },
   };
@@ -147,6 +154,30 @@ test('a future calendar start keeps missing facts unknown rather than unaudited'
     classifyPhase({ startSec: now - 3600, endSec: null, nowSec: now, minted: null, maxSupply: null, stale: false, soldOut: false }),
     'unaudited'
   );
+});
+
+test('refreshCalendar only keeps the chains this scan is configured for', async () => {
+  const { refreshCalendar } = require('../dist/scan/scanner');
+  const now = new Date('2026-09-19T08:00:00.000Z');
+  const entries = parseCalendar(fixture);
+  const state = emptyState();
+  const update = await refreshCalendar(state, {
+    now: () => now,
+    chains: ['robinhood'],
+    calendarFn: async () => ({ fetchedAt: now.toISOString(), entries }),
+  });
+  assert.deepEqual(update.counts, { robinhood: 3 });
+  assert.equal(Object.keys(state.contracts.ethereum ?? {}).length, 0, 'ethereum entries must not land in the state');
+
+  // A chain we do not scan must not trip the canary either.
+  const scoped = emptyState();
+  scoped.calendar = { fetchedAt: '2026-09-19T07:00:00.000Z', counts: { robinhood: 3, ethereum: 1 } };
+  const second = await refreshCalendar(scoped, {
+    now: () => now,
+    chains: ['robinhood'],
+    calendarFn: async () => ({ fetchedAt: now.toISOString(), entries: entries.filter((e) => e.chain === 'robinhood') }),
+  });
+  assert.deepEqual(second.warnings, []);
 });
 
 test('refreshCalendar throttles, applies the snapshot and canaries failures', async () => {
@@ -184,6 +215,7 @@ test('refreshCalendar throttles, applies the snapshot and canaries failures', as
     calendarFn: async () => ({ fetchedAt: now.toISOString(), entries: [parseCalendar(fixture)[0]] }),
   });
   assert.ok(partial.warnings.includes('chain-empty:robinhood'));
+  assert.deepEqual(canary.calendar.warnings, ['chain-empty:robinhood'], 'warnings are persisted for /api/status');
 
   const failing = emptyState();
   failing.calendar = { fetchedAt: '2026-09-19T07:00:00.000Z', counts: { robinhood: 3 } };
