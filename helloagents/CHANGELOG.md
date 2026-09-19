@@ -57,6 +57,12 @@
 - 看板：新增 `24h net / 72h net` 两列（读取 `.backfill.jsonl`，`--backfill-file` 可覆盖）、每 5 分钟自动刷新
 
 ### 修复
+- review11 四项（M5b 运营与评分边界）：
+  1) **OpenSea 限速与 429**：新增共享令牌桶 `RateLimiter`（`OPENSEA_RPS`，默认 2 req/s）与 `limitedFetch`（429 读 `retry-after` 退避重试一次、其余非 2xx 计 `rateLimited` 并在结尾提示；所有请求 15s 超时、X 10s），修掉"900+ 合约迁移大面积静默失败、反复重跑"的问题
+  2) **状态并发写**：刷新改为字段级合并写（`saveStateMerged`），不再整文件覆盖；`--serve` 每轮用 `REFRESH_PER_TICK`（默认 20）自行消化积压，首次迁移无需停服
+  3) **创作者评分自我包含**：`creatorStatsFor` 评分时排除目标自身，`dropCount=0`（没有其它 drop）返回 null 让维度退出，消除"热门项目靠自己热度拿创作者分"的循环论证与单 drop 的凭空 0.41
+  4) **秒空标签**：新增 `instant-sellout` 惩罚/徽标（免费 + 预售吃掉 ≥40% 供应 + 独立地址 ≥1000 + 每钱包 ≥5），名称列红色标注、筛选可排除、预设默认排除
+- 需求维度回退：未开售且无速度时用**预售已吃掉的比例**作代理（吃掉 50% 记满分），避免 upcoming 目标的需求维度恒为未知
 - M6 面板部署后无法筛选：主行 `<tr>` 漏了脚本所选的 `class="main-row"`，`querySelectorAll("tr.main-row")` 得到 0 行，所有筛选/排序/展开都是空操作；同时短名单区块被复制了一份导致 `shortlist/copy/copyNote/commands` 四个重复 id（DevTools 报 "Duplicate form field id"）。已补上类名、删除重复区块，并新增防回归断言：渲染页面 id 唯一、主行数量与类名一致、脚本绑定所需的元素必须出现在脚本之前
 - 面板链接指向 item 页：slug 此前只存在于审计历史（且升级前的行没有），无 slug 时兜底成 `opensea.io/assets/...`（会跳到 item）。现在 `ContractEntry` 持久化 `slug/name`（每个合约只解析一次），面板优先 `/collection/<slug>`，未解析时只给浏览器链接并标 `slug?`；新增 `--refresh-targets` 一次性补齐（幂等，可重复执行）
 - 已结束/长期开放项目混入面板：引入 **phase 模型**（`upcoming` / `live-fresh` / `live` / `stale` / `sold-out` / `ended` / `unaudited`），由合约状态与廉价的链上事实判定；面板默认只显示 upcoming + live-fresh，其余分阶段隐藏并计数，开售超过一周且已结束的行不再渲染（状态保留供创作者历史）；`live`（开售 >24h）与 `unaudited` 不再靠陈旧规则放行

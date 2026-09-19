@@ -120,6 +120,7 @@ export function createServer(options: ServerOptions): http.Server {
           openseaKey: (process.env.OPENSEA_API_KEY || "").trim().length > 0 ? "set" : "unset",
           lastReports: scheduler.status.lastReports,
           backfill: scheduler.status.backfill,
+          refresh: scheduler.status.refresh,
           log: sanitizeLog(scheduler.status.log.slice(-20)),
         });
       }

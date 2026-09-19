@@ -1,6 +1,6 @@
 const { test } = require('node:test');
 const assert = require('node:assert/strict');
-const { aggregateCreators, qualityScore, safeImageUrl, safeLinkUrl } = require('../dist/scan/quality');
+const { aggregateCreators, creatorStatsFor, qualityScore, safeImageUrl, safeLinkUrl } = require('../dist/scan/quality');
 
 const now = 1_758_000_000;
 
@@ -56,6 +56,7 @@ const strongCreator = {
 
 const strongSignals = {
   phase: 'live-fresh',
+  presaleShare: 0,
   stale: false,
   mintPriceWei: '0',
   startSec: now - 3600,
@@ -170,4 +171,43 @@ test('safeLinkUrl only allows http(s) links', () => {
   assert.equal(safeLinkUrl('http://example.com'), 'http://example.com/'); // normalised by URL()
   assert.equal(safeLinkUrl('javascript:alert(1)'), null);
   assert.equal(safeLinkUrl('  '), null);
+});
+
+test('creatorStatsFor excludes the target itself so it cannot score on its own success', () => {
+  const facts = [
+    { owner: '0xOwner', chain: 'arc', contract: '0x1', soldOut: true, maxSupply: 100n, minted: 100n, velocity24h: 900n },
+    { owner: '0xOwner', chain: 'arc', contract: '0x2', soldOut: false, maxSupply: 100n, minted: 10n, velocity24h: 10n },
+  ];
+  const excludingSelf = creatorStatsFor('0xowner', facts, [], undefined, { chain: 'arc', contract: '0x1' });
+  assert.equal(excludingSelf.dropCount, 1);
+  assert.equal(excludingSelf.avgVelocity24h, 10);
+  assert.equal(excludingSelf.soldOutRate, 0);
+
+  // No other drop: the creator dimension must be absent, not a phantom 0.41.
+  const onlySelf = creatorStatsFor('0xowner', [facts[0]], [], undefined, { chain: 'arc', contract: '0x1' });
+  assert.equal(onlySelf, null);
+});
+
+test('a creator with a single drop does not add a phantom creator dimension', () => {
+  const result = qualityScore({
+    ...strongSignals,
+    creator: { owner: '0xowner', dropCount: 0, soldOutRate: null, avgVelocity24h: null, salesCount: null, ownMints: 0, ownNetUsd: null, ownData: false },
+  });
+  assert.equal(result.dimensions.creator, null);
+  assert.ok(result.confidence < 1);
+});
+
+test('instant-sellout flags free presale-heavy drops a single wallet cannot win', () => {
+  const base = { ...strongSignals, mintPriceWei: '0', presaleShare: 0.6, uniqueMinters: 1500, capPerWallet: 5 };
+  assert.ok(qualityScore(base).penalties.includes('instant-sellout'));
+  assert.ok(!qualityScore({ ...base, presaleShare: 0.3 }).penalties.includes('instant-sellout'));
+  assert.ok(!qualityScore({ ...base, uniqueMinters: 999 }).penalties.includes('instant-sellout'));
+  assert.ok(!qualityScore({ ...base, capPerWallet: 1 }).penalties.includes('instant-sellout'));
+  assert.ok(!qualityScore({ ...base, mintPriceWei: '1000000000000000' }).penalties.includes('instant-sellout'));
+});
+
+test('demand falls back to the absorbed presale share when there is no velocity yet', () => {
+  assert.equal(qualityScore({ ...strongSignals, velocity24h: null, presaleShare: 0.5 }).dimensions.demand, 100);
+  assert.equal(qualityScore({ ...strongSignals, velocity24h: null, presaleShare: 0.25 }).dimensions.demand, 50);
+  assert.equal(qualityScore({ ...strongSignals, velocity24h: null, presaleShare: null }).dimensions.demand, null);
 });

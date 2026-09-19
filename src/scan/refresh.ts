@@ -13,10 +13,86 @@ import { resolveChain } from "../chains";
 import { planRpcs, resolveScanRpcs } from "../rpc-resolver";
 import { buildLocalMintPlan, fetchMintStats } from "../seadrop-public";
 import { resolveSlug } from "../slug-resolver";
-import { ContractEntry, ScanState, loadState, saveState, DEFAULT_STATE_PATH } from "./state";
+import { ContractEntry, ScanState, loadState, saveStateMerged, StatePatch, DEFAULT_STATE_PATH } from "./state";
 
 const ZERO_ADDRESS = "0x0000000000000000000000000000000000000000";
 const CONCURRENCY = 3;
+const REQUEST_TIMEOUT_MS = 15_000;
+
+// A 900-contract migration is thousands of OpenSea requests; a free key allows
+// only a few per second, so every call goes through one shared limiter and a
+// 429 is retried once (honouring retry-after) instead of being read as "no data".
+export interface LimiterDeps {
+  now?: () => number;
+  sleep?: (ms: number) => Promise<void>;
+}
+
+export class RateLimiter {
+  private nextAt = 0;
+  private readonly now: () => number;
+  private readonly sleep: (ms: number) => Promise<void>;
+
+  constructor(private readonly rps: number, deps: LimiterDeps = {}) {
+    this.now = deps.now ?? (() => Date.now());
+    this.sleep = deps.sleep ?? ((ms) => new Promise((resolve) => setTimeout(resolve, ms)));
+  }
+
+  async acquire(): Promise<void> {
+    const interval = this.rps > 0 ? 1000 / this.rps : 0;
+    const at = this.now();
+    const wait = Math.max(0, this.nextAt - at);
+    this.nextAt = Math.max(at, this.nextAt) + interval;
+    if (wait > 0) await this.sleep(wait);
+  }
+}
+
+let sharedLimiter: RateLimiter | null = null;
+
+function defaultLimiter(): RateLimiter {
+  const configured = Number(process.env.OPENSEA_RPS);
+  const rps = Number.isFinite(configured) && configured > 0 ? configured : 2;
+  return (sharedLimiter ??= new RateLimiter(rps));
+}
+
+export interface LimitedFetchDeps {
+  fetchFn?: (url: string, init: RequestInit) => Promise<Response>;
+  sleep?: (ms: number) => Promise<void>;
+  limiter?: { acquire(): Promise<void> };
+  timeoutMs?: number;
+}
+
+export interface LimitedFetchResult {
+  response: Response | null;
+  rateLimited: boolean;
+}
+
+export async function limitedFetch(url: string, init: RequestInit, deps: LimitedFetchDeps = {}): Promise<LimitedFetchResult> {
+  const sleep = deps.sleep ?? ((ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms)));
+  const timeoutMs = deps.timeoutMs ?? REQUEST_TIMEOUT_MS;
+  const fetchFn = deps.fetchFn ?? ((target: string, options: RequestInit) => fetch(target, options));
+
+  for (let attempt = 0; attempt < 2; attempt++) {
+    await deps.limiter?.acquire();
+    let response: Response;
+    try {
+      response = await fetchFn(url, { ...init, signal: init.signal ?? AbortSignal.timeout(timeoutMs) });
+    } catch {
+      if (attempt === 1) return { response: null, rateLimited: false };
+      continue;
+    }
+    if (response.status !== 429) return { response, rateLimited: false };
+    if (attempt === 1) return { response: null, rateLimited: true };
+    const retryAfter = Number(response.headers?.get?.("retry-after"));
+    const waitMs = Number.isFinite(retryAfter) && retryAfter > 0 ? Math.min(retryAfter * 1000, 15_000) : 5_000;
+    await sleep(waitMs);
+  }
+  return { response: null, rateLimited: false };
+}
+
+interface OpenSeaCallDeps {
+  limiter?: { acquire(): Promise<void> };
+  onRateLimited?: () => void;
+}
 
 export function needsRefresh(entry: ContractEntry): boolean {
   return (
@@ -63,11 +139,16 @@ export function xMetricsDue(entry: ContractEntry, nowSec: number, enabled: boole
   return !Number.isFinite(at) || nowSec - at / 1000 > 86_400;
 }
 
-async function fetchXFollowers(handle: string): Promise<number | null> {
+async function fetchXFollowers(handle: string, deps: OpenSeaCallDeps = {}): Promise<number | null> {
+  const { response, rateLimited } = await limitedFetch(
+    `https://api.fxtwitter.com/${encodeURIComponent(handle.replace(/^@/, ""))}`,
+    { headers: { accept: "application/json" } },
+    { limiter: deps.limiter, timeoutMs: 10_000 }
+  );
+  if (rateLimited) deps.onRateLimited?.();
+  if (!response || !response.ok) return null;
   try {
-    const res = await fetch(`https://api.fxtwitter.com/${encodeURIComponent(handle.replace(/^@/, ""))}`);
-    if (!res.ok) return null;
-    const json = (await res.json()) as { user?: { followers?: unknown } };
+    const json = (await response.json()) as { user?: { followers?: unknown } };
     const followers = json?.user?.followers;
     return typeof followers === "number" && Number.isFinite(followers) ? followers : null;
   } catch {
@@ -82,6 +163,7 @@ export interface RefreshOptions {
   onProgress?: (message: string) => void;
   resolveSlugFn?: (chain: string, contract: string) => Promise<string | null>;
   collectionFn?: (slug: string) => Promise<CollectionFacts | null>;
+  limiter?: { acquire(): Promise<void> };
   xEnabled?: boolean;
 }
 
@@ -92,6 +174,7 @@ export interface RefreshSummary {
   factsUpdated: number;
   socialsUpdated: number;
   xUpdated: number;
+  rateLimited: number;
   errors: number;
   remaining: number;
 }
@@ -101,15 +184,16 @@ function apiKey(): string | null {
   return key.length > 0 ? key : null;
 }
 
-async function reverseSlug(chain: string, contract: string): Promise<string | null> {
+async function reverseSlug(chain: string, contract: string, deps: OpenSeaCallDeps = {}): Promise<string | null> {
   const key = apiKey();
   if (!key) return null;
+  const { response, rateLimited } = await limitedFetch(`https://api.opensea.io/api/v2/chain/${chain}/contract/${contract}`, {
+    headers: { accept: "application/json", "x-api-key": key },
+  }, { limiter: deps.limiter });
+  if (rateLimited) deps.onRateLimited?.();
+  if (!response || !response.ok) return null;
   try {
-    const res = await fetch(`https://api.opensea.io/api/v2/chain/${chain}/contract/${contract}`, {
-      headers: { accept: "application/json", "x-api-key": key },
-    });
-    if (!res.ok) return null;
-    const json = (await res.json()) as { collection?: string };
+    const json = (await response.json()) as { collection?: string };
     return json.collection ?? null;
   } catch {
     return null;
@@ -139,15 +223,19 @@ async function readOwner(rpcUrl: string, contract: string): Promise<string | nul
 // The collections endpoint is readable without a key, so socials and the image
 // arrive even on a keyless box. A 404 is authoritative (nothing to read, stop
 // asking); a rate limit or a network blip returns null and is retried later.
-async function fetchCollection(slug: string): Promise<CollectionFacts | null> {
+async function fetchCollection(slug: string, deps: OpenSeaCallDeps = {}): Promise<CollectionFacts | null> {
+  const key = apiKey();
+  const { response, rateLimited } = await limitedFetch(
+    `https://api.opensea.io/api/v2/collections/${encodeURIComponent(slug)}`,
+    { headers: key ? { accept: "application/json", "x-api-key": key } : { accept: "application/json" } },
+    { limiter: deps.limiter }
+  );
+  if (rateLimited) deps.onRateLimited?.();
+  if (!response) return null;
+  if (response.status === 404) return socialFromCollection(null); // authoritative: nothing to read
+  if (!response.ok) return null; // rate limit / network: retry next run
   try {
-    const key = apiKey();
-    const res = await fetch(`https://api.opensea.io/api/v2/collections/${encodeURIComponent(slug)}`, {
-      headers: key ? { accept: "application/json", "x-api-key": key } : { accept: "application/json" },
-    });
-    if (res.status === 404) return socialFromCollection(null);
-    if (!res.ok) return null;
-    return socialFromCollection(await res.json());
+    return socialFromCollection(await response.json());
   } catch {
     return null;
   }
@@ -181,7 +269,20 @@ export async function refreshTargets(opts: RefreshOptions): Promise<RefreshSumma
   let factsUpdated = 0;
   let socialsUpdated = 0;
   let xUpdated = 0;
+  let rateLimited = 0;
   let errors = 0;
+
+  const limiter = opts.limiter ?? defaultLimiter();
+  const onRateLimited = (): void => {
+    rateLimited++;
+  };
+  const collectionFn = opts.collectionFn ?? ((slug: string) => fetchCollection(slug, { limiter, onRateLimited }));
+  const slugFn =
+    opts.resolveSlugFn ?? ((chain: string, contract: string) => reverseSlug(chain, contract, { limiter, onRateLimited }));
+  // Only the fields actually refreshed are written back, merged into whatever is
+  // on disk, so a scan running at the same time cannot be overwritten.
+  const patches: StatePatch["contracts"] = {};
+  const flush = (): void => saveStateMerged({ contracts: patches }, statePath);
 
   const getRpc = async (chain: string): Promise<string | null> => {
     if (rpcByChain.has(chain)) return rpcByChain.get(chain)!;
@@ -198,6 +299,7 @@ export async function refreshTargets(opts: RefreshOptions): Promise<RefreshSumma
       const index = cursor++;
       if (index >= batch.length) return;
       const { chain, contract, entry } = batch[index];
+      const patch: Partial<ContractEntry> = {};
       try {
         const rpc = await getRpc(chain);
         if (!rpc) {
@@ -210,30 +312,34 @@ export async function refreshTargets(opts: RefreshOptions): Promise<RefreshSumma
         if (plan) {
           entry.publicStart = plan.drop.startTime;
           entry.endTime = plan.drop.endTime;
+          patch.publicStart = plan.drop.startTime;
+          patch.endTime = plan.drop.endTime;
         }
         if (stats) {
           entry.maxSupply = stats.maxSupply > 0n ? stats.maxSupply.toString() : null;
           entry.totalMinted = stats.totalMinted.toString();
+          patch.maxSupply = entry.maxSupply;
+          patch.totalMinted = entry.totalMinted;
         }
         if (plan || stats) factsUpdated++;
 
         if (entry.slug === null || entry.slug === undefined) {
-          const slug = opts.resolveSlugFn
-            ? await opts.resolveSlugFn(chain, contract)
-            : await reverseSlug(chain, contract);
+          const slug = await slugFn(chain, contract);
           if (slug) {
             entry.slug = slug;
+            patch.slug = slug;
             slugsResolved++;
           }
         }
         if (entry.name === null || entry.name === undefined) {
           entry.name = await readName(rpc, contract);
+          if (entry.name) patch.name = entry.name;
         }
         if (entry.owner === null || entry.owner === undefined) {
           entry.owner = await readOwner(rpc, contract);
+          if (entry.owner) patch.owner = entry.owner;
         }
 
-        const collectionFn = opts.collectionFn ?? fetchCollection;
         if (entry.slug && entry.socialCheckedAt == null) {
           const facts = await collectionFn(entry.slug);
           if (facts) {
@@ -244,29 +350,41 @@ export async function refreshTargets(opts: RefreshOptions): Promise<RefreshSumma
             entry.createdDate = facts.createdDate;
             entry.safelist = facts.safelist;
             entry.socialCheckedAt = new Date().toISOString();
+            Object.assign(patch, {
+              imageUrl: facts.imageUrl,
+              twitter: facts.twitter,
+              discord: facts.discord,
+              website: facts.website,
+              createdDate: facts.createdDate,
+              safelist: facts.safelist,
+              socialCheckedAt: entry.socialCheckedAt,
+            });
             socialsUpdated++;
           }
         }
 
         if (xMetricsDue(entry, Math.floor(Date.now() / 1000), xEnabled) && entry.twitter) {
-          const followers = await fetchXFollowers(entry.twitter);
+          const followers = await fetchXFollowers(entry.twitter, { limiter, onRateLimited });
           if (followers !== null) {
             entry.xFollowers = followers;
             entry.xCheckedAt = new Date().toISOString();
+            patch.xFollowers = followers;
+            patch.xCheckedAt = entry.xCheckedAt;
             xUpdated++;
           }
         }
+        (patches[chain] ??= {})[contract.toLowerCase()] = patch;
         processed++;
       } catch (err) {
         errors++;
         progress(`${chain}/${contract}: ${(err as Error).message}`);
       }
-      if (processed % 25 === 0) saveState(state, statePath);
+      if (processed % 25 === 0) flush();
     }
   };
   await Promise.all(Array.from({ length: Math.min(CONCURRENCY, batch.length) }, worker));
 
-  saveState(state, statePath);
+  flush();
   return {
     candidates: work.length,
     processed,
@@ -274,6 +392,7 @@ export async function refreshTargets(opts: RefreshOptions): Promise<RefreshSumma
     factsUpdated,
     socialsUpdated,
     xUpdated,
+    rateLimited,
     errors,
     remaining: Math.max(0, work.length - processed),
   };
@@ -308,6 +427,13 @@ export async function runRefreshCommand(args: string[]): Promise<void> {
       `  candidates ${summary.candidates} | processed ${summary.processed} | slugs +${summary.slugsResolved} | facts +${summary.factsUpdated} | socials +${summary.socialsUpdated} | x +${summary.xUpdated} | errors ${summary.errors}`
     )
   );
+  if (summary.rateLimited > 0) {
+    console.log(
+      chalk.yellow(
+        `  OpenSea rate-limited ${summary.rateLimited} request(s) — lower OPENSEA_RPS (now ${process.env.OPENSEA_RPS ?? "2"}) or retry later`
+      )
+    );
+  }
   if (summary.remaining > 0) {
     console.log(chalk.bold(`  ${summary.remaining} still need refreshing — run this command again`));
   } else {

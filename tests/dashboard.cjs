@@ -414,9 +414,12 @@ test('rows carry quality, creator stats and only whitelisted media', () => {
 
   const rows = loadDashboardRows(richState, richHistory, { version: 1, entries: {} }, () => null, backfills);
   const row = rows.find((r) => r.contract === '0xdef');
-  assert.equal(row.creator.dropCount, 2);
-  assert.equal(row.creator.ownNetUsd, 2);
-  assert.equal(row.creator.ownData, true);
+  // 0xdef and 0xbad share 0xOwner, but a target must not score on its own
+  // success: the target itself is excluded from its creator history.
+  assert.equal(row.creator.dropCount, 1, 'the target itself is excluded from its creator history');
+  assert.equal(row.creator.avgVelocity24h, null, 'its own velocity must not count as creator evidence');
+  assert.equal(row.creator.ownNetUsd, null, 'the net on the target itself must not count');
+  assert.equal(row.creator.ownData, false);
   assert.ok(row.quality.score >= 60, `expected a strong score, got ${row.quality.score}`);
   assert.ok(row.quality.confidence > 0.5);
 
@@ -437,6 +440,43 @@ test('the quality preset narrows to free, A/B, Q>=60 and fresh phases', () => {
   assert.match(html, /<option value="60">/);
   assert.ok(html.includes('Q≥60'));
   assert.ok(html.includes('document.getElementById("qFilter").value = "60"'));
+  assert.ok(html.includes('id="excludeInstant"'));
+  assert.ok(html.includes('document.getElementById("excludeInstant").checked = true'));
+});
+
+test('instant-sellout targets are flagged, filterable and excluded by the preset', () => {
+  const now = Math.floor(Date.now() / 1000);
+  const instantState = {
+    version: 1,
+    chains: {},
+    contracts: {
+      arc: {
+        '0xiii': {
+          firstSeenBlock: 1, lastSeenBlock: 10, lastAuditedBlock: 10, lastAuditedAt: '2026-09-19T08:00:00.000Z',
+          lastGrade: 'A', soldOutAtBlock: null, publicStart: now - 3600, pendingAudit: false, slug: 'hot',
+          name: 'Hot', endTime: now + 86_400, maxSupply: '1000', totalMinted: '50', owner: '0xOwner',
+          socialCheckedAt: '2026-09-19T08:00:00.000Z',
+        },
+      },
+    },
+  };
+  const instantHistory = [
+    { at: new Date(now * 1000).toISOString(), chain: 'arc', contract: '0xiii', grade: 'A', remaining: '950', projected: '0', start: now - 3600, minted: '50', maxSupply: '1000', uniqueMinters: 1500, topMinterShare: 0.1, presaleStages: 1, capPerWallet: 5, recent1h: '10', mintPriceWei: '0' },
+  ];
+  const instantCache = {
+    mintScan: {
+      stages: [{ stage: 1, txs: 1, tokens: 600n, uniqueMinters: 1200, topMinterTokens: 10n, firstBlock: 1, lastBlock: 2, price: 0n }],
+      totalTxs: 1, totalTokens: 600n, uniqueMinters: 1200, topMinterShare: 0.1, firstBlock: 1, lastBlock: 2, recentTokens: 600n,
+    },
+    updates: [],
+    scannedAt: 1,
+  };
+
+  const rows = loadDashboardRows(instantState, instantHistory, { version: 1, entries: {} }, () => instantCache);
+  assert.ok(rows[0].quality.penalties.includes('instant-sellout'));
+  const html = renderDashboard(rows, { generatedAt: 'now', sources: [] });
+  assert.ok(html.includes('data-instant="1"'));
+  assert.ok(html.includes('预计秒空'));
 });
 
 test('the rendered page has unique ids, main-row hooks and bindable elements', () => {

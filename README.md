@@ -141,7 +141,7 @@ npm start -- --scan --chain robinhood --since-days 3 --limit 5   # 首次回看 
 npm start -- --scan --chain arc --no-audit            # 只看发现，不审计
 npm start -- --report dashboard.html                   # 从本地状态生成静态看板（可单独用）
 npm start -- --backfill                                # 结算已成功 mint 的 +24h/+72h 成本与地板价
-npm start -- --refresh-targets [--limit 200]           # 补齐 slug/名称/owner/社交与链上事实（可重复执行直到 all entries）
+npm start -- --refresh-targets [--limit 200]           # 补齐 slug/名称/owner/社交与链上事实（限速 + 可重复执行直到 all entries）
 ```
 
 行为说明：
@@ -158,14 +158,16 @@ npm start -- --refresh-targets [--limit 200]           # 补齐 slug/名称/owne
 - 注意币种：Robinhood 部分收藏以 **USDG（6 位小数）**计价，而成本是 ETH——净值只有两边都能换算成 USD 时才计算，避免混币种相减。Seaport 扫描走 `SCAN_RPC_URL_<CHAIN>` / 公共端点；OpenSea stats 与地址→slug 反查需要你的长期 key（Settings → Developer）
 - 面板默认视图 = **phase: upcoming + live-fresh**：只显示「未开始」和「刚开售 24h 内」的目标；`ended` / `sold-out` / `stale` / `live`（开售超过 24h）/ `unaudited`（缺事实的旧记录）默认隐藏并在状态行显示各阶段隐藏数量，可用 phase 下拉切换；开售超过一周且已结束的行会从面板移除（状态保留）
 - 链接：已知 slug 时指向 `opensea.io/collection/<slug>`；未解析出 slug 的行只给区块浏览器链接并标 `slug?`，运行 `npm start -- --refresh-targets` 补齐（**slug 反查需要 `OPENSEA_API_KEY`**；每个合约只查一次并永久缓存）
+- OpenSea 请求有限速：所有调用共用一个令牌桶，`OPENSEA_RPS`（默认 2 次/秒，免费 key 建议 1–2）；遇到 429 会读 `retry-after` 退避重试一次，仍失败则计入 `rateLimited` 并在结尾提示，其它非 2xx（含 404）按「无数据」处理。`--serve` 下 `REFRESH_PER_TICK`（默认 20，0 = 关闭）让服务每轮自行补一批目标，首次迁移**无需停服**；手动 `--refresh-targets` 与 `--serve` 同时跑也安全——刷新的写入是字段级合并（`saveStateMerged`），不会覆盖并发扫描发现的合约或游标
 - 面板界面（M6 起）：cladd 风扁平主题（令牌驱动的多级灰/圆角/强调色，深色浅色自适应），顶部摘要卡显示各**阶段**数量、免费数、队列中数量与最近开售倒计时；表头与「名称」列粘性固定，行点击展开明细（阶段拆分、备注/风险、社交、创作者历史、Q 分拆分、slug/owner、执行结果、24/72 时净值、等级轨迹）
 - 表格 14 个核心列：名称/合约（含**缩略图**）、等级、**Q 分（含置信度）**、阶段、开售时间、价格、每钱包上限、已铸（含进度条）、剩余、15分/1时铸造、铸造地址（含集中度）、24时速度→售罄预计、链接
 - 面板文案全部为中文（阶段值：未开售/新开售/在售/陈旧/售罄/已结束/待复审）；名称、slug、合约地址、链 key、txHash 与金额单位保持原文；**CLI 仍为英文**（仓库约定）
-- 筛选与预设：等级、**Q 分（≥40/≥60/≥80）**、阶段、链、仅免费、仅队列中、仅已执行、搜索；预设按钮「免费 · A/B · Q≥60 · 未开售」一键收窄；被阶段过滤隐藏的行显示分组计数，价格未知的行在「仅免费」下保留并计数
+- 筛选与预设：等级、**Q 分（≥40/≥60/≥80）**、阶段、链、仅免费、仅队列中、仅已执行、**排除预计秒空**、搜索；预设按钮「免费 · A/B · Q≥60 · 未开售」一键收窄（默认勾选「排除预计秒空」）；被阶段过滤隐藏的行显示分组计数，价格未知的行在「仅免费」下保留并计数
 - M5b 信号：缩略图只允许 https 且域名属于 `seadn.io` / `opensea.io`；社交（X/Discord/官网）、创建日期与 safelist 均来自 `collections/<slug>`（**无需 key**），由 `--refresh-targets` 一并补齐（已读但确实没有链接的合集记为「已知为空」，不会反复请求）
-- 创作者历史按 `owner` 聚合：drop 数、售罄率、平均 24h 速度、已扫到的二级成交笔数；有账本/回填证据时叠加「自有数据」（mint 数、净值）并上调 Q 分置信度
-- Q 分 0–100 = 需求 30 + 真实参与 20 + 创作者 20 + 社交身份 15 + 结构 15 加权；**未知维度不计分、只降低 `confidence`**（列中显示的百分比），惩罚项（陈旧、集中度高、无社交）在展开明细里单独标注。权重是经验初值，观察后可调，集中在 `src/scan/quality.ts`
-- X 粉丝数默认关闭；`ENABLE_X_METRICS=1` 时用 `api.fxtwitter.com/<handle>` 抓取（24 小时缓存、失败静默），显示在展开明细的社交一行
+- 创作者历史按 `owner` 聚合：drop 数、售罄率、平均 24h 速度、已扫到的二级成交笔数；有账本/回填证据时叠加「自有数据」（mint 数、净值）并上调 Q 分置信度。**评分时排除目标自身**：一个项目不能靠自己的热度给自己加创作者分；只有这一个 drop 的创作者维度视为未知（不计分、降置信度），而不是给一个凭空的中间分
+- Q 分 0–100 = 需求 30 + 真实参与 20 + 创作者 20 + 社交身份 15 + 结构 15 加权；**未知维度不计分、只降低 `confidence`**（列中显示的百分比），惩罚项（陈旧、集中度高、无社交、**预计秒空**）在展开明细里单独标注。未开售且无速度时，需求维度回退用**预售已吃掉的比例**（吃掉 50% 记满分）；权重是经验初值，观察后可调，集中在 `src/scan/quality.ts`
+- **预计秒空**：免费 + 预售已吃掉 ≥40% 供应 + 独立地址 ≥1000 + 每钱包上限 ≥5（The Obscura 那类）时，公售剩余大概率被批量合约秒光——名称列用红色徽标标出，预设默认过滤掉，避免 Q 分把你引向一定抢不到的目标
+- X 粉丝数默认关闭；`ENABLE_X_METRICS=1` 时用 `api.fxtwitter.com/<handle>` 抓取（10s 超时、24 小时缓存、失败静默），显示在展开明细的社交一行
 - 陈旧规则：开售 >24h 且 已铸 <10% 且 24h 铸造 < max(5, 0.1%×supply)；开售 72 小时内的目标每 30 分钟复审，形成速度序列
 - 旧历史记录没有新字段（显示为空），新审计会逐步补齐；活跃目标优先。勾选 `free only` 时价格未知的行会保留并计数（`N price unknown`）
 - `--report <out.html>` 生成单文件静态看板（无 server、无外部资源、file:// 直接打开）：按开售时间排序，显示等级、剩余/预计、分阶段铸造、变更与风险标注、执行结果（含浏览器交易链接）与等级变化轨迹；支持按等级/链筛选、排序、搜索，勾选后一键复制短名单与审计/导出命令（可另行保存成 `@shortlist.<chain>.txt`）
@@ -298,7 +300,9 @@ caddy hash-password --plaintext '你的强密码'   # 填入 deploy/Caddyfile.ex
 sudo cp deploy/Caddyfile.example /etc/caddy/Caddyfile && sudo systemctl reload caddy
 ```
 
-打开 `https://<你的域名>/`：顶部状态条显示扫描进度与行数，可点 **Scan now** 立即触发；表格与 `--report` 完全一致。
+打开 `https://<你的域名>/`：顶部状态条显示扫描进度与行数，可点 **Scan now** 立即触发；表格与 `--report` 完全一致。状态条与 `/api/status` 也会显示每轮的 refresh 结果（`processed/socials/x/rate-limited/remaining`）。
+
+首次迁移无需停服：`REFRESH_PER_TICK`（默认 20）会让服务每轮扫描后补一批目标，若干轮后自行清空积压；想更快可在另一终端手动跑 `npm start -- --refresh-targets --limit 200`（字段级合并写，不会与服务的扫描互相覆盖），但请把 `OPENSEA_RPS` 保持在你 key 的限额内。
 
 验收要点：`journalctl` 里一轮扫描有清晰的开始/结束；页面首轮 5–10 分钟内有数据（Robinhood 1 天回填约 3–5 分钟）；`ps eww <pid>` 或 `tr '\0' '\n' < /proc/<pid>/environ | grep PRIVATE` 应无输出。
 

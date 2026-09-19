@@ -139,6 +139,7 @@
 | contracts[chain][addr].socialCheckedAt | string \| null | collections 已读时间；即使合集没有社交链接也会写入，避免反复请求（404 视为已读，限流/网络失败不写、下次重试） |
 | contracts[chain][addr].xFollowers / xCheckedAt | number \| null / string \| null | X 粉丝数与读取时间；仅 `ENABLE_X_METRICS=1` 时抓取（`api.fxtwitter.com/<handle>`），24 小时缓存，失败静默 |
 
-M5b 的派生字段（不落盘，`loadDashboardRows` 计算）：`social`（已知但为空 ≠ 未知）、`creator`（按 owner 聚合的 drop 数/售罄率/平均 24h 速度/二级成交/自有净值与 `ownData` 标记）、`quality`（0–100 分 + `confidence` 覆盖率 + 维度拆分 + 惩罚项，见 `src/scan/quality.ts`）。缩略图仅在域名属于 `seadn.io` / `opensea.io` 且为 https 时才进 `src`；社交链接仅允许 http(s)。
+M5b 的派生字段（不落盘，`loadDashboardRows` 计算）：`social`（已知但为空 ≠ 未知）、`creator`（按 owner 聚合的 drop 数/售罄率/平均 24h 速度/二级成交/自有净值与 `ownData` 标记；**评分时排除目标自身**，`dropCount=0` 表示没有其它 drop → 创作者维度视为未知）、`presaleShare`（预售阶段铸出量 / 上限，来自审计缓存；用于需求代理与秒空判定）、`quality`（0–100 分 + `confidence` 覆盖率 + 维度拆分 + 惩罚项，见 `src/scan/quality.ts`）。缩略图仅在域名属于 `seadn.io` / `opensea.io` 且为 https 时才进 `src`；社交链接仅允许 http(s)。
+并发写入：刷新用 `saveStateMerged(patch)` 做**字段级合并**（只写本次刷新的字段，先读回文件再合并），因此与正在运行的 `--serve` 扫描（整文件 `saveState`）不会互相抹掉合约或游标。
 
 `scan-history.jsonl` 每行：`{ at, chain, contract, grade, remaining, projected, start }`。

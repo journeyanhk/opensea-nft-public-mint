@@ -11,7 +11,7 @@ import { CachedScan, readCachedScan } from "../audit/audit";
 import { Ledger, entryOf } from "../batch-ledger";
 import { BackfillRecord, formatNetUsd } from "./backfill";
 import { ContractEntry, ScanState } from "./state";
-import { aggregateCreators, qualityScore, safeImageUrl, safeLinkUrl } from "./quality";
+import { creatorStatsFor, qualityScore, safeImageUrl, safeLinkUrl } from "./quality";
 import type { CreatorFact, CreatorStats, Phase, Penalty, QualityDimension, QualityResult, QualitySignals, SocialFact } from "./quality";
 import { toUtc8Time } from "../time-format";
 
@@ -99,6 +99,7 @@ export interface DashboardRow {
   sellOutEtaHours: number | null;
   stale: boolean;
   phase: Phase;
+  presaleShare: number | null;
   imageUrl: string | null;
   xFollowers: number | null;
   social: SocialFact | null;
@@ -268,6 +269,13 @@ export function loadDashboardRows(
       if (phase === 'ended' && endTime !== null && endTime + 7 * 86_400 < nowSec) continue;
       const explorer = resolveChain(chain)?.explorer ?? "";
       const social = socialFact(entry);
+      // Share of the supply the presale stages absorbed (only known when an
+      // audit cache exists); it is both a demand proxy and a sell-out warning.
+      const presaleTokens = (cached?.mintScan.stages ?? [])
+        .filter((stage) => stage.stage !== 0)
+        .reduce((sum, stage) => sum + stage.tokens, 0n);
+      const presaleShare =
+        cached && maxSupply !== null && maxSupply > 0n ? Number((presaleTokens * 10_000n) / maxSupply) / 10_000 : null;
       const row: DashboardRow = {
         chain,
         contract,
@@ -309,6 +317,7 @@ export function loadDashboardRows(
         sellOutEtaHours: sellOutEtaHours(remainingNow, velocity.per24h),
         stale,
         phase,
+        presaleShare,
         imageUrl: safeImageUrl(entry.imageUrl),
         xFollowers: entry.xFollowers ?? null,
         social,
@@ -336,6 +345,7 @@ export function loadDashboardRows(
           uniqueMinters: row.uniqueMinters,
           topMinterShare: row.topMinterShare,
           presaleStages: row.presaleStages,
+          presaleShare,
           capPerWallet: row.capPerWallet,
           social,
         },
@@ -343,10 +353,13 @@ export function loadDashboardRows(
     }
   }
 
-  const creators = aggregateCreators(facts, backfills, ledger);
+  // A target must not score on its own success, so its creator history is
+  // aggregated with the target itself excluded (dropCount 0 then means unknown).
   for (const { row, signals } of pending) {
     const creatorKey = (row.owner ?? "").trim().toLowerCase();
-    row.creator = creatorKey ? creators.get(creatorKey) ?? null : null;
+    row.creator = creatorKey
+      ? creatorStatsFor(creatorKey, facts, backfills, ledger, { chain: row.chain, contract: row.contract })
+      : null;
     row.quality = qualityScore({ ...signals, nowSec, creator: row.creator });
   }
 
@@ -496,6 +509,7 @@ const PENALTY_ZH: Record<Penalty, string> = {
   stale: "陈旧",
   concentrated: "集中度高",
   "no-socials": "无社交",
+  "instant-sellout": "预计秒空",
 };
 
 function netClass(net: string | null | undefined): string {
@@ -567,6 +581,10 @@ export function renderDashboard(rows: DashboardRow[], meta: DashboardMeta, opts:
       const thumb = row.imageUrl ? `<img class="thumb" src="${escapeHtml(row.imageUrl)}" alt="" loading="lazy">` : "";
       const quality = row.quality ?? EMPTY_QUALITY;
       const qScore = quality.score;
+      const instant = quality.penalties.includes("instant-sellout");
+      const instantPill = instant
+        ? ` <span class="pill instant" title="预售已吃掉大部分供应、地址多且每钱包至少 5 个，公售剩余大概率被批量合约秒光">预计秒空</span>`
+        : "";
       const qCell =
         qScore === null
           ? `<span class="pill q-none" title="数据不足，不足以评分">—</span>`
@@ -578,6 +596,7 @@ export function renderDashboard(rows: DashboardRow[], meta: DashboardMeta, opts:
         `data-chain="${escapeHtml(row.chain)}"`,
         `data-grade="${escapeHtml(row.grade ?? "")}"`,
         `data-q="${qScore === null ? "" : qScore}"`,
+        `data-instant="${instant ? "1" : "0"}"`,
         `data-phase="${escapeHtml(row.phase)}"`,
         `data-start="${row.start ?? ""}"`,
         `data-pending="${row.pendingAudit ? "1" : "0"}"`,
@@ -657,7 +676,7 @@ export function renderDashboard(rows: DashboardRow[], meta: DashboardMeta, opts:
 
       return `<tr ${data} class="main-row">
   <td class="col-check"><input type="checkbox" class="pick" value="${escapeHtml(row.contract)}" data-chain="${escapeHtml(row.chain)}"></td>
-  <td class="col-name">${thumb}<span class="caret">▸</span><span class="name-main">${escapeHtml(row.name ?? "—")}</span><div class="mono muted">${escapeHtml(row.contract)}</div></td>
+  <td class="col-name">${thumb}<span class="caret">▸</span><span class="name-main">${escapeHtml(row.name ?? "—")}</span>${instantPill}<div class="mono muted">${escapeHtml(row.contract)}</div></td>
   <td>${gradeCell}</td>
   <td class="num">${qCell}</td>
   <td><span class="pill phase phase-${escapeHtml(row.phase)}">${PHASE_ZH[row.phase]}</span></td>
@@ -821,6 +840,7 @@ export function renderDashboard(rows: DashboardRow[], meta: DashboardMeta, opts:
   .q-mid { background: var(--warn-soft); color: var(--warn); }
   .q-weak { background: var(--danger-soft); color: var(--danger); }
   .q-none { background: var(--outline-soft); color: var(--fg-muted); }
+  .pill.instant { background: var(--danger-soft); color: var(--danger); border-color: var(--danger-soft); }
   .g-A { background: var(--ok-soft); color: var(--ok); }
   .g-B { background: var(--warn-soft); color: var(--warn); }
   .g-C { background: var(--danger-soft); color: var(--danger); }
@@ -889,6 +909,7 @@ ${serveBar}
   <label><input type="checkbox" id="freeOnly"> 仅免费</label>
   <label><input type="checkbox" id="onlyPending"> 仅队列中</label>
   <label><input type="checkbox" id="onlyExecuted"> 仅已执行</label>
+  <label><input type="checkbox" id="excludeInstant"> 排除预计秒空</label>
   <label>搜索 <input id="search" type="search" placeholder="名称 / 合约 / 链"></label>
   <button id="presetFresh" class="primary">免费 · A/B · Q≥60 · 未开售</button>
   <span id="hiddenCount" class="muted"></span>
@@ -937,6 +958,7 @@ ${rowHtml}
     var pending = document.getElementById("onlyPending").checked;
     var executed = document.getElementById("onlyExecuted").checked;
     var freeOnly = document.getElementById("freeOnly").checked;
+    var excludeInstant = document.getElementById("excludeInstant").checked;
     var phaseFilter = document.getElementById("phaseFilter").value;
     var qMin = parseInt(document.getElementById("qFilter").value, 10) || 0;
     var q = document.getElementById("search").value.toLowerCase();
@@ -948,6 +970,7 @@ ${rowHtml}
         && (!pending || r.dataset.pending === "1")
         && (!executed || r.dataset.executed === "1")
         && (!freeOnly || r.dataset.free === "1" || r.dataset.free === "")
+        && (!excludeInstant || r.dataset.instant !== "1")
         && (!qMin || (r.dataset.q !== "" && parseFloat(r.dataset.q) >= qMin))
         && (!q || r.dataset.target.toLowerCase().indexOf(q) >= 0);
       var phase = r.dataset.phase;
@@ -980,7 +1003,7 @@ ${rowHtml}
     document.getElementById("commands").textContent = commands;
   }
 
-  ["gradeFilter", "chainFilter", "onlyPending", "onlyExecuted", "freeOnly", "phaseFilter", "qFilter"].forEach(function (id) {
+  ["gradeFilter", "chainFilter", "onlyPending", "onlyExecuted", "freeOnly", "excludeInstant", "phaseFilter", "qFilter"].forEach(function (id) {
     document.getElementById(id).addEventListener("change", apply);
   });
   document.getElementById("presetFresh").addEventListener("click", function () {
@@ -988,6 +1011,7 @@ ${rowHtml}
     document.getElementById("freeOnly").checked = true;
     document.getElementById("phaseFilter").value = "focus";
     document.getElementById("qFilter").value = "60";
+    document.getElementById("excludeInstant").checked = true;
     document.getElementById("onlyPending").checked = false;
     document.getElementById("onlyExecuted").checked = false;
     apply();

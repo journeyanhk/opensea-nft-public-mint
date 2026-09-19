@@ -22,6 +22,7 @@ export interface ServeConfig {
   lookbackDays: number;
   horizonHours: number;
   includeMints: boolean;
+  refreshPerTick: number; // how many targets the serve loop backfills per cycle (0 = never)
   exportsDir: string;
   statePath: string;
   historyPath: string;
@@ -44,6 +45,11 @@ function positiveNumber(value: string | undefined, fallback: number): number {
   return Number.isFinite(n) && n > 0 ? n : fallback;
 }
 
+function nonNegativeNumber(value: string | undefined, fallback: number): number {
+  const n = Number(value);
+  return Number.isFinite(n) && n >= 0 ? n : fallback;
+}
+
 export function serveConfig(env: NodeJS.ProcessEnv = process.env): ServeConfig {
   const chains = (env.SCAN_CHAINS ?? "robinhood,arc")
     .split(",")
@@ -59,6 +65,7 @@ export function serveConfig(env: NodeJS.ProcessEnv = process.env): ServeConfig {
     lookbackDays: positiveNumber(env.SCAN_LOOKBACK_DAYS, 0.5),
     horizonHours: positiveNumber(env.SCAN_HORIZON_HOURS, 72),
     includeMints: env.SCAN_INCLUDE_MINTS === "1" || env.SCAN_INCLUDE_MINTS === "true",
+    refreshPerTick: Math.floor(nonNegativeNumber(env.REFRESH_PER_TICK, 20)),
     exportsDir: (env.EXPORTS_DIR ?? "").trim() || path.resolve(process.cwd(), "exports"),
     statePath: (env.SCAN_STATE_PATH ?? "").trim() || DEFAULT_STATE_PATH,
     historyPath: (env.SCAN_HISTORY_PATH ?? "").trim() || DEFAULT_HISTORY_PATH,

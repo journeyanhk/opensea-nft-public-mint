@@ -69,10 +69,60 @@ export function loadState(file = DEFAULT_STATE_PATH): { state: ScanState; corrup
   }
 }
 
+export function emptyContractEntry(): ContractEntry {
+  return {
+    firstSeenBlock: 0,
+    lastSeenBlock: 0,
+    lastAuditedBlock: null,
+    lastAuditedAt: null,
+    lastGrade: null,
+    soldOutAtBlock: null,
+    publicStart: null,
+    pendingAudit: false,
+    lastMintedTotal: null,
+    quietStreak: 0,
+    slug: null,
+    name: null,
+    endTime: null,
+    maxSupply: null,
+    totalMinted: null,
+    owner: null,
+    imageUrl: null,
+    twitter: null,
+    discord: null,
+    website: null,
+    createdDate: null,
+    safelist: null,
+    socialCheckedAt: null,
+    xFollowers: null,
+    xCheckedAt: null,
+  };
+}
+
 export function saveState(state: ScanState, file = DEFAULT_STATE_PATH): void {
   const tmp = `${file}.tmp`;
   fs.writeFileSync(tmp, JSON.stringify(state, null, 2));
   fs.renameSync(tmp, file);
+}
+
+// A refresh must never clobber what a concurrent scan wrote while it worked.
+// Instead of writing its whole in-memory snapshot back, it writes only the
+// fields it actually refreshed, re-reading and merging the file first, so
+// contracts discovered meanwhile and the scan cursors survive.
+export interface StatePatch {
+  contracts: Record<string, Record<string, Partial<ContractEntry>>>;
+}
+
+export function saveStateMerged(patch: StatePatch, file = DEFAULT_STATE_PATH): void {
+  const { state } = loadState(file);
+  for (const [chain, contracts] of Object.entries(patch.contracts)) {
+    const known = (state.contracts[chain] ??= {});
+    for (const [contract, fields] of Object.entries(contracts)) {
+      const key = contract.toLowerCase();
+      known[key] = { ...(known[key] ?? emptyContractEntry()), ...fields };
+    }
+  }
+  saveState(state, file);
 }
 
 export function appendHistory(records: unknown[], file = DEFAULT_HISTORY_PATH): void {
@@ -103,33 +153,7 @@ export function recordContracts(
   for (const [key, block] of newest) {
     const entry = known[key];
     if (!entry) {
-      known[key] = {
-        firstSeenBlock: block,
-        lastSeenBlock: block,
-        lastAuditedBlock: null,
-        lastAuditedAt: null,
-        lastGrade: null,
-        soldOutAtBlock: null,
-        publicStart: null,
-        pendingAudit: false,
-        lastMintedTotal: null,
-        quietStreak: 0,
-        slug: null,
-        name: null,
-        endTime: null,
-        maxSupply: null,
-        totalMinted: null,
-        owner: null,
-        imageUrl: null,
-        twitter: null,
-        discord: null,
-        website: null,
-        createdDate: null,
-        safelist: null,
-        socialCheckedAt: null,
-        xFollowers: null,
-        xCheckedAt: null,
-      };
+      known[key] = { ...emptyContractEntry(), firstSeenBlock: block, lastSeenBlock: block };
       added.push(key);
     } else {
       entry.lastSeenBlock = Math.max(entry.lastSeenBlock, block);

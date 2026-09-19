@@ -29,7 +29,10 @@
 - 幂等、可重复执行；`--limit` 控制单次数量，结束时报告 `remaining`；典型数百合约一两分钟跑完
 - 面板 phase 判定即依赖这些字段：`upcoming`（未开售）、`live-fresh`（开售 ≤24h）、`live`、`stale`、`sold-out`、`ended`、`unaudited`
 - M5b：collections 读取缩略图/社交/创建日期/safelist，404 视为「已知为空」写入 `socialCheckedAt`（不重复请求），限流/网络失败不写、下次重试；`ENABLE_X_METRICS=1` 时额外抓 X 粉丝数（`api.fxtwitter.com`，24h 缓存，失败静默）
-- 创作者历史与 Q 分是派生数据（不落盘）：`src/scan/quality.ts` 的 `aggregateCreators`（按 owner）与 `qualityScore`（0–100 + `confidence`）
+- 限速与 429：所有 OpenSea 调用共用一个 `RateLimiter`（`OPENSEA_RPS`，默认 2 req/s）；`limitedFetch` 对 429 读 `retry-after` 退避重试一次，仍失败计入 `RefreshSummary.rateLimited`；所有请求带 15s 超时（X 为 10s）
+- 并发写安全：刷新只写本次刷新的字段，`saveStateMerged` 先读回文件再按合约字段合并，不会覆盖并发扫描的发现或游标
+- `--serve` 的调度器每轮扫描后跑一次有界刷新（`REFRESH_PER_TICK`，默认 20，0 = 关闭），迁移无需停服；`/api/status` 暴露 `refresh` 摘要
+- 创作者历史与 Q 分是派生数据（不落盘）：`src/scan/quality.ts` 的 `creatorStatsFor(owner, facts, …, exclude)`（按 owner 且排除目标自身）与 `qualityScore`（0–100 + `confidence`；惩罚项含 `instant-sellout`）
 
 ### 需求: 状态与快照
 **模块:** scan

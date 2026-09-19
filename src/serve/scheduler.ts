@@ -8,6 +8,7 @@
 import { loadLedger } from "../batch-ledger";
 import { runScan, ChainScanReport } from "../scan/scanner";
 import { runBackfill, loadBackfill, BackfillSummary } from "../scan/backfill";
+import { refreshTargets, RefreshSummary } from "../scan/refresh";
 import { DashboardRow, loadDashboardRows, loadHistory } from "../scan/html";
 import { loadState } from "../scan/state";
 import { ServeConfig } from "./config";
@@ -24,6 +25,7 @@ export interface SchedulerStatus {
     | { chainKey: string; discovered: number; newContracts: number; candidates: number; audited: number }[]
     | null;
   backfill: BackfillSummary | null;
+  refresh: RefreshSummary | null;
   rowCount: number;
 }
 
@@ -44,6 +46,7 @@ export class Scheduler {
       log: [],
       lastReports: null,
       backfill: null,
+      refresh: null,
       rowCount: 0,
     };
   }
@@ -110,6 +113,24 @@ export class Scheduler {
       });
       this.status.backfill = backfill;
       if (backfill.due > 0) this.log(`backfill — due ${backfill.due}, written ${backfill.written}`);
+
+      // Drain the refresh backlog from the service itself, a bounded slice per
+      // cycle, so a migration needs no stop-the-service window. Disable with
+      // REFRESH_PER_TICK=0 and run `--refresh-targets` manually instead.
+      if (this.config.refreshPerTick > 0) {
+        const refresh = await refreshTargets({
+          limit: this.config.refreshPerTick,
+          statePath: this.config.statePath,
+          onProgress: (message) => this.log(`refresh: ${message}`),
+        });
+        this.status.refresh = refresh;
+        if (refresh.processed > 0) {
+          this.log(
+            `refresh — processed ${refresh.processed}, socials +${refresh.socialsUpdated}, x +${refresh.xUpdated}, ` +
+              `rate-limited ${refresh.rateLimited}, remaining ${refresh.remaining}`
+          );
+        }
+      }
 
       this.rebuildRows();
       this.status.lastScanAt = new Date().toISOString();
