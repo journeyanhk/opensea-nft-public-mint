@@ -188,6 +188,9 @@ export async function refreshCalendar(state: ScanState, opts: CalendarOptions = 
     const { warnings } = calendarVerdict(previous, counts);
     const result = upsertCalendar(state, supported, snapshot.fetchedAt);
     state.calendar = { fetchedAt: snapshot.fetchedAt, counts, warnings };
+    opts.onProgress?.(
+      `calendar — added ${result.added}, updated ${result.updated}, counts ${Object.entries(counts).map(([chain, n]) => chain + ":" + n).join(" ") || "none"}`
+    );
     for (const warning of warnings) opts.onProgress?.(`calendar canary: ${warning}`);
     return { ...result, counts, warnings };
   } catch (err) {
