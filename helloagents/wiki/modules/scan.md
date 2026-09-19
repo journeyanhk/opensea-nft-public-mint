@@ -25,9 +25,11 @@
 
 ### 需求: 状态补齐（--refresh-targets）
 **模块:** scan
-- 对 `.scan-state.json` 中缺 slug/name/endTime/totalMinted 的合约做轻量刷新：`buildLocalMintPlan` + `getMintStats` +（有 key 时）OpenSea 反查 slug + `name()`
+- 对 `.scan-state.json` 中缺 slug/name/endTime/totalMinted/**owner**/**社交**的合约做轻量刷新：`buildLocalMintPlan` + `getMintStats` +（有 key 时）OpenSea 反查 slug + `name()` + `owner()` +（无 key 也可）`collections/<slug>`
 - 幂等、可重复执行；`--limit` 控制单次数量，结束时报告 `remaining`；典型数百合约一两分钟跑完
 - 面板 phase 判定即依赖这些字段：`upcoming`（未开售）、`live-fresh`（开售 ≤24h）、`live`、`stale`、`sold-out`、`ended`、`unaudited`
+- M5b：collections 读取缩略图/社交/创建日期/safelist，404 视为「已知为空」写入 `socialCheckedAt`（不重复请求），限流/网络失败不写、下次重试；`ENABLE_X_METRICS=1` 时额外抓 X 粉丝数（`api.fxtwitter.com`，24h 缓存，失败静默）
+- 创作者历史与 Q 分是派生数据（不落盘）：`src/scan/quality.ts` 的 `aggregateCreators`（按 owner）与 `qualityScore`（0–100 + `confidence`）
 
 ### 需求: 状态与快照
 **模块:** scan

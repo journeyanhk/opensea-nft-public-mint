@@ -58,9 +58,10 @@ export interface ApiStage {
 }
 
 export interface Social {
-  twitter: boolean;
-  discord: boolean;
-  website: boolean;
+  twitter: string | null; // handle, not a URL
+  discord: string | null; // invite URL
+  website: string | null; // project URL
+  imageUrl: string | null;
   createdDate: string | null;
   safelist: string | null;
 }
@@ -380,12 +381,14 @@ export async function auditTarget(input: AuditInput, opts: AuditOptions = {}): P
         fetchJson(`https://api.opensea.io/api/v2/drops/${slug}`, key),
       ]);
       if (collection) {
+        const str = (value: unknown): string | null => (typeof value === "string" && value.trim() ? value.trim() : null);
         social = {
-          twitter: Boolean(collection.twitter_username),
-          discord: Boolean(collection.discord_url),
-          website: Boolean(collection.project_url),
-          createdDate: collection.created_date ?? null,
-          safelist: collection.safelist_status ?? null,
+          twitter: str(collection.twitter_username),
+          discord: str(collection.discord_url),
+          website: str(collection.project_url),
+          imageUrl: str(collection.image_url),
+          createdDate: str(collection.created_date),
+          safelist: str(collection.safelist_status),
         };
       } else {
         errors.push("collections API unavailable or rate-limited");
@@ -445,7 +448,7 @@ export async function auditTarget(input: AuditInput, opts: AuditOptions = {}): P
     scanTokens: mintScan.totalTokens,
     scanCoverage: totalMinted > 0n ? Number((mintScan.totalTokens * 10_000n) / totalMinted) / 10_000 : 1,
     socialKnown: social !== null,
-    socialAny: social !== null && (social.twitter || social.discord || social.website),
+    socialAny: social !== null && Boolean(social.twitter || social.discord || social.website),
     ageHours,
   });
 

@@ -32,6 +32,18 @@ export interface ContractEntry {
   endTime: number | null; // public drop end, unix seconds
   maxSupply: string | null; // getMintStats max, as a string to stay JSON-safe
   totalMinted: string | null; // cumulative minted at the last read
+  // M5b: identity and creator history. All optional-on-read so pre-M5b state
+  // files keep loading; `undefined` is treated like `null`.
+  owner: string | null; // contract owner() / deployer
+  imageUrl: string | null; // collection image (whitelisted at render time)
+  twitter: string | null; // handle, not a URL
+  discord: string | null; // invite URL
+  website: string | null; // project URL
+  createdDate: string | null; // collection creation date, ISO
+  safelist: string | null; // OpenSea safelist status
+  socialCheckedAt: string | null; // when collections was last read (null = never)
+  xFollowers: number | null; // opt-in X follower count
+  xCheckedAt: string | null; // when X metrics were last read
 }
 
 export interface ScanState {
@@ -107,6 +119,16 @@ export function recordContracts(
         endTime: null,
         maxSupply: null,
         totalMinted: null,
+        owner: null,
+        imageUrl: null,
+        twitter: null,
+        discord: null,
+        website: null,
+        createdDate: null,
+        safelist: null,
+        socialCheckedAt: null,
+        xFollowers: null,
+        xCheckedAt: null,
       };
       added.push(key);
     } else {

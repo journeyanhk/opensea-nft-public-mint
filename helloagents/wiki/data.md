@@ -134,5 +134,11 @@
 | contracts[chain][addr].lastMintedTotal / quietStreak | string \| null / number | 上次审计的累计铸造量与连续「无新增」次数；≥2 时复审间隔放宽到 2 小时 |
 | contracts[chain][addr].slug / name | string \| null | OpenSea slug 与代币名称；slug 一经解析永久缓存（`--refresh-targets` 补齐） |
 | contracts[chain][addr].endTime / maxSupply / totalMinted | number \| null / string \| null | 公售结束时间、供应上限、最近一次读到的累计铸造（面板 phase 判定用） |
+| contracts[chain][addr].owner | string \| null | `owner()`（`--refresh-targets` / 审计写入）；M5b 按它聚合创作者历史 |
+| contracts[chain][addr].imageUrl / twitter / discord / website / createdDate / safelist | string \| null | `collections/<slug>`（**无需 key**）读取的合集身份字段；`--refresh-targets` 补齐 |
+| contracts[chain][addr].socialCheckedAt | string \| null | collections 已读时间；即使合集没有社交链接也会写入，避免反复请求（404 视为已读，限流/网络失败不写、下次重试） |
+| contracts[chain][addr].xFollowers / xCheckedAt | number \| null / string \| null | X 粉丝数与读取时间；仅 `ENABLE_X_METRICS=1` 时抓取（`api.fxtwitter.com/<handle>`），24 小时缓存，失败静默 |
+
+M5b 的派生字段（不落盘，`loadDashboardRows` 计算）：`social`（已知但为空 ≠ 未知）、`creator`（按 owner 聚合的 drop 数/售罄率/平均 24h 速度/二级成交/自有净值与 `ownData` 标记）、`quality`（0–100 分 + `confidence` 覆盖率 + 维度拆分 + 惩罚项，见 `src/scan/quality.ts`）。缩略图仅在域名属于 `seadn.io` / `opensea.io` 且为 https 时才进 `src`；社交链接仅允许 http(s)。
 
 `scan-history.jsonl` 每行：`{ at, chain, contract, grade, remaining, projected, start }`。

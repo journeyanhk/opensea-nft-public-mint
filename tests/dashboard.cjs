@@ -368,11 +368,75 @@ test('ended stages stop rendering after a week', () => {
   assert.equal(ancient.length, 0);
 });
 
-test('refresh bookkeeping picks entries that still need facts', () => {
+test('refresh bookkeeping picks entries that still need facts or socials', () => {
   const { needsRefresh } = require('../dist/scan/refresh');
   assert.equal(needsRefresh({ slug: null, name: null, endTime: null, totalMinted: null }), true);
-  assert.equal(needsRefresh({ slug: 'x', name: 'X', endTime: 1, totalMinted: '0' }), false);
-  assert.equal(needsRefresh({ slug: 'x', name: 'X', endTime: 1, totalMinted: '0', maxSupply: null }), false);
+  // Slug, name and facts alone are not enough any more: the owner and the
+  // collections enrichment (image/socials) are what M5b scores on.
+  assert.equal(needsRefresh({ slug: 'x', name: 'X', endTime: 1, totalMinted: '0' }), true);
+  assert.equal(needsRefresh({ slug: 'x', name: 'X', endTime: 1, totalMinted: '0', owner: '0x1' }), true);
+  assert.equal(needsRefresh({ slug: 'x', name: 'X', endTime: 1, totalMinted: '0', owner: '0x1', socialCheckedAt: 't' }), false);
+  assert.equal(needsRefresh({ slug: null, name: 'X', endTime: 1, totalMinted: '0', owner: '0x1', socialCheckedAt: 't' }), true);
+  // Known slug with a public collection that simply has no socials is done.
+  assert.equal(needsRefresh({ slug: 'x', name: 'X', endTime: 1, totalMinted: '0', owner: '0x1', socialCheckedAt: 't' }), false);
+});
+
+test('rows carry quality, creator stats and only whitelisted media', () => {
+  // Live now: an ended drop older than a week is deliberately not rendered.
+  const recentStart = Math.floor(Date.now() / 1000) - 3600;
+  const richState = {
+    version: 1,
+    chains: {},
+    contracts: {
+      arc: {
+        '0xdef': {
+          firstSeenBlock: 1, lastSeenBlock: 10, lastAuditedBlock: 10, lastAuditedAt: '2026-09-17T08:00:00.000Z',
+          lastGrade: 'A', soldOutAtBlock: null, publicStart: recentStart, pendingAudit: false, slug: 'cool', name: 'Cool',
+          endTime: recentStart + 86_400, maxSupply: '1000', totalMinted: '500', owner: '0xOwner',
+          imageUrl: 'https://i.seadn.io/a.png', twitter: 'cool', discord: 'https://discord.gg/x',
+          website: 'https://cool.xyz', createdDate: '2020-01-01T00:00:00.000Z', safelist: 'approved',
+          socialCheckedAt: '2026-09-17T08:00:00.000Z',
+        },
+        '0xbad': {
+          firstSeenBlock: 1, lastSeenBlock: 10, lastAuditedBlock: 10, lastAuditedAt: '2026-09-17T08:00:00.000Z',
+          lastGrade: 'B', soldOutAtBlock: null, publicStart: recentStart, pendingAudit: false, slug: 'bad', name: 'Bad',
+          endTime: recentStart + 86_400, maxSupply: '100', totalMinted: '0', owner: '0xOwner',
+          imageUrl: 'https://evil.com/x.png', socialCheckedAt: '2026-09-17T08:00:00.000Z',
+        },
+      },
+    },
+  };
+  const richHistory = [
+    { at: '2026-09-17T07:00:00.000Z', chain: 'arc', contract: '0xdef', grade: 'A', remaining: '800', projected: '0', start: recentStart, minted: '200', maxSupply: '1000', uniqueMinters: 70, topMinterShare: 0.1, presaleStages: 1, capPerWallet: 2, recent1h: '20' },
+    { at: '2026-09-17T08:00:00.000Z', chain: 'arc', contract: '0xdef', grade: 'A', remaining: '500', projected: '0', start: recentStart, minted: '500', maxSupply: '1000', uniqueMinters: 80, topMinterShare: 0.1, presaleStages: 1, capPerWallet: 2, recent1h: '20' },
+  ];
+  const backfills = [{ chain: 'arc', contract: '0xdef', checkpointHours: 6, salesCount: 5, netUsd: 2 }];
+
+  const rows = loadDashboardRows(richState, richHistory, { version: 1, entries: {} }, () => null, backfills);
+  const row = rows.find((r) => r.contract === '0xdef');
+  assert.equal(row.creator.dropCount, 2);
+  assert.equal(row.creator.ownNetUsd, 2);
+  assert.equal(row.creator.ownData, true);
+  assert.ok(row.quality.score >= 60, `expected a strong score, got ${row.quality.score}`);
+  assert.ok(row.quality.confidence > 0.5);
+
+  const html = renderDashboard(rows, { generatedAt: '现在', sources: ['x'] });
+  assert.ok(html.includes('src="https://i.seadn.io/a.png"'), 'whitelisted thumbnail should render');
+  assert.ok(!html.includes('evil.com'), 'non-whitelisted image host must be dropped');
+  assert.ok(html.includes('data-sort="q"'), 'quality column must be sortable');
+  assert.match(html, /data-q="\d+"/);
+  assert.ok(html.includes('id="qFilter"'));
+  assert.ok(html.includes('创作者'));
+  assert.ok(html.includes('discord.gg/x'));
+});
+
+test('the quality preset narrows to free, A/B, Q>=60 and fresh phases', () => {
+  const rows = loadDashboardRows(state, history, ledger, () => cached);
+  const html = renderDashboard(rows, { generatedAt: 'now', sources: [] });
+  assert.ok(html.includes('id="qFilter"'));
+  assert.match(html, /<option value="60">/);
+  assert.ok(html.includes('Q≥60'));
+  assert.ok(html.includes('document.getElementById("qFilter").value = "60"'));
 });
 
 test('the rendered page has unique ids, main-row hooks and bindable elements', () => {

@@ -368,6 +368,16 @@ export async function runScan(
           entry.totalMinted = result.totalMinted.toString();
           entry.slug = result.slug ?? entry.slug;
           entry.name = result.name ?? entry.name;
+          entry.owner = result.owner ?? entry.owner;
+          if (result.social) {
+            entry.imageUrl = result.social.imageUrl ?? entry.imageUrl;
+            entry.twitter = result.social.twitter ?? entry.twitter;
+            entry.discord = result.social.discord ?? entry.discord;
+            entry.website = result.social.website ?? entry.website;
+            entry.createdDate = result.social.createdDate ?? entry.createdDate;
+            entry.safelist = result.social.safelist ?? entry.safelist;
+            entry.socialCheckedAt = entry.socialCheckedAt ?? entry.lastAuditedAt;
+          }
           entry.pendingAudit = false;
           const mintedNow = result.totalMinted.toString();
           entry.quietStreak = entry.lastMintedTotal === mintedNow ? (entry.quietStreak ?? 0) + 1 : 0;

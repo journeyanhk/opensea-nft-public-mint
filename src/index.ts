@@ -52,7 +52,8 @@ Usage
   npm start -- --backfill [--ledger <file>] [--backfill-after 24,72] [--backfill-file <file>]
                                   settle cost and floor-price checkpoints for minted targets; idempotent
   npm start -- --refresh-targets [--limit N] [--chain <key>] [--state <file>]
-                                  resolve slugs/names and cheap chain facts for the state file (run until "all entries")
+                                  resolve slugs/names/owner and read collections (socials, image) for the state file
+                                  (run until "all entries"); set ENABLE_X_METRICS=1 to also cache X follower counts
   npm start -- --serve            run the scanner/backfill scheduler and the dashboard over http (read-only)
                                   loads .env.serve (never .env) and refuses to start with private keys present
       --report <out.html>         also write a static dashboard from .scan-state.json, .scan-history.jsonl

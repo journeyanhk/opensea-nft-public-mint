@@ -141,7 +141,7 @@ npm start -- --scan --chain robinhood --since-days 3 --limit 5   # 首次回看 
 npm start -- --scan --chain arc --no-audit            # 只看发现，不审计
 npm start -- --report dashboard.html                   # 从本地状态生成静态看板（可单独用）
 npm start -- --backfill                                # 结算已成功 mint 的 +24h/+72h 成本与地板价
-npm start -- --refresh-targets [--limit 200]           # 补齐 slug/名称与链上事实（可重复执行直到 all entries）
+npm start -- --refresh-targets [--limit 200]           # 补齐 slug/名称/owner/社交与链上事实（可重复执行直到 all entries）
 ```
 
 行为说明：
@@ -157,11 +157,15 @@ npm start -- --refresh-targets [--limit 200]           # 补齐 slug/名称与�
 - `--backfill` 对账本中 `SUCCESS` 的目标在 +24h / +72h 结算：链上真实成本（`tx.value + gasUsed × effectiveGasPrice`）+ **Seaport 1.6 链上成交地板价**（无需 key），OpenSea stats 作为补充（有 key 时）；净值统一换算成 USD 写入 `.backfill.jsonl`，看板显示 `24h net / 72h net`。幂等，可挂在扫描循环末尾或每天跑一次
 - 注意币种：Robinhood 部分收藏以 **USDG（6 位小数）**计价，而成本是 ETH——净值只有两边都能换算成 USD 时才计算，避免混币种相减。Seaport 扫描走 `SCAN_RPC_URL_<CHAIN>` / 公共端点；OpenSea stats 与地址→slug 反查需要你的长期 key（Settings → Developer）
 - 面板默认视图 = **phase: upcoming + live-fresh**：只显示「未开始」和「刚开售 24h 内」的目标；`ended` / `sold-out` / `stale` / `live`（开售超过 24h）/ `unaudited`（缺事实的旧记录）默认隐藏并在状态行显示各阶段隐藏数量，可用 phase 下拉切换；开售超过一周且已结束的行会从面板移除（状态保留）
-- 链接：已知 slug 时指向 `opensea.io/collection/<slug>`；未解析出 slug 的行只给区块浏览器链接并标 `slug?`，运行 `npm start -- --refresh-targets` 补齐（需要 `OPENSEA_API_KEY`，每个合约只查一次并永久缓存在 `.scan-state.json`）
-- 面板界面（M6 起）：cladd 风扁平主题（令牌驱动的多级灰/圆角/强调色，深色浅色自适应），顶部摘要卡显示各**阶段**数量、免费数、队列中数量与最近开售倒计时；表头与「名称」列粘性固定，行点击展开明细（阶段拆分、备注/风险、slug/owner、执行结果、24/72 时净值、等级轨迹）
-- 表格 13 个核心列：名称/合约、等级、阶段、开售时间、价格、每钱包上限、已铸（含进度条）、剩余、15分/1时铸造、铸造地址（含集中度）、24时速度→售罄预计、链接
+- 链接：已知 slug 时指向 `opensea.io/collection/<slug>`；未解析出 slug 的行只给区块浏览器链接并标 `slug?`，运行 `npm start -- --refresh-targets` 补齐（**slug 反查需要 `OPENSEA_API_KEY`**；每个合约只查一次并永久缓存）
+- 面板界面（M6 起）：cladd 风扁平主题（令牌驱动的多级灰/圆角/强调色，深色浅色自适应），顶部摘要卡显示各**阶段**数量、免费数、队列中数量与最近开售倒计时；表头与「名称」列粘性固定，行点击展开明细（阶段拆分、备注/风险、社交、创作者历史、Q 分拆分、slug/owner、执行结果、24/72 时净值、等级轨迹）
+- 表格 14 个核心列：名称/合约（含**缩略图**）、等级、**Q 分（含置信度）**、阶段、开售时间、价格、每钱包上限、已铸（含进度条）、剩余、15分/1时铸造、铸造地址（含集中度）、24时速度→售罄预计、链接
 - 面板文案全部为中文（阶段值：未开售/新开售/在售/陈旧/售罄/已结束/待复审）；名称、slug、合约地址、链 key、txHash 与金额单位保持原文；**CLI 仍为英文**（仓库约定）
-- 筛选与预设：等级、阶段、链、仅免费、仅队列中、仅已执行、搜索；预设按钮「免费 · A/B · 未开售」一键收窄；被阶段过滤隐藏的行显示分组计数，价格未知的行在「仅免费」下保留并计数
+- 筛选与预设：等级、**Q 分（≥40/≥60/≥80）**、阶段、链、仅免费、仅队列中、仅已执行、搜索；预设按钮「免费 · A/B · Q≥60 · 未开售」一键收窄；被阶段过滤隐藏的行显示分组计数，价格未知的行在「仅免费」下保留并计数
+- M5b 信号：缩略图只允许 https 且域名属于 `seadn.io` / `opensea.io`；社交（X/Discord/官网）、创建日期与 safelist 均来自 `collections/<slug>`（**无需 key**），由 `--refresh-targets` 一并补齐（已读但确实没有链接的合集记为「已知为空」，不会反复请求）
+- 创作者历史按 `owner` 聚合：drop 数、售罄率、平均 24h 速度、已扫到的二级成交笔数；有账本/回填证据时叠加「自有数据」（mint 数、净值）并上调 Q 分置信度
+- Q 分 0–100 = 需求 30 + 真实参与 20 + 创作者 20 + 社交身份 15 + 结构 15 加权；**未知维度不计分、只降低 `confidence`**（列中显示的百分比），惩罚项（陈旧、集中度高、无社交）在展开明细里单独标注。权重是经验初值，观察后可调，集中在 `src/scan/quality.ts`
+- X 粉丝数默认关闭；`ENABLE_X_METRICS=1` 时用 `api.fxtwitter.com/<handle>` 抓取（24 小时缓存、失败静默），显示在展开明细的社交一行
 - 陈旧规则：开售 >24h 且 已铸 <10% 且 24h 铸造 < max(5, 0.1%×supply)；开售 72 小时内的目标每 30 分钟复审，形成速度序列
 - 旧历史记录没有新字段（显示为空），新审计会逐步补齐；活跃目标优先。勾选 `free only` 时价格未知的行会保留并计数（`N price unknown`）
 - `--report <out.html>` 生成单文件静态看板（无 server、无外部资源、file:// 直接打开）：按开售时间排序，显示等级、剩余/预计、分阶段铸造、变更与风险标注、执行结果（含浏览器交易链接）与等级变化轨迹；支持按等级/链筛选、排序、搜索，勾选后一键复制短名单与审计/导出命令（可另行保存成 `@shortlist.<chain>.txt`）

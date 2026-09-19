@@ -10,8 +10,12 @@ import { resolveChain } from "../chains";
 import { CachedScan, readCachedScan } from "../audit/audit";
 import { Ledger, entryOf } from "../batch-ledger";
 import { BackfillRecord, formatNetUsd } from "./backfill";
-import { ScanState } from "./state";
+import { ContractEntry, ScanState } from "./state";
+import { aggregateCreators, qualityScore, safeImageUrl, safeLinkUrl } from "./quality";
+import type { CreatorFact, CreatorStats, Phase, Penalty, QualityDimension, QualityResult, QualitySignals, SocialFact } from "./quality";
 import { toUtc8Time } from "../time-format";
+
+export type { Phase };
 
 export interface HistoryLine {
   at: string;
@@ -95,6 +99,11 @@ export interface DashboardRow {
   sellOutEtaHours: number | null;
   stale: boolean;
   phase: Phase;
+  imageUrl: string | null;
+  xFollowers: number | null;
+  social: SocialFact | null;
+  creator: CreatorStats | null;
+  quality: QualityResult;
   links: { opensea: string; explorer: string };
 }
 
@@ -119,6 +128,28 @@ export function loadHistory(file: string): HistoryLine[] {
   } catch {
     return [];
   }
+}
+
+const EMPTY_QUALITY: QualityResult = {
+  score: null,
+  confidence: 0,
+  dimensions: { demand: null, participation: null, creator: null, social: null, structure: null },
+  penalties: [],
+};
+
+// A collection we have read (even if it turned out to have no links) is a known
+// fact and must be scored as such; one we have never read is unknown.
+function socialFact(entry: ContractEntry): SocialFact | null {
+  const known = entry.socialCheckedAt != null;
+  const anyLink = entry.twitter != null || entry.discord != null || entry.website != null;
+  if (!known && !anyLink) return null;
+  return {
+    twitter: entry.twitter ?? null,
+    discord: entry.discord ?? null,
+    website: entry.website ?? null,
+    createdDate: entry.createdDate ?? null,
+    safelist: entry.safelist ?? null,
+  };
 }
 
 // Structural facts come from the state file; change and concentration labels are
@@ -178,6 +209,11 @@ export function loadDashboardRows(
   }
 
   const rows: DashboardRow[] = [];
+  const nowSec = Math.floor(Date.now() / 1000);
+  // Creator history needs every contract's facts before it can be attached, so
+  // the loop collects the raw signals and a second pass scores each row.
+  const facts: CreatorFact[] = [];
+  const pending: { row: DashboardRow; signals: Omit<QualitySignals, "nowSec" | "creator"> }[] = [];
   for (const [chain, contracts] of Object.entries(state.contracts)) {
     for (const [contract, entry] of Object.entries(contracts)) {
       const key = `${chain}|${contract.toLowerCase()}`;
@@ -198,6 +234,7 @@ export function loadDashboardRows(
       const endTime = entry.endTime ?? latest?.endTime ?? null;
       const slug = entry.slug ?? latest?.slug ?? null;
       const name = entry.name ?? latest?.name ?? null;
+      const owner = entry.owner ?? latest?.owner ?? null;
       const topShare = cached?.mintScan.topMinterShare ?? null;
 
       const minted = entry.totalMinted != null ? BigInt(entry.totalMinted) : latest?.minted != null ? BigInt(latest.minted) : null;
@@ -210,7 +247,6 @@ export function loadDashboardRows(
             ? BigInt(latest.recent15m) * 4n
             : null;
       const velocity = velocityPer24h(points, fallbackPerHour);
-      const nowSec = Math.floor(Date.now() / 1000);
       const stale = staleVerdict({
         startSec: start,
         nowSec,
@@ -231,8 +267,8 @@ export function loadDashboardRows(
       // closed more than a week ago.
       if (phase === 'ended' && endTime !== null && endTime + 7 * 86_400 < nowSec) continue;
       const explorer = resolveChain(chain)?.explorer ?? "";
-
-      rows.push({
+      const social = socialFact(entry);
+      const row: DashboardRow = {
         chain,
         contract,
         start,
@@ -258,7 +294,7 @@ export function loadDashboardRows(
         }),
         slug,
         name,
-        owner: latest?.owner ?? null,
+        owner,
         mintPriceWei: latest?.mintPriceWei ?? null,
         capPerWallet: latest?.capPerWallet ?? null,
         endTime,
@@ -273,12 +309,45 @@ export function loadDashboardRows(
         sellOutEtaHours: sellOutEtaHours(remainingNow, velocity.per24h),
         stale,
         phase,
+        imageUrl: safeImageUrl(entry.imageUrl),
+        xFollowers: entry.xFollowers ?? null,
+        social,
+        creator: null,
+        quality: EMPTY_QUALITY,
         links: {
           opensea: slug ? `https://opensea.io/collection/${slug}` : "",
           explorer: explorer ? `${explorer}/address/${contract}` : "",
         },
+      };
+      rows.push(row);
+      facts.push({ owner: owner ?? "", chain, contract, soldOut: row.soldOut, maxSupply, minted, velocity24h: velocity.per24h });
+      pending.push({
+        row,
+        signals: {
+          phase,
+          stale,
+          mintPriceWei: row.mintPriceWei,
+          startSec: start,
+          endSec: endTime,
+          maxSupply,
+          minted,
+          remaining: remainingNow,
+          velocity24h: velocity.per24h,
+          uniqueMinters: row.uniqueMinters,
+          topMinterShare: row.topMinterShare,
+          presaleStages: row.presaleStages,
+          capPerWallet: row.capPerWallet,
+          social,
+        },
       });
     }
+  }
+
+  const creators = aggregateCreators(facts, backfills, ledger);
+  for (const { row, signals } of pending) {
+    const creatorKey = (row.owner ?? "").trim().toLowerCase();
+    row.creator = creatorKey ? creators.get(creatorKey) ?? null : null;
+    row.quality = qualityScore({ ...signals, nowSec, creator: row.creator });
   }
 
   rows.sort((a, b) => (a.start ?? Number.MAX_SAFE_INTEGER) - (b.start ?? Number.MAX_SAFE_INTEGER));
@@ -368,8 +437,6 @@ export function staleVerdict(input: {
   return (input.velocityPer24h ?? 0n) < quietFloor;
 }
 
-export type Phase = 'upcoming' | 'live-fresh' | 'live' | 'stale' | 'sold-out' | 'ended' | 'unaudited';
-
 // One definition of the target's lifecycle, shared by the table, the filters and
 // the default preset. Missing facts mean 'unaudited', never 'fine'.
 export function classifyPhase(input: {
@@ -415,7 +482,21 @@ const PHASE_ZH: Record<Phase, string> = {
 };
 
 const PHASE_ORDER: Phase[] = ["upcoming", "live-fresh", "live", "stale", "sold-out", "ended", "unaudited"];
-const CORE_COLUMNS = 13;
+const CORE_COLUMNS = 14;
+
+const DIMENSION_ZH: [QualityDimension, string][] = [
+  ["demand", "需求"],
+  ["participation", "参与"],
+  ["creator", "创作者"],
+  ["social", "社交"],
+  ["structure", "结构"],
+];
+
+const PENALTY_ZH: Record<Penalty, string> = {
+  stale: "陈旧",
+  concentrated: "集中度高",
+  "no-socials": "无社交",
+};
 
 function netClass(net: string | null | undefined): string {
   if (!net) return "";
@@ -483,10 +564,20 @@ export function renderDashboard(rows: DashboardRow[], meta: DashboardMeta, opts:
         row.phase === "unaudited"
           ? `<span class="pill g-?">?</span>`
           : `<span class="pill g-${escapeHtml(row.grade ?? "?")}">${escapeHtml(row.grade ?? "?")}</span>`;
+      const thumb = row.imageUrl ? `<img class="thumb" src="${escapeHtml(row.imageUrl)}" alt="" loading="lazy">` : "";
+      const quality = row.quality ?? EMPTY_QUALITY;
+      const qScore = quality.score;
+      const qCell =
+        qScore === null
+          ? `<span class="pill q-none" title="数据不足，不足以评分">—</span>`
+          : `<span class="pill ${qScore >= 70 ? "q-strong" : qScore >= 45 ? "q-mid" : "q-weak"}">${qScore}</span> <span class="muted">${Math.round(
+              quality.confidence * 100
+            )}%</span>`;
 
       const data = [
         `data-chain="${escapeHtml(row.chain)}"`,
         `data-grade="${escapeHtml(row.grade ?? "")}"`,
+        `data-q="${qScore === null ? "" : qScore}"`,
         `data-phase="${escapeHtml(row.phase)}"`,
         `data-start="${row.start ?? ""}"`,
         `data-pending="${row.pendingAudit ? "1" : "0"}"`,
@@ -514,11 +605,43 @@ export function renderDashboard(rows: DashboardRow[], meta: DashboardMeta, opts:
         .filter(Boolean)
         .join(" · ");
 
+      const socialBits: string[] = [];
+      if (row.social) {
+        const xUrl = safeLinkUrl(row.social.twitter ? `https://x.com/${row.social.twitter.replace(/^@/, "")}` : null);
+        if (xUrl) socialBits.push(`<a href="${escapeHtml(xUrl)}" target="_blank" rel="noreferrer">X</a>`);
+        const discord = safeLinkUrl(row.social.discord);
+        if (discord) socialBits.push(`<a href="${escapeHtml(discord)}" target="_blank" rel="noreferrer">Discord</a>`);
+        const website = safeLinkUrl(row.social.website);
+        if (website) socialBits.push(`<a href="${escapeHtml(website)}" target="_blank" rel="noreferrer">官网</a>`);
+        if (row.xFollowers != null) socialBits.push(`${row.xFollowers} 粉丝`);
+        if (row.social.safelist) socialBits.push(`清单：${escapeHtml(row.social.safelist)}`);
+        if (row.social.createdDate) socialBits.push(`创建：${escapeHtml(row.social.createdDate.slice(0, 10))}`);
+      }
+      const creatorText = row.creator
+        ? `创作者：${row.creator.dropCount} 个 drop · 售罄率 ${
+            row.creator.soldOutRate === null ? "—" : `${Math.round(row.creator.soldOutRate * 100)}%`
+          } · 平均速度 ${row.creator.avgVelocity24h ?? "—"}/天 · 二级成交 ${row.creator.salesCount ?? "—"} · 自有 mint ${
+            row.creator.ownMints
+          }${row.creator.ownNetUsd === null ? "" : ` · 净值 $${row.creator.ownNetUsd.toFixed(2)}`}${
+            row.creator.ownData ? "（自有数据）" : ""
+          }`
+        : "";
+      const qBreakdown =
+        qScore === null
+          ? ""
+          : `Q 拆分：${DIMENSION_ZH.map(([key, label]) => `${label} ${quality.dimensions[key] ?? "—"}`).join(" · ")}`;
+
       const detailBits = [
         row.stages.length > 0
           ? `<span>阶段拆分：${row.stages.map((s) => `#${s.stage} ${s.tokens}（${s.minters} 地址）`).join(" &nbsp;|&nbsp; ")}</span>`
           : "",
         row.presaleStages !== null && row.presaleStages > 0 ? `<span>预售阶段：${row.presaleStages}</span>` : "",
+        socialBits.length > 0 ? `<span>社交：${socialBits.join(" · ")}</span>` : "",
+        row.creator ? `<span>${creatorText}</span>` : "",
+        qBreakdown ? `<span>${qBreakdown}</span>` : "",
+        quality.penalties.length > 0
+          ? `<span>扣分项：${quality.penalties.map((penalty) => PENALTY_ZH[penalty]).join("、")}</span>`
+          : "",
         row.notes.length > 0 ? `<span>备注：${escapeHtml(row.notes.join("；"))}</span>` : "",
         row.slug ? `<span>slug：<span class="mono">${escapeHtml(row.slug)}</span></span>` : "",
         row.owner ? `<span>owner：<span class="mono">${escapeHtml(row.owner)}</span></span>` : "",
@@ -534,8 +657,9 @@ export function renderDashboard(rows: DashboardRow[], meta: DashboardMeta, opts:
 
       return `<tr ${data} class="main-row">
   <td class="col-check"><input type="checkbox" class="pick" value="${escapeHtml(row.contract)}" data-chain="${escapeHtml(row.chain)}"></td>
-  <td class="col-name"><span class="caret">▸</span><span class="name-main">${escapeHtml(row.name ?? "—")}</span><div class="mono muted">${escapeHtml(row.contract)}</div></td>
+  <td class="col-name">${thumb}<span class="caret">▸</span><span class="name-main">${escapeHtml(row.name ?? "—")}</span><div class="mono muted">${escapeHtml(row.contract)}</div></td>
   <td>${gradeCell}</td>
+  <td class="num">${qCell}</td>
   <td><span class="pill phase phase-${escapeHtml(row.phase)}">${PHASE_ZH[row.phase]}</span></td>
   <td>${startText ? escapeHtml(startText) : "—"}<div class="muted">${escapeHtml(window)}</div></td>
   <td class="num">${priceText}</td>
@@ -689,6 +813,14 @@ export function renderDashboard(rows: DashboardRow[], meta: DashboardMeta, opts:
     font-size: 11px; font-weight: 650; text-align: center; border: 1px solid transparent;
   }
   .pill.free { background: var(--ok-soft); color: var(--ok); border-color: var(--ok-soft); }
+  .thumb {
+    width: 26px; height: 26px; border-radius: var(--radius-sm); object-fit: cover; vertical-align: middle;
+    margin-right: 6px; border: 1px solid var(--outline-soft); background: var(--bg-soft);
+  }
+  .q-strong { background: var(--ok-soft); color: var(--ok); }
+  .q-mid { background: var(--warn-soft); color: var(--warn); }
+  .q-weak { background: var(--danger-soft); color: var(--danger); }
+  .q-none { background: var(--outline-soft); color: var(--fg-muted); }
   .g-A { background: var(--ok-soft); color: var(--ok); }
   .g-B { background: var(--warn-soft); color: var(--warn); }
   .g-C { background: var(--danger-soft); color: var(--danger); }
@@ -745,12 +877,20 @@ ${serveBar}
       <option value="unaudited">待复审</option>
     </select>
   </label>
+  <label>Q 分
+    <select id="qFilter">
+      <option value="">全部</option>
+      <option value="40">≥ 40</option>
+      <option value="60">≥ 60</option>
+      <option value="80">≥ 80</option>
+    </select>
+  </label>
   <label>链 <select id="chainFilter"><option value="">全部</option></select></label>
   <label><input type="checkbox" id="freeOnly"> 仅免费</label>
   <label><input type="checkbox" id="onlyPending"> 仅队列中</label>
   <label><input type="checkbox" id="onlyExecuted"> 仅已执行</label>
   <label>搜索 <input id="search" type="search" placeholder="名称 / 合约 / 链"></label>
-  <button id="presetFresh" class="primary">免费 · A/B · 未开售</button>
+  <button id="presetFresh" class="primary">免费 · A/B · Q≥60 · 未开售</button>
   <span id="hiddenCount" class="muted"></span>
   <span id="freeNote" class="muted"></span>
   <span id="count" class="muted"></span>
@@ -761,7 +901,7 @@ ${serveBar}
 <thead>
 <tr>
   <th class="col-check"></th><th class="col-name" data-sort="target">名称 / 合约</th>
-  <th data-sort="grade">等级</th><th data-sort="phase">阶段</th><th data-sort="start">开售时间 (UTC+8)</th>
+  <th data-sort="grade">等级</th><th class="num" data-sort="q">Q 分</th><th data-sort="phase">阶段</th><th data-sort="start">开售时间 (UTC+8)</th>
   <th class="num" data-sort="mintprice">价格</th><th class="num">每钱包上限</th>
   <th class="num" data-sort="mintedpct">已铸</th><th class="num" data-sort="remaining">剩余</th>
   <th class="num" data-sort="recent1h">15分 / 1时</th><th class="num" data-sort="minters">铸造地址</th>
@@ -798,6 +938,7 @@ ${rowHtml}
     var executed = document.getElementById("onlyExecuted").checked;
     var freeOnly = document.getElementById("freeOnly").checked;
     var phaseFilter = document.getElementById("phaseFilter").value;
+    var qMin = parseInt(document.getElementById("qFilter").value, 10) || 0;
     var q = document.getElementById("search").value.toLowerCase();
     var visible = 0;
     var hiddenByPhase = {};
@@ -807,6 +948,7 @@ ${rowHtml}
         && (!pending || r.dataset.pending === "1")
         && (!executed || r.dataset.executed === "1")
         && (!freeOnly || r.dataset.free === "1" || r.dataset.free === "")
+        && (!qMin || (r.dataset.q !== "" && parseFloat(r.dataset.q) >= qMin))
         && (!q || r.dataset.target.toLowerCase().indexOf(q) >= 0);
       var phase = r.dataset.phase;
       var phaseOk = !phaseFilter
@@ -838,13 +980,14 @@ ${rowHtml}
     document.getElementById("commands").textContent = commands;
   }
 
-  ["gradeFilter", "chainFilter", "onlyPending", "onlyExecuted", "freeOnly", "phaseFilter"].forEach(function (id) {
+  ["gradeFilter", "chainFilter", "onlyPending", "onlyExecuted", "freeOnly", "phaseFilter", "qFilter"].forEach(function (id) {
     document.getElementById(id).addEventListener("change", apply);
   });
   document.getElementById("presetFresh").addEventListener("click", function () {
     document.getElementById("gradeFilter").value = "AB";
     document.getElementById("freeOnly").checked = true;
     document.getElementById("phaseFilter").value = "focus";
+    document.getElementById("qFilter").value = "60";
     document.getElementById("onlyPending").checked = false;
     document.getElementById("onlyExecuted").checked = false;
     apply();
