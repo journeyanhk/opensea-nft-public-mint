@@ -402,6 +402,34 @@ export interface DashboardMeta {
   sources: string[];
 }
 
+// Chinese labels for the display layer only; identifiers (name, slug, contract,
+// chain key, tx hash) and the CLI stay in English as the repo convention.
+const PHASE_ZH: Record<Phase, string> = {
+  upcoming: "未开售",
+  "live-fresh": "新开售",
+  live: "在售",
+  stale: "陈旧",
+  "sold-out": "售罄",
+  ended: "已结束",
+  unaudited: "待复审",
+};
+
+const PHASE_ORDER: Phase[] = ["upcoming", "live-fresh", "live", "stale", "sold-out", "ended", "unaudited"];
+const CORE_COLUMNS = 13;
+
+function netClass(net: string | null | undefined): string {
+  if (!net) return "";
+  const value = Number(net.replace(/[^0-9.-]/g, ""));
+  if (!Number.isFinite(value) || value === 0) return "";
+  return value > 0 ? "net-pos" : "net-neg";
+}
+
+function mintedBar(pct: number | null): string {
+  if (pct === null) return "";
+  const width = Math.min(100, Math.max(0, pct)).toFixed(1);
+  return `<div class="bar"><span style="width:${width}%"></span></div>`;
+}
+
 export function renderDashboard(rows: DashboardRow[], meta: DashboardMeta, opts: { serve?: boolean } = {}): string {
   const explorerTx = (chain: string, hash: string | null): string | null => {
     if (!hash) return null;
@@ -409,199 +437,359 @@ export function renderDashboard(rows: DashboardRow[], meta: DashboardMeta, opts:
     return explorer ? `${explorer}/tx/${hash}` : null;
   };
 
+  // ── summary ──────────────────────────────────────────────────────────
+  const byPhase = new Map<Phase, number>();
+  for (const row of rows) byPhase.set(row.phase, (byPhase.get(row.phase) ?? 0) + 1);
+  const freeCount = rows.filter((row) => row.mintPriceWei === "0").length;
+  const queuedCount = rows.filter((row) => row.pendingAudit).length;
+  const nextOpen = rows
+    .filter((row) => row.phase === "upcoming" && row.start !== null)
+    .sort((a, b) => (a.start ?? 0) - (b.start ?? 0))[0];
+
+  const cards = [
+    ...PHASE_ORDER.filter((phase) => (byPhase.get(phase) ?? 0) > 0).map(
+      (phase) => `<div class="card"><span class="card-num">${byPhase.get(phase)}</span><span class="card-label">${PHASE_ZH[phase]}</span></div>`
+    ),
+    `<div class="card"><span class="card-num">${freeCount}</span><span class="card-label">免费</span></div>`,
+    `<div class="card"><span class="card-num">${queuedCount}</span><span class="card-label">队列中</span></div>`,
+  ].join("");
+  const nextOpenText = nextOpen
+    ? `${escapeHtml(nextOpen.name ?? nextOpen.contract.slice(0, 10) + "…")} · ${escapeHtml(describeWindow(nextOpen.start, nextOpen.endTime))}`
+    : "—";
+
+  // ── rows ─────────────────────────────────────────────────────────────
   const rowHtml = rows
     .map((row) => {
-      const startSec = row.start;
-      const startText = startSec === null ? "" : toUtc8Time(new Date(startSec * 1000));
-      const window = describeWindow(startSec, row.endTime);
-      const history = row.gradeHistory.map((p) => `${p.grade}@${p.at.slice(5, 16)}`).join(" → ");
-      const stages = row.stages.map((s) => `#${s.stage} ${s.tokens}`).join(" | ");
-      const txUrl = explorerTx(row.chain, row.execution?.txHash ?? null);
+      const startText = row.start === null ? "" : toUtc8Time(new Date(row.start * 1000));
+      const window = describeWindow(row.start, row.endTime);
       const price = row.mintPriceWei === null ? null : BigInt(row.mintPriceWei);
-      const priceText = price === null ? "" : price === 0n ? "FREE" : `${formatEther(price)}`;
-      const capText = row.capPerWallet === null ? "" : row.capPerWallet === 0 ? "∞" : String(row.capPerWallet);
+      const priceText = price === null ? "—" : price === 0n ? `<span class="pill free">免费</span>` : `${formatEther(price)}`;
+      const capText = row.capPerWallet === null ? "—" : row.capPerWallet === 0 ? "不限" : String(row.capPerWallet);
       const mintedPct =
         row.minted !== null && row.maxSupply !== null && BigInt(row.maxSupply) > 0n
           ? Number((BigInt(row.minted) * 10_000n) / BigInt(row.maxSupply)) / 100
           : null;
-      const velocityText =
-        row.velocity24h === null
-          ? ""
-          : `${row.velocity24h}${row.velocitySource === "bucket" ? " (1h est)" : ""}`;
       const etaText =
         row.sellOutEtaHours === null
           ? ""
           : row.sellOutEtaHours < 1
-            ? "<1h"
+            ? "<1时"
             : row.sellOutEtaHours < 48
-              ? `${Math.round(row.sellOutEtaHours)}h`
-              : `${(row.sellOutEtaHours / 24).toFixed(1)}d`;
+              ? `${Math.round(row.sellOutEtaHours)}时`
+              : `${(row.sellOutEtaHours / 24).toFixed(1)}天`;
+      const hot = row.velocity24h !== null && BigInt(row.velocity24h) > 0n;
+      const txUrl = explorerTx(row.chain, row.execution?.txHash ?? null);
+      const gradeCell =
+        row.phase === "unaudited"
+          ? `<span class="pill g-?">?</span>`
+          : `<span class="pill g-${escapeHtml(row.grade ?? "?")}">${escapeHtml(row.grade ?? "?")}</span>`;
+
       const data = [
         `data-chain="${escapeHtml(row.chain)}"`,
         `data-grade="${escapeHtml(row.grade ?? "")}"`,
+        `data-phase="${escapeHtml(row.phase)}"`,
         `data-start="${row.start ?? ""}"`,
         `data-pending="${row.pendingAudit ? "1" : "0"}"`,
         `data-executed="${row.execution ? "1" : "0"}"`,
-        `data-net24="${escapeHtml(row.nets["24"] ?? "")}"`,
-        `data-net72="${escapeHtml(row.nets["72"] ?? "")}"`,
+        `data-stale="${row.stale ? "1" : "0"}"`,
+        `data-free="${price === null ? "" : price === 0n ? "1" : "0"}"`,
+        `data-mintprice="${escapeHtml(row.mintPriceWei ?? "")}"`,
+        `data-mintedpct="${mintedPct === null ? "" : mintedPct}"`,
+        `data-remaining="${escapeHtml(row.remaining ?? "")}"`,
+        `data-recent1h="${escapeHtml(row.recent1h ?? "")}"`,
+        `data-minters="${row.uniqueMinters ?? ""}"`,
+        `data-velocity="${escapeHtml(row.velocity24h ?? "")}"`,
+        `data-notes="${escapeHtml(row.notes.join("；"))}"`,
         `data-net24usd="${escapeHtml(row.nets["24"] ?? "")}"`,
         `data-net72usd="${escapeHtml(row.nets["72"] ?? "")}"`,
-        `data-stale="${row.stale ? "1" : "0"}"`,
-        `data-phase="${escapeHtml(row.phase)}"`,
-        `data-free="${price === null ? "" : price === 0n ? "1" : "0"}"`,
-        `data-name="${escapeHtml(row.name ?? "")}"`,
-        `data-velocity="${escapeHtml(row.velocity24h ?? "")}"`,
-        `data-mintprice="${escapeHtml(row.mintPriceWei ?? "")}"`,
-        `data-remaining="${escapeHtml(row.remaining ?? "")}"`,
-        `data-notes="${escapeHtml(row.notes.join("; "))}"`,
-        `data-mintedpct="${mintedPct === null ? "" : mintedPct}"`,
         `data-target="${escapeHtml(`${row.name ?? ""} ${row.contract} ${row.chain}`)}"`,
       ].join(" ");
+
       const links = [
         row.links.opensea
-          ? `<a href="${escapeHtml(row.links.opensea)}" target="_blank" rel="noreferrer">OS</a>`
-          : `<span class="small" title="run --refresh-targets to resolve the collection slug">slug?</span>`,
-        row.links.explorer ? `<a href="${escapeHtml(row.links.explorer)}" target="_blank" rel="noreferrer">scan</a>` : "",
+          ? `<a href="${escapeHtml(row.links.opensea)}" target="_blank" rel="noreferrer">OpenSea</a>`
+          : `<span class="muted" title="运行 --refresh-targets 解析 slug">slug?</span>`,
+        row.links.explorer ? `<a href="${escapeHtml(row.links.explorer)}" target="_blank" rel="noreferrer">浏览器</a>` : "",
       ]
         .filter(Boolean)
-        .join(" ");
+        .join(" · ");
+
+      const detailBits = [
+        row.stages.length > 0
+          ? `<span>阶段拆分：${row.stages.map((s) => `#${s.stage} ${s.tokens}（${s.minters} 地址）`).join(" &nbsp;|&nbsp; ")}</span>`
+          : "",
+        row.presaleStages !== null && row.presaleStages > 0 ? `<span>预售阶段：${row.presaleStages}</span>` : "",
+        row.notes.length > 0 ? `<span>备注：${escapeHtml(row.notes.join("；"))}</span>` : "",
+        row.slug ? `<span>slug：<span class="mono">${escapeHtml(row.slug)}</span></span>` : "",
+        row.owner ? `<span>owner：<span class="mono">${escapeHtml(row.owner)}</span></span>` : "",
+        row.execution
+          ? `<span>执行：${escapeHtml(row.execution.status)}${txUrl ? ` <a href="${escapeHtml(txUrl)}" target="_blank" rel="noreferrer">tx</a>` : ""}</span>`
+          : "",
+        row.nets["24"] ? `<span>24时净值：<span class="${netClass(row.nets["24"])}">${escapeHtml(row.nets["24"])}</span></span>` : "",
+        row.nets["72"] ? `<span>72时净值：<span class="${netClass(row.nets["72"])}">${escapeHtml(row.nets["72"])}</span></span>` : "",
+        `<span>等级轨迹：${escapeHtml(row.gradeHistory.map((p) => `${p.grade}@${p.at.slice(5, 16)}`).join(" → ") || "—")}</span>`,
+      ]
+        .filter(Boolean)
+        .join("");
+
       return `<tr ${data}>
-  <td><input type="checkbox" class="pick" value="${escapeHtml(row.contract)}" data-chain="${escapeHtml(row.chain)}"></td>
-  <td>${row.phase === "unaudited" ? `<span class="grade g-?">?</span>` : `<span class="grade g-${escapeHtml(row.grade ?? "?")}">${escapeHtml(row.grade ?? "?")}</span>`}</td>
-  <td>${escapeHtml(row.phase)}</td>
-  <td>${escapeHtml(row.chain)}</td>
-  <td>${escapeHtml(row.name ?? "")}<div class="mono small">${escapeHtml(row.contract)}</div></td>
-  <td>${startSec === null ? "" : escapeHtml(startText)}<div class="small">${escapeHtml(window)}</div></td>
-  <td>${price !== null && price === 0n ? `<span class="free">FREE</span>` : escapeHtml(priceText)}</td>
-  <td>${escapeHtml(capText)}</td>
-  <td>${row.minted ?? ""}${mintedPct === null ? "" : ` <span class="small">(${mintedPct.toFixed(1)}%)</span>`}</td>
-  <td>${escapeHtml(row.remaining ?? "")}</td>
-  <td>${escapeHtml(row.recent15m ?? "")} / ${escapeHtml(row.recent1h ?? "")}</td>
-  <td>${row.uniqueMinters ?? ""}${row.topMinterShare === null ? "" : ` <span class="small">top ${Math.round(row.topMinterShare * 100)}%</span>`}</td>
-  <td>${row.presaleStages === null || row.presaleStages === 0 ? "" : "yes"}</td>
-  <td>${escapeHtml(velocityText)}${etaText ? ` <span class="small">→ ${escapeHtml(etaText)}</span>` : ""}</td>
-  <td>${row.stale ? `<span class="stale">stale</span>` : ""}</td>
+  <td class="col-check"><input type="checkbox" class="pick" value="${escapeHtml(row.contract)}" data-chain="${escapeHtml(row.chain)}"></td>
+  <td class="col-name"><span class="caret">▸</span><span class="name-main">${escapeHtml(row.name ?? "—")}</span><div class="mono muted">${escapeHtml(row.contract)}</div></td>
+  <td>${gradeCell}</td>
+  <td><span class="pill phase phase-${escapeHtml(row.phase)}">${PHASE_ZH[row.phase]}</span></td>
+  <td>${startText ? escapeHtml(startText) : "—"}<div class="muted">${escapeHtml(window)}</div></td>
+  <td class="num">${priceText}</td>
+  <td class="num">${escapeHtml(capText)}</td>
+  <td class="num">${row.minted ?? "—"}${mintedPct === null ? "" : ` <span class="muted">(${mintedPct.toFixed(1)}%)</span>`}${mintedBar(mintedPct)}</td>
+  <td class="num">${escapeHtml(row.remaining ?? "—")}</td>
+  <td class="num">${escapeHtml(row.recent15m ?? "—")} / ${escapeHtml(row.recent1h ?? "—")}</td>
+  <td class="num">${row.uniqueMinters ?? "—"}${row.topMinterShare === null ? "" : ` <span class="muted">top ${Math.round(row.topMinterShare * 100)}%</span>`}</td>
+  <td class="num ${hot ? "hot" : "cold"}">${escapeHtml(row.velocity24h ?? "—")}${row.velocitySource === "bucket" ? ` <span class="muted">1时估</span>` : ""}${etaText ? ` <span class="muted">→ ${escapeHtml(etaText)}</span>` : ""}</td>
   <td>${links}</td>
-  <td>${escapeHtml(row.notes.join("; "))}</td>
-  <td>${escapeHtml(row.execution ? row.execution!.status : "")}${txUrl ? ` <a href="${escapeHtml(txUrl)}" target="_blank" rel="noreferrer">tx</a>` : ""}</td>
-  <td>${escapeHtml(row.nets["24"] ?? "")}</td>
-  <td>${escapeHtml(row.nets["72"] ?? "")}</td>
-  <td class="mono small">${escapeHtml(history)}</td>
-</tr>`;
+</tr>
+<tr class="detail" hidden><td colspan="${CORE_COLUMNS}"><div class="detail-grid">${detailBits}</div></td></tr>`;
     })
     .join("\n");
 
+  const serveBar = opts.serve
+    ? `<div class="status" id="statusBar">
+  <span class="state" id="stState">启动中…</span>
+  <button id="scanNow">立即扫描</button>
+  <span class="muted" id="stLog"></span>
+</div>`
+    : "";
+  const serveScript = opts.serve
+    ? `<script>
+(function () {
+  if (!document.getElementById("statusBar")) return;
+  var state = document.getElementById("stState");
+  var log = document.getElementById("stLog");
+  var button = document.getElementById("scanNow");
+  function refresh() {
+    fetch("/api/status", { cache: "no-store" }).then(function (r) { return r.json(); }).then(function (s) {
+      var parts = [s.running ? "扫描中…" : "空闲"];
+      if (s.lastScanAt) parts.push("上次 " + s.lastScanAt.slice(11, 16) + "Z");
+      if (s.nextScanAt) parts.push("下次 " + s.nextScanAt.slice(11, 16) + "Z");
+      parts.push((s.rowCount || 0) + " 行");
+      parts.push("OpenSea key: " + (s.openseaKey === "set" ? "已设置" : "未设置"));
+      if (s.lastError) parts.push("错误：" + s.lastError);
+      state.textContent = parts.join(" · ");
+      if (s.log && s.log.length) { var last = s.log[s.log.length - 1]; log.textContent = last.slice(11, 19) + " " + last.slice(30); }
+    }).catch(function () { state.textContent = "状态不可用"; });
+  }
+  button.addEventListener("click", function () {
+    button.disabled = true;
+    fetch("/api/scan", { method: "POST", headers: { "content-type": "application/json" }, body: "{}" })
+      .then(function (r) { return r.json().then(function (j) { if (!r.ok) throw new Error(j.error || String(r.status)); return j; }); })
+      .catch(function (e) { alert("扫描失败：" + e.message); })
+      .then(function () { button.disabled = false; refresh(); });
+  });
+  refresh();
+  setInterval(refresh, 15000);
+})();
+</script>`
+    : "";
+
   return `<!doctype html>
-<html lang="en">
+<html lang="zh-CN">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta http-equiv="refresh" content="300">
-<title>Mint dashboard</title>
+<meta name="theme-color" content="#0f1115" media="(prefers-color-scheme: dark)">
+<meta name="theme-color" content="#ffffff" media="(prefers-color-scheme: light)">
+<title>SeaDrop 目标看板</title>
 <style>
-  :root { color-scheme: light dark; }
-  body { font: 13px/1.5 -apple-system, "Segoe UI", Roboto, sans-serif; margin: 16px; }
-  h1 { font-size: 16px; margin: 0 0 4px; }
-  .meta { color: #888; margin-bottom: 12px; }
-  .controls { display: flex; flex-wrap: wrap; gap: 12px; align-items: center; margin-bottom: 10px; }
-  .controls label { display: inline-flex; gap: 4px; align-items: center; }
-  table { border-collapse: collapse; width: 100%; }
-  th, td { border-bottom: 1px solid #8883; padding: 4px 6px; text-align: left; vertical-align: top; }
-  th { cursor: pointer; user-select: none; white-space: nowrap; }
-  .mono { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
-  .small { font-size: 11px; color: #888; }
-  .grade { display: inline-block; min-width: 16px; text-align: center; border-radius: 4px; padding: 0 4px; color: #fff; }
-  .g-A { background: #2e7d32; } .g-B { background: #f9a825; color: #222; }
-  .free { color: #2e7d32; font-weight: 700; }
-  .stale { color: #c62828; }
-  .controls button { font-weight: 600; }
-  .g-C { background: #c62828; } .g-D { background: #6a1b9a; } .g-\\? { background: #777; }
-  textarea { width: 100%; min-height: 80px; font-family: ui-monospace, monospace; }
-  .out { margin-top: 14px; }
-  button { padding: 4px 10px; }
-  .status { display: flex; gap: 12px; align-items: center; flex-wrap: wrap; margin: 6px 0 12px; padding: 6px 8px; border: 1px solid #8883; border-radius: 6px; }
+  :root {
+    --bg: #ffffff; --bg-soft: #f6f7f9; --bg-hover: #eef2f7; --bg-elev: #ffffff;
+    --fg: #16181d; --fg-soft: #4b5563; --fg-muted: #8a94a3;
+    --outline: #e5e7eb; --outline-soft: #eef0f3;
+    --primary: #2563eb; --on-primary: #ffffff;
+    --ok: #15803d; --ok-soft: #dcfce7; --warn: #b45309; --warn-soft: #fef3c7;
+    --danger: #b91c1c; --danger-soft: #fee2e2; --info: #6d28d9; --info-soft: #ede9fe;
+    --teal: #0f766e; --teal-soft: #ccfbf1;
+    --radius: 10px; --radius-sm: 6px;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #0f1115; --bg-soft: #151821; --bg-hover: #1b2030; --bg-elev: #151821;
+      --fg: #e6e8ee; --fg-soft: #a8b0bf; --fg-muted: #6b7688;
+      --outline: #252a36; --outline-soft: #1d2230;
+      --primary: #60a5fa; --on-primary: #0b1220;
+      --ok: #4ade80; --ok-soft: #14351f; --warn: #fbbf24; --warn-soft: #3a2c0a;
+      --danger: #f87171; --danger-soft: #3d1416; --info: #c4b5fd; --info-soft: #2a1e4a;
+      --teal: #5eead4; --teal-soft: #0f2e2b;
+    }
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; padding: 18px 20px 40px; background: var(--bg); color: var(--fg);
+    font: 13px/1.55 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", "PingFang SC", "Microsoft YaHei", sans-serif;
+  }
+  h1 { font-size: 17px; margin: 0 0 2px; letter-spacing: .2px; }
+  .meta { color: var(--fg-muted); margin-bottom: 14px; font-size: 12px; }
+  .cards { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 12px; }
+  .card {
+    display: flex; flex-direction: column; min-width: 74px; padding: 8px 12px;
+    background: var(--bg-soft); border: 1px solid var(--outline-soft); border-radius: var(--radius);
+  }
+  .card-num { font-size: 18px; font-weight: 650; font-variant-numeric: tabular-nums; }
+  .card-label { font-size: 11px; color: var(--fg-muted); }
+  .next-open { font-size: 12px; color: var(--fg-soft); margin-bottom: 12px; }
+  .controls {
+    display: flex; flex-wrap: wrap; gap: 10px 14px; align-items: center;
+    padding: 10px 12px; margin-bottom: 12px;
+    background: var(--bg-soft); border: 1px solid var(--outline-soft); border-radius: var(--radius);
+  }
+  .controls label { display: inline-flex; gap: 5px; align-items: center; color: var(--fg-soft); font-size: 12px; }
+  select, input[type="search"], button {
+    font: inherit; color: var(--fg); background: var(--bg-elev);
+    border: 1px solid var(--outline); border-radius: var(--radius-sm); padding: 4px 8px;
+  }
+  button { cursor: pointer; }
+  button:hover { border-color: var(--primary); color: var(--primary); }
+  button.primary { background: var(--primary); border-color: var(--primary); color: var(--on-primary); font-weight: 600; }
+  .status {
+    display: flex; gap: 12px; align-items: center; flex-wrap: wrap;
+    padding: 8px 12px; margin-bottom: 12px;
+    background: var(--bg-soft); border: 1px solid var(--outline-soft); border-radius: var(--radius); font-size: 12px;
+  }
   .status .state { font-weight: 600; }
-  .status .last { color: #888; }
+  .table-wrap { overflow: auto; max-height: 76vh; border: 1px solid var(--outline-soft); border-radius: var(--radius); }
+  table { border-collapse: separate; border-spacing: 0; width: 100%; min-width: 1180px; }
+  th, td { padding: 6px 9px; text-align: left; border-bottom: 1px solid var(--outline-soft); vertical-align: top; }
+  thead th {
+    position: sticky; top: 0; z-index: 2; background: var(--bg-soft); color: var(--fg-soft);
+    font-size: 11px; font-weight: 650; white-space: nowrap; cursor: pointer; user-select: none;
+    border-bottom: 1px solid var(--outline);
+  }
+  tbody tr.main-row { background: var(--bg); }
+  tbody tr.main-row:nth-of-type(4n+3) { background: var(--bg-soft); }
+  tbody tr.main-row:hover { background: var(--bg-hover); }
+  tbody tr.main-row { cursor: pointer; }
+  td.col-check, th.col-check { position: sticky; left: 0; z-index: 1; width: 30px; background: inherit; }
+  thead th.col-check { z-index: 3; }
+  td.col-name, th.col-name { position: sticky; left: 30px; z-index: 1; min-width: 190px; background: inherit; }
+  thead th.col-check, thead th.col-name { background: var(--bg-soft); z-index: 3; }
+  .name-main { font-weight: 600; margin-left: 4px; }
+  .caret { display: inline-block; width: 10px; color: var(--fg-muted); transition: transform .12s ease; }
+  tr.main-row.open .caret { transform: rotate(90deg); }
+  tr.detail > td { background: var(--bg-soft); }
+  .detail-grid { display: grid; gap: 4px 18px; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); font-size: 12px; color: var(--fg-soft); }
+  .muted { color: var(--fg-muted); font-size: 11px; }
+  .mono { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 11px; }
+  .num { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
+  th.num { text-align: right; }
+  .hot { color: var(--ok); font-weight: 600; }
+  .cold { color: var(--fg-muted); }
+  .net-pos { color: var(--ok); font-weight: 600; }
+  .net-neg { color: var(--danger); font-weight: 600; }
+  .pill {
+    display: inline-block; min-width: 18px; padding: 1px 7px; border-radius: 999px;
+    font-size: 11px; font-weight: 650; text-align: center; border: 1px solid transparent;
+  }
+  .pill.free { background: var(--ok-soft); color: var(--ok); border-color: var(--ok-soft); }
+  .g-A { background: var(--ok-soft); color: var(--ok); }
+  .g-B { background: var(--warn-soft); color: var(--warn); }
+  .g-C { background: var(--danger-soft); color: var(--danger); }
+  .g-D { background: var(--info-soft); color: var(--info); }
+  .g-\? { background: var(--outline-soft); color: var(--fg-muted); }
+  .phase-upcoming { background: var(--info-soft); color: var(--info); }
+  .phase-live-fresh { background: var(--ok-soft); color: var(--ok); }
+  .phase-live { background: var(--teal-soft); color: var(--teal); }
+  .phase-stale { background: var(--outline-soft); color: var(--fg-muted); }
+  .phase-sold-out { background: var(--danger-soft); color: var(--danger); }
+  .phase-ended { background: var(--outline-soft); color: var(--fg-muted); }
+  .phase-unaudited { background: var(--warn-soft); color: var(--warn); }
+  .bar { height: 4px; margin-top: 4px; background: var(--outline-soft); border-radius: 999px; overflow: hidden; min-width: 70px; }
+  .bar > span { display: block; height: 100%; background: var(--primary); }
+  .out { margin-top: 16px; }
+  textarea { width: 100%; min-height: 80px; padding: 8px; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12px; color: var(--fg); background: var(--bg-elev); border: 1px solid var(--outline); border-radius: var(--radius-sm); }
+  pre { white-space: pre-wrap; margin: 6px 0 0; }
+  a { color: var(--primary); text-decoration: none; }
+  a:hover { text-decoration: underline; }
+  @media (max-width: 900px) {
+    table { min-width: 0; }
+    thead { display: none; }
+    td.col-check, th.col-check, td.col-name, th.col-name { position: static; }
+    tr.main-row { display: block; margin-bottom: 10px; padding: 10px; border: 1px solid var(--outline); border-radius: var(--radius); }
+    tr.main-row > td { display: block; border: 0; padding: 2px 0; text-align: left; }
+  }
 </style>
 </head>
 <body>
-<h1>Mint dashboard</h1>
-<div class="meta">generated ${escapeHtml(meta.generatedAt)} · ${rows.length} target(s) · sources: ${escapeHtml(meta.sources.join(", "))}</div>
-
-${opts.serve ? `<div class="status" id="statusBar">
-  <span class="state" id="stState">starting…</span>
-  <button id="scanNow">Scan now</button>
-  <span class="last" id="stLog"></span>
-</div>
-
-` : ""}
+<h1>SeaDrop 目标看板</h1>
+<div class="meta">生成于 ${escapeHtml(meta.generatedAt)} · ${rows.length} 个目标 · 数据源：${escapeHtml(meta.sources.join("、"))}</div>
+${serveBar}
+<div class="cards">${cards}</div>
+<div class="next-open">最近开售：${nextOpenText}</div>
 
 <div class="controls">
-  <label>grade
+  <label>等级
     <select id="gradeFilter">
-      <option value="">all</option>
+      <option value="">全部</option>
       <option value="AB">A+B</option>
       <option>A</option><option>B</option><option>C</option><option>D</option>
     </select>
   </label>
-  <label>chain
-    <select id="chainFilter"><option value="">all</option></select>
-  </label>
-  <label><input type="checkbox" id="freeOnly"> free only</label>
-  <label><input type="checkbox" id="onlyPending"> queued only</label>
-  <label><input type="checkbox" id="onlyExecuted"> executed only</label>
-  <label>phase
+  <label>阶段
     <select id="phaseFilter">
-      <option value="focus">upcoming + live-fresh</option>
-      <option value="">all</option>
-      <option value="upcoming">upcoming</option>
-      <option value="live-fresh">live-fresh</option>
-      <option value="live">live</option>
-      <option value="stale">stale</option>
-      <option value="sold-out">sold-out</option>
-      <option value="ended">ended</option>
-      <option value="unaudited">unaudited</option>
+      <option value="focus">未开售 + 新开售</option>
+      <option value="">全部</option>
+      <option value="upcoming">未开售</option>
+      <option value="live-fresh">新开售</option>
+      <option value="live">在售</option>
+      <option value="stale">陈旧</option>
+      <option value="sold-out">售罄</option>
+      <option value="ended">已结束</option>
+      <option value="unaudited">待复审</option>
     </select>
   </label>
-  <button id="presetFresh">FREE · A/B · upcoming</button>
-  <span id="hiddenCount" class="small"></span>
-  <span id="freeNote" class="small"></span>
-  <label>search <input id="search" type="search" placeholder="contract / chain"></label>
-  <span id="count"></span>
+  <label>链 <select id="chainFilter"><option value="">全部</option></select></label>
+  <label><input type="checkbox" id="freeOnly"> 仅免费</label>
+  <label><input type="checkbox" id="onlyPending"> 仅队列中</label>
+  <label><input type="checkbox" id="onlyExecuted"> 仅已执行</label>
+  <label>搜索 <input id="search" type="search" placeholder="名称 / 合约 / 链"></label>
+  <button id="presetFresh" class="primary">免费 · A/B · 未开售</button>
+  <span id="hiddenCount" class="muted"></span>
+  <span id="freeNote" class="muted"></span>
+  <span id="count" class="muted"></span>
 </div>
 
+<div class="table-wrap">
 <table id="table">
 <thead>
 <tr>
-  <th></th><th data-sort="grade">grade</th><th data-sort="phase">phase</th><th data-sort="chain">chain</th><th data-sort="target">name / contract</th>
-  <th data-sort="start">start (UTC+8) / window</th><th data-sort="mintprice">price</th><th>cap</th>
-  <th data-sort="mintedpct">minted (%)</th><th data-sort="remaining">left</th><th data-sort="velocity">15m / 1h</th>
-  <th>minters (top%)</th><th>pre</th><th data-sort="velocity">24h vel → eta</th><th data-sort="stale">stale</th><th>links</th>
-  <th data-sort="notes">notes</th><th>execution</th><th data-sort="net24usd">24h net</th><th data-sort="net72usd">72h net</th><th>grade history</th>
+  <th class="col-check"></th><th class="col-name" data-sort="target">名称 / 合约</th>
+  <th data-sort="grade">等级</th><th data-sort="phase">阶段</th><th data-sort="start">开售时间 (UTC+8)</th>
+  <th class="num" data-sort="mintprice">价格</th><th class="num">每钱包上限</th>
+  <th class="num" data-sort="mintedpct">已铸</th><th class="num" data-sort="remaining">剩余</th>
+  <th class="num" data-sort="recent1h">15分 / 1时</th><th class="num" data-sort="minters">铸造地址</th>
+  <th class="num" data-sort="velocity">24时速度 → 售罄预计</th><th>链接</th>
 </tr>
 </thead>
 <tbody>
 ${rowHtml}
 </tbody>
 </table>
+</div>
 
 <div class="out">
-  <div><strong>shortlist</strong> — checked targets, one contract per line (@shortlist.txt)</div>
+  <div><strong>短名单</strong> <span class="muted">勾选的目标，每行一个合约地址（可存为 @shortlist.txt）</span></div>
   <textarea id="shortlist" readonly></textarea>
-  <div style="margin-top:6px">
-    <button id="copy">copy</button>
-    <span id="copyNote" class="small"></span>
-  </div>
-  <pre id="commands" class="small"></pre>
+  <div style="margin-top:6px"><button id="copy">复制</button> <span id="copyNote" class="muted"></span></div>
+  <pre id="commands" class="muted"></pre>
 </div>
 
 <script>
 (function () {
   var table = document.getElementById("table");
-  var rows = Array.prototype.slice.call(table.tBodies[0].rows);
+  var rows = Array.prototype.slice.call(table.querySelectorAll("tr.main-row"));
   var chains = Array.from(new Set(rows.map(function (r) { return r.dataset.chain; }))).sort();
   var chainFilter = document.getElementById("chainFilter");
   chains.forEach(function (c) { var o = document.createElement("option"); o.value = c; o.textContent = c; chainFilter.appendChild(o); });
+
+  var PHASE_ZH = { upcoming: "未开售", "live-fresh": "新开售", live: "在售", stale: "陈旧", "sold-out": "售罄", ended: "已结束", unaudited: "待复审" };
 
   function apply() {
     var grade = document.getElementById("gradeFilter").value;
@@ -626,23 +814,23 @@ ${rowHtml}
       if (matches && !phaseOk) hiddenByPhase[phase] = (hiddenByPhase[phase] || 0) + 1;
       var ok = matches && phaseOk;
       r.style.display = ok ? "" : "none";
+      var detail = r.nextElementSibling;
+      if (detail && detail.classList.contains("detail")) detail.hidden = !ok || !r.classList.contains("open");
       if (ok) visible++;
     });
-    document.getElementById("count").textContent = visible + " shown";
-    var hiddenText = Object.keys(hiddenByPhase).map(function (p) { return hiddenByPhase[p] + " " + p; }).join(" · ");
-    document.getElementById("hiddenCount").textContent = hiddenText ? "hidden: " + hiddenText : "";
+    document.getElementById("count").textContent = visible + " 行";
+    var hiddenText = Object.keys(hiddenByPhase).map(function (p) { return (PHASE_ZH[p] || p) + " " + hiddenByPhase[p]; }).join(" · ");
+    document.getElementById("hiddenCount").textContent = hiddenText ? "已隐藏：" + hiddenText : "";
     var unknownPrice = freeOnly ? rows.filter(function (r) { return r.dataset.free === ""; }).length : 0;
-    document.getElementById("freeNote").textContent = unknownPrice > 0 ? unknownPrice + " price unknown" : "";
+    document.getElementById("freeNote").textContent = unknownPrice > 0 ? unknownPrice + " 行价格未知" : "";
     updateShortlist();
   }
 
   function updateShortlist() {
     var picked = Array.prototype.slice.call(document.querySelectorAll(".pick:checked"));
-    var lines = picked.map(function (p) { return p.value; });
-    document.getElementById("shortlist").value = lines.join("\\n");
+    document.getElementById("shortlist").value = picked.map(function (p) { return p.value; }).join("\\n");
     var byChain = {};
     picked.forEach(function (p) { (byChain[p.dataset.chain] = byChain[p.dataset.chain] || []).push(p.value); });
-    // Inline the addresses: --audit takes multiple targets, so no @file is needed.
     var commands = Object.keys(byChain).map(function (c) {
       return "npm start -- --audit " + byChain[c].join(" ") + " --chain " + c +
         " --export targets." + c + ".json --quantity 1 --max-price current --force";
@@ -673,48 +861,39 @@ ${rowHtml}
       var cmp = (!isNaN(an) && !isNaN(bn)) ? an - bn : av.localeCompare(bv);
       return desc ? -cmp : cmp;
     });
-    rows.forEach(function (r) { table.tBodies[0].appendChild(r); });
+    rows.forEach(function (r) {
+      var detail = r.nextElementSibling;
+      table.tBodies[0].appendChild(r);
+      if (detail && detail.classList.contains("detail")) table.tBodies[0].appendChild(detail);
+    });
     th.dataset.desc = desc ? "0" : "1";
+  });
+  rows.forEach(function (r) {
+    r.addEventListener("click", function (event) {
+      if (event.target.closest("a") || event.target.closest("input")) return;
+      var detail = r.nextElementSibling;
+      r.classList.toggle("open");
+      if (detail && detail.classList.contains("detail")) detail.hidden = !r.classList.contains("open");
+    });
   });
   document.querySelectorAll(".pick").forEach(function (p) { p.addEventListener("change", updateShortlist); });
   document.getElementById("copy").addEventListener("click", function () {
     var area = document.getElementById("shortlist");
     area.select();
-    var done = function () { document.getElementById("copyNote").textContent = "copied"; };
+    var done = function () { document.getElementById("copyNote").textContent = "已复制"; };
     if (navigator.clipboard) navigator.clipboard.writeText(area.value).then(done, done);
     else { document.execCommand("copy"); done(); }
   });
   apply();
 })();
 </script>
-<script>
-(function () {
-  if (!document.getElementById("statusBar")) return;
-  var state = document.getElementById("stState");
-  var log = document.getElementById("stLog");
-  var button = document.getElementById("scanNow");
-  function refresh() {
-    fetch("/api/status", { cache: "no-store" }).then(function (r) { return r.json(); }).then(function (s) {
-      var parts = [s.running ? "scanning…" : "idle"];
-      if (s.lastScanAt) parts.push("last " + s.lastScanAt.slice(11, 16) + "Z");
-      if (s.nextScanAt) parts.push("next " + s.nextScanAt.slice(11, 16) + "Z");
-      parts.push((s.rowCount || 0) + " rows");
-      if (s.lastError) parts.push("error: " + s.lastError);
-      state.textContent = parts.join(" · ");
-      if (s.log && s.log.length) log.textContent = s.log[s.log.length - 1].slice(11, 19) + " " + s.log[s.log.length - 1].slice(30);
-    }).catch(function () { state.textContent = "status unavailable"; });
-  }
-  button.addEventListener("click", function () {
-    button.disabled = true;
-    fetch("/api/scan", { method: "POST", headers: { "content-type": "application/json" }, body: "{}" })
-      .then(function (r) { return r.json().then(function (j) { if (!r.ok) throw new Error(j.error || String(r.status)); return j; }); })
-      .catch(function (e) { alert("scan: " + e.message); })
-      .then(function () { button.disabled = false; refresh(); });
-  });
-  refresh();
-  setInterval(refresh, 15000);
-})();
-</script>
+${serveScript}
+<div class="out">
+  <div><strong>短名单</strong> <span class="muted">勾选的目标，每行一个合约地址（可存为 @shortlist.txt）</span></div>
+  <textarea id="shortlist" readonly></textarea>
+  <div style="margin-top:6px"><button id="copy">复制</button> <span id="copyNote" class="muted"></span></div>
+  <pre id="commands" class="muted"></pre>
+</div>
 </body>
 </html>
 `;

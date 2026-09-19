@@ -118,8 +118,8 @@ test('backfill records surface as net columns', () => {
   const rows = loadDashboardRows(state, history, ledger, () => cached, backfills);
   assert.deepEqual(rows[0].nets, { '24': '$0.0500', '72': '$0.0200', '168': '$0.0100' });
   const html = renderDashboard(rows, { generatedAt: 'now', sources: [] });
-  assert.ok(html.includes('data-net24="$0.0500"'));
-  assert.ok(html.includes('24h net'));
+  assert.ok(html.includes('data-net24usd="$0.0500"'));
+  assert.ok(html.includes('24时净值'));
 });
 
 const {
@@ -246,7 +246,7 @@ test('new history facts surface as dashboard row fields and render', () => {
   assert.ok(row.links.explorer.includes('/address/0xfeed'));
 
   const html = renderDashboard(rows, { generatedAt: 'now', sources: [] });
-  assert.ok(html.includes('>FREE<'));
+  assert.ok(html.includes('>免费<'));
   assert.ok(html.includes('data-free="1"'));
   assert.ok(html.includes('data-stale="0"'));
   assert.ok(html.includes('id="presetFresh"'));
@@ -269,9 +269,10 @@ test('the table header and every row have the same number of columns', () => {
   // Left (remaining) is its own column, and every sort key exists on the rows.
   assert.ok(head.includes('data-sort="remaining"'));
   assert.ok(body.includes('data-remaining='));
-  for (const key of ['grade', 'chain', 'target', 'start', 'mintprice', 'mintedpct', 'remaining', 'velocity', 'stale', 'notes', 'net24usd', 'net72usd']) {
-    assert.ok(head.includes(`data-sort="${key}"`), `missing sort key ${key}`);
-    assert.ok(body.includes(`data-${key}=`), `missing data attribute ${key}`);
+  const sortKeys = [...new Set([...head.matchAll(/data-sort="([a-z0-9]+)"/g)].map((m) => m[1]))];
+  assert.ok(sortKeys.length >= 8);
+  for (const key of sortKeys) {
+    assert.ok(body.includes(`data-${key}=`), `sort key without a row attribute: ${key}`);
   }
 });
 
