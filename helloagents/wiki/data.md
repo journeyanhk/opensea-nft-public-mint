@@ -142,6 +142,8 @@
 | ScanState.calendar | object \| undefined | `{ fetchedAt, counts }`：上次成功抓取时间（节流）与各链条目数（金丝雀基线） |
 | contracts[chain][addr].xFollowers / xCheckedAt | number \| null / string \| null | X 粉丝数与读取时间；仅 `ENABLE_X_METRICS=1` 时抓取（`api.fxtwitter.com/<handle>`），24 小时缓存，失败静默 |
 
+M7/A2 的流动性派生（不落盘）：`liquidity { level, label }`（`traded/thin/stale-evidence/unknown`，取自最近一次回填检查点的 `salesCount/uniqueBuyers/at`）与创作者 `withSales`（其它 drop 中 `salesCount ≥ 3` 的数量，作有界加分）。
+
 M7/A3 的铸造结构字段（审计写入历史）：`maxTxTokens`（单笔交易最多铸出的 token 数，按 transactionHash 归组）、`payerDiffers`（付款人≠铸造人的日志笔数）、`smartMinters`（目标 Top20 铸造地址命中聪明铸造者集合的数量）。本地派生文件：`.smart-minters.json`（`{ version, updatedAt, minters: { addr: { appearances, drops[] } } }`，出现 ≥2 次视为合格，上限 5000 条按出现次数淘汰）。
 
 M5b 的派生字段（不落盘，`loadDashboardRows` 计算）：`social`（已知但为空 ≠ 未知）、`creator`（按 owner 聚合的 drop 数/售罄率/平均 24h 速度/二级成交/自有净值与 `ownData` 标记；**评分时排除目标自身**，`dropCount=0` 表示没有其它 drop → 创作者维度视为未知）、`presaleShare`（预售阶段铸出量 / 上限，来自审计缓存；用于需求代理与秒空判定）、`quality`（0–100 分 + `confidence` 覆盖率 + 维度拆分 + 惩罚项，见 `src/scan/quality.ts`）。缩略图仅在域名属于 `seadn.io` / `opensea.io` 且为 https 时才进 `src`；社交链接仅允许 http(s)。

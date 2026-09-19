@@ -529,3 +529,36 @@ test('batch-mint traces and smart-minter reach surface on the row and in the pan
   assert.ok(html.includes('单笔最多 1000 个'));
   assert.ok(html.includes('聪明铸造者触达 4'));
 });
+
+test('liquidity evidence is labelled and never flirts with a profit claim for upcoming drops', () => {
+  const now = Math.floor(Date.now() / 1000);
+  const entry = (extra) => ({
+    firstSeenBlock: 1, lastSeenBlock: 10, lastAuditedBlock: 10, lastAuditedAt: '2026-09-19T08:00:00.000Z',
+    lastGrade: 'A', soldOutAtBlock: null, pendingAudit: false, slug: 's', name: 'S', endTime: now + 86_400,
+    maxSupply: '1000', totalMinted: '100', owner: '0xOwner', socialCheckedAt: '2026-09-19T08:00:00.000Z', ...extra,
+  });
+  const liquidityState = {
+    version: 1,
+    chains: {},
+    contracts: {
+      arc: {
+        '0xeee': entry({ publicStart: now - 3600 }),
+        '0xfff': entry({ publicStart: now + 3600 }),
+      },
+    },
+  };
+  const liquidityHistory = [
+    { at: new Date(now * 1000).toISOString(), chain: 'arc', contract: '0xeee', grade: 'A', remaining: '900', projected: '0', start: now - 3600, minted: '100', maxSupply: '1000', uniqueMinters: 20, topMinterShare: 0.1, presaleStages: 0, capPerWallet: 2, recent1h: '5', mintPriceWei: '0', smartMinters: 2 },
+    { at: new Date(now * 1000).toISOString(), chain: 'arc', contract: '0xfff', grade: 'A', remaining: '1000', projected: '0', start: now + 3600, minted: '0', maxSupply: '1000', uniqueMinters: 0, topMinterShare: 0, presaleStages: 0, capPerWallet: 2, recent1h: '0', mintPriceWei: '0' },
+  ];
+  const backfills = [
+    { chain: 'arc', contract: '0xeee', checkpointHours: 6, salesCount: 5, uniqueBuyers: 3, netUsd: 1, at: new Date((now - 3600) * 1000).toISOString() },
+  ];
+  const rows = loadDashboardRows(liquidityState, liquidityHistory, { version: 1, entries: {} }, () => null, backfills);
+  assert.equal(rows[0].liquidity.level, 'traded');
+  assert.equal(rows[1].liquidity, null);
+
+  const html = renderDashboard(rows, { generatedAt: 'now', sources: [] });
+  assert.ok(html.includes('流动性：有成交'));
+  assert.ok(!html.includes('利润'), 'no profit claim on the board');
+});

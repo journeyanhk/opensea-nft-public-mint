@@ -47,6 +47,12 @@
 - `scanner.ts`：审计传入 `smartSet`（`AuditResult.smartMinters` 为 Top20 命中数）；审计后若售罄则把候选并入集合，运行结束保存
 - 面板：`批量痕迹` 徽标（`maxTxTokens ≥ 10`）+ Q 分惩罚 `batch-mint`；明细「铸造结构：单笔最多 N 个 · 付款人≠铸造人 M 笔 · 聪明铸造者触达 K」；参与维度加 `smartMinters` 加成（只加分不减分）
 
+### 需求: 保守估值与流动性（M7/A2）
+**模块:** scan
+- `src/scan/valuation.ts`：`conservativeValuation`（24h 窗口、按 txHash 去重、≥3 笔不同交易 + ≥2 个不同买家 + 近 6h 有成交；买家等权中位数；`reference = min(floor, lowerQuartile×0.8, topOffer)`；`floorDivergence = floor > lowerQuartile×3`）与 `liquidityVerdict`（用回填检查点给出 有成交/样本不足/数据过旧/无数据）
+- 面板：流动性标签进明细；**upcoming 行不显示地板与参考价**（无二级成交，不做利润暗示）；创作者维度用 `withSales`（其它 drop 中回填 `salesCount ≥ 3` 的数量）做有界加成
+- 后续（未做）：页面 `collectionActivity` 的真实 Sale 样本采集（现值只覆盖"汇总证据"层，逐笔样本留给 A2+）
+
 ### 需求: 状态与快照
 **模块:** scan
 - `.scan-state.json`（`version: 1`）：`chains[chain] = { cursorBlock, blockTimeSec, updatedAt }`；`contracts[chain][contract] = { firstSeenBlock, lastSeenBlock, lastAuditedBlock, lastAuditedAt, lastGrade, soldOutAtBlock, publicStart, pendingAudit }`

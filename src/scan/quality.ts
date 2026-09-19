@@ -38,6 +38,7 @@ export interface CreatorStats {
   soldOutRate: number | null; // over drops with a known supply
   avgVelocity24h: number | null; // tokens/day, over drops with a reading
   salesCount: number | null; // secondary sales we observed (backfill)
+  withSales?: number; // other drops with real secondary sales (>= 3)
   ownMints: number; // our confirmed mints (ledger)
   ownNetUsd: number | null; // latest net per contract, summed
   ownData: boolean;
@@ -94,10 +95,12 @@ function statsForOwner(
   let sales: number | null = null;
   let net: number | null = null;
   let mints = 0;
+  let withSales = 0;
   for (const fact of drops) {
     const record = latest.get(`${fact.chain}|${fact.contract.toLowerCase()}`);
     if (record) {
       if (record.salesCount !== null) sales = (sales ?? 0) + record.salesCount;
+      if (record.salesCount !== null && record.salesCount >= 3) withSales++;
       if (record.netUsd !== null) net = (net ?? 0) + record.netUsd;
     }
     const entry = ledger ? entryOf(ledger, fact.chain, fact.contract) : undefined;
@@ -113,6 +116,7 @@ function statsForOwner(
     avgVelocity24h:
       velocities.length > 0 ? Math.round(velocities.reduce((sum, v) => sum + Number(v), 0) / velocities.length) : null,
     salesCount: sales,
+    withSales,
     ownMints: mints,
     ownNetUsd: net,
     ownData: mints > 0 || net !== null || sales !== null,
@@ -192,7 +196,10 @@ function creatorScore(creator: CreatorStats | null): number | null {
   const reliability = creator.soldOutRate ?? 0.5;
   const track = clamp01(creator.dropCount / 5);
   const pace = creator.avgVelocity24h === null ? 0.5 : clamp01(creator.avgVelocity24h / 100);
-  return 0.5 * reliability + 0.3 * track + 0.2 * pace;
+  // A creator whose other drops actually traded is a bonus, never a penalty for
+  // the rest of the set (older records simply have no secondary evidence).
+  const traded = clamp01((creator.withSales ?? 0) / 2);
+  return clamp01(0.5 * reliability + 0.3 * track + 0.2 * pace + 0.15 * traded);
 }
 
 function socialScore(social: SocialFact | null, nowSec: number): number | null {

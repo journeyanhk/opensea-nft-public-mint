@@ -7,6 +7,7 @@
 ## [Unreleased]
 
 ### 新增
+- M7/A2 保守估值与流动性：新增 `src/scan/valuation.ts`（买家中位数等权、lowerQuartile×0.8 折扣、`min(floor, 下四分位×0.8, topOffer)`、地板偏离标记、证据门槛 ≥3 笔/≥2 买家/近 6h）；面板流动性标签（未开售行不给地板与利润暗示）；创作者维度 `withSales` 有界加成
 - M7/A3+A4 铸造结构与聪明铸造者：`aggregateMints` 新增 `maxTxTokens`（按 `transactionHash` 归组）、`payerDiffers`、`topMinters`；新增 `src/scan/smart-minters.ts`（售罄 drop 的吃满/重复铸造地址自动进入 `.smart-minters.json`，≥2 次合格）与 `AuditResult.smartMinters`；面板加「批量痕迹」徽标（单笔 ≥10 个）+ Q 分惩罚 `batch-mint`、明细「铸造结构」行、参与维度 `smartMinters` 加成
 - M7/A1 OpenSea 日历第二信息源：新增 `src/scan/calendar.ts`（`urql_transport` 解析 + 固定 UA/跟随 307/15s 超时 + fail-loud + 金丝雀）与 `refreshCalendar`（按 `CALENDAR_INTERVAL_MIN` 节流，失败沿用旧快照）；upcoming 的 slug/名称/合约/开售时间/地板/认证/禁用/stages 落 `ContractEntry.calendar` 与 `sources`；面板新增「日历/未认证/平台禁用」徽标与明细、`schedule mismatch`；`classifyPhase` 允许"未来开售但缺链上事实"判为 upcoming。真链验证：一次抓取解析出 7 条（robinhood 3 / ethereum 3 / base 1），1.9s
 - M5b 社交、创作者历史与 Q 分：`--refresh-targets` 额外读取 `owner()` 与 **无需 key** 的 `collections/<slug>`（缩略图、X/Discord/官网、创建日期、safelist），已读但无链接的合集记为「已知为空」不再重试；面板名称列加缩略图（仅 https 且域名属 `seadn.io`/`opensea.io`）、展开明细显示社交与**创作者历史**（按 `owner` 聚合 drop 数/售罄率/平均 24h 速度/二级成交，叠加账本与回填的「自有数据」）

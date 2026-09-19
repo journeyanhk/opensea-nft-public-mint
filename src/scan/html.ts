@@ -10,6 +10,7 @@ import { resolveChain } from "../chains";
 import { CachedScan, readCachedScan } from "../audit/audit";
 import { Ledger, entryOf } from "../batch-ledger";
 import { BackfillRecord, formatNetUsd } from "./backfill";
+import { liquidityVerdict, LiquidityLevel } from "./valuation";
 import { ContractEntry, ScanState } from "./state";
 import { creatorStatsFor, qualityScore, safeImageUrl, safeLinkUrl } from "./quality";
 import type { CreatorFact, CreatorStats, Phase, Penalty, QualityDimension, QualityResult, QualitySignals, SocialFact } from "./quality";
@@ -108,6 +109,7 @@ export interface DashboardRow {
   phase: Phase;
   presaleShare: number | null;
   batchMint: boolean;
+  liquidity: { level: LiquidityLevel; label: string } | null;
   maxTxTokens: string | null;
   payerDiffers: number | null;
   smartMinters: number | null;
@@ -195,12 +197,15 @@ export function loadDashboardRows(
   backfills: BackfillRecord[] = []
 ): DashboardRow[] {
   const netsByTarget = new Map<string, Record<string, string>>();
+  const latestBackfill = new Map<string, BackfillRecord>();
   for (const record of backfills) {
     const key = `${record.chain}|${record.contract.toLowerCase()}`;
     const nets = netsByTarget.get(key) ?? {};
     const net = formatNetUsd(record);
     if (net !== null) nets[String(record.checkpointHours)] = net;
     netsByTarget.set(key, nets);
+    const current = latestBackfill.get(key);
+    if (!current || record.checkpointHours >= current.checkpointHours) latestBackfill.set(key, record);
   }
   const byTarget = new Map<string, GradePoint[]>();
   for (const line of history) {
@@ -272,6 +277,15 @@ export function loadDashboardRows(
       const batchMint = maxTxTokens !== null && BigInt(maxTxTokens) >= 10n;
       const smartMinters = latest?.smartMinters ?? null;
 
+      const backfill = latestBackfill.get(key) ?? null;
+      // Our own checkpoints are a summary, not per-sale samples, so they can
+      // label liquidity but never produce a reference price on their own.
+      const liquidity = liquidityVerdict(
+        backfill
+          ? { salesCount: backfill.salesCount, uniqueBuyers: backfill.uniqueBuyers, checkedAtMs: Date.parse(backfill.at) }
+          : null,
+        nowSec * 1000
+      );
       const minted = entry.totalMinted != null ? BigInt(entry.totalMinted) : latest?.minted != null ? BigInt(latest.minted) : null;
       const maxSupply = entry.maxSupply != null ? BigInt(entry.maxSupply) : latest?.maxSupply != null ? BigInt(latest.maxSupply) : null;
       const remainingNow = latest?.remaining != null ? BigInt(latest.remaining) : null;
@@ -359,6 +373,7 @@ export function loadDashboardRows(
         phase,
         presaleShare,
         batchMint,
+        liquidity: liquidity.level === "unknown" ? null : liquidity,
         maxTxTokens,
         payerDiffers: latest?.payerDiffers ?? null,
         smartMinters,
@@ -688,6 +703,11 @@ export function renderDashboard(rows: DashboardRow[], meta: DashboardMeta, opts:
         .filter(Boolean)
         .join(" · ");
 
+      const liquidityLine = row.liquidity
+        ? `<span>流动性：${escapeHtml(row.liquidity.label)}${
+            row.phase === "upcoming" ? "（未开售，暂无二级成交）" : ""
+          }${row.calendar?.floorValue != null && row.phase !== "upcoming" ? ` · 挂单地板 ${escapeHtml(String(row.calendar.floorValue))} ${escapeHtml(row.calendar.floorSymbol ?? "")}` : ""}</span>`
+        : "";
       const batchLine = row.maxTxTokens
         ? `<span>铸造结构：单笔最多 ${escapeHtml(row.maxTxTokens)} 个${
             row.payerDiffers ? ` · 付款人≠铸造人 ${row.payerDiffers} 笔` : ""
@@ -746,6 +766,7 @@ export function renderDashboard(rows: DashboardRow[], meta: DashboardMeta, opts:
         calendarLine,
         mismatchLine,
         batchLine,
+        liquidityLine,
         socialBits.length > 0 ? `<span>社交：${socialBits.join(" · ")}</span>` : "",
         row.creator ? `<span>${creatorText}</span>` : "",
         qBreakdown ? `<span>${qBreakdown}</span>` : "",

@@ -226,3 +226,10 @@ test('batch-mint evidence is a penalty and smart-minter reach is a bonus', () =>
   // Smart reach can only help: a known-strong target stays at 100.
   assert.equal(qualityScore({ ...strongSignals, smartMinters: 0 }).dimensions.participation, 100);
 });
+
+test('a creator whose other drops traded gets a bounded bonus', () => {
+  const base = { owner: '0xowner', dropCount: 2, soldOutRate: 0.5, avgVelocity24h: 50, salesCount: 5, ownMints: 0, ownNetUsd: null, ownData: false };
+  const without = qualityScore({ ...strongSignals, creator: base });
+  const traded = qualityScore({ ...strongSignals, creator: { ...base, withSales: 2 } });
+  assert.ok(traded.dimensions.creator > without.dimensions.creator);
+});
