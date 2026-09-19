@@ -40,6 +40,13 @@
 - `refreshCalendar`（scanner）：每 `CALENDAR_INTERVAL_MIN`（默认 15）抓一次；失败记 `calendar unavailable` 并沿用旧快照（绝不静默清空）；成功更新 `state.calendar.counts` 作为下次金丝雀基线
 - 面板：`日历/未认证/平台禁用` 徽标 + 明细（收录时间/开售/地板/最高报价/供应/阶段数）；`classifyPhase` 对「未来开售但尚无链上事实」的条目判 `upcoming` 而不是 `unaudited`
 
+### 需求: 聪明铸造者集合与批量痕迹（M7/A3+A4）
+**模块:** scan
+- `src/scan/smart-minters.ts`：`smartCandidates`（售罄 drop 中吃满 cap 或铸造 ≥3 个的地址）、`addSmartCandidates`（出现次数累计，≥2 次合格，5000 条上限）、`smartSet`/`smartOverlap`；存储 `.smart-minters.json`
+- `events.ts`：`RawLog.transactionHash`（RPC 原样透传）→ `aggregateMints` 归组出 `maxTxTokens`（单笔最多 token）、`payerDiffers`、`topMinters`（Top20 地址）；审计缓存序列化同步新增字段（旧缓存缺字段按 0/空读）
+- `scanner.ts`：审计传入 `smartSet`（`AuditResult.smartMinters` 为 Top20 命中数）；审计后若售罄则把候选并入集合，运行结束保存
+- 面板：`批量痕迹` 徽标（`maxTxTokens ≥ 10`）+ Q 分惩罚 `batch-mint`；明细「铸造结构：单笔最多 N 个 · 付款人≠铸造人 M 笔 · 聪明铸造者触达 K」；参与维度加 `smartMinters` 加成（只加分不减分）
+
 ### 需求: 状态与快照
 **模块:** scan
 - `.scan-state.json`（`version: 1`）：`chains[chain] = { cursorBlock, blockTimeSec, updatedAt }`；`contracts[chain][contract] = { firstSeenBlock, lastSeenBlock, lastAuditedBlock, lastAuditedAt, lastGrade, soldOutAtBlock, publicStart, pendingAudit }`

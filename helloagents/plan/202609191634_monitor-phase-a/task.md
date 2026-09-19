@@ -14,11 +14,11 @@
 - [√] 1.5 `tests/calendar.cjs`（真实结构 fixture + fail-loud + 金丝雀 + upsert 语义）；真链验证解析出的 robinhood 条数与实测一致
 
 ## 2. A3 + A4-lite 秒空强化与聪明铸造者
-- [ ] 2.1 `src/scan/smart-minters.ts`：`deriveSmartMinters`（售罄 drop + 吃满/≥3 + 出现 ≥2 次）、`.smart-minters.json` 读写
-- [ ] 2.2 审计：`AuditResult.smartMinters`（与目标 `walletMints` 交集），写入历史；扫描器审计后增量更新集合
-- [ ] 2.3 批量合约痕迹：`batchMintEvidence`（单笔多 mint、payer≠minter、caller 为合约抽样）→ Q 分惩罚 `batch-mint` + 面板徽标
-- [ ] 2.4 Q 分：`participation` 加 `smartMinters` 子分（有值才计入）
-- [ ] 2.5 `tests/smart-minters.cjs` + 面板断言
+- [√] 2.1 `src/scan/smart-minters.ts`：`deriveSmartMinters`（售罄 drop + 吃满/≥3 + 出现 ≥2 次）、`.smart-minters.json` 读写
+- [√] 2.2 审计：`AuditResult.smartMinters`（与目标 `walletMints` 交集），写入历史；扫描器审计后增量更新集合
+- [√] 2.3 批量合约痕迹：`batchMintEvidence`（单笔多 mint、payer≠minter、caller 为合约抽样）→ Q 分惩罚 `batch-mint` + 面板徽标
+- [√] 2.4 Q 分：`participation` 加 `smartMinters` 子分（有值才计入）
+- [√] 2.5 `tests/smart-minters.cjs` + 面板断言
 
 ## 3. A2 保守估值护栏
 - [ ] 3.1 `src/scan/valuation.ts`：`conservativeValuation`（≥3 交易 + ≥2 买家 + 6h 新鲜；买家等权中位数；`reference = min(floor, lowerQuartile×0.8, topOffer)`；`floorDivergence`）

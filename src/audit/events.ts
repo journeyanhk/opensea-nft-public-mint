@@ -95,6 +95,7 @@ export interface RawLog {
   topics: string[];
   data: string;
   blockNumber: string;
+  transactionHash?: string;
 }
 
 export interface ScanDeps {
@@ -258,6 +259,12 @@ export interface MintScan {
   lastBlock: number | null;
   recentTokens: bigint; // tokens minted in blocks >= recentFromBlock (the 15m window)
   recentByWindow: Record<string, bigint>; // labelled windows, e.g. { "15m": …, "1h": … }
+  // M7/A3: a batch contract mints many tokens in one transaction, so the
+  // largest transaction and a payer that differs from the minter are the
+  // cheapest on-chain trace of one. Top minters feed the smart-minter set.
+  maxTxTokens: bigint;
+  payerDiffers: number;
+  topMinters: { address: string; tokens: bigint }[];
 }
 
 export interface DecodedMint {
@@ -307,6 +314,9 @@ export function aggregateMints(
   let recentTokens = 0n;
   let firstBlock: number | null = null;
   let lastBlock: number | null = null;
+  const perTx = new Map<string, bigint>();
+  const perAddress = new Map<string, bigint>();
+  let payerDiffers = 0;
 
   for (const log of logs) {
     const mint = decodeMintLog(log);
@@ -314,6 +324,10 @@ export function aggregateMints(
 
     totalTxs++;
     totalTokens += mint.quantity;
+    if (mint.payer.toLowerCase() !== mint.minter.toLowerCase()) payerDiffers++;
+    const txKey = log.transactionHash ?? `log:${mint.block}:${mint.minter}:${mint.quantity}`;
+    perTx.set(txKey, (perTx.get(txKey) ?? 0n) + mint.quantity);
+    perAddress.set(mint.minter, (perAddress.get(mint.minter) ?? 0n) + mint.quantity);
     if (mint.block >= recentFromBlock) recentTokens += mint.quantity;
     for (const cutoff of extraCutoffs) {
       if (mint.block >= cutoff.fromBlock) recentByWindow[cutoff.label] += mint.quantity;
@@ -350,6 +364,11 @@ export function aggregateMints(
     entry.topMinterTokens = [...minterMap.values()].reduce((max, v) => (v > max ? v : max), 0n);
   }
 
+  const maxTxTokens = [...perTx.values()].reduce((max, value) => (value > max ? value : max), 0n);
+  const topMinters = [...perAddress.entries()]
+    .map(([address, tokens]) => ({ address, tokens }))
+    .sort((a, b) => (a.tokens === b.tokens ? a.address.localeCompare(b.address) : a.tokens > b.tokens ? -1 : 1))
+    .slice(0, 20);
   const topTokens = [...globalMinters.values()].reduce((max, v) => (v > max ? v : max), 0n);
   recentByWindow["15m"] = recentTokens;
   return {
@@ -362,6 +381,9 @@ export function aggregateMints(
     lastBlock,
     recentTokens,
     recentByWindow,
+    maxTxTokens,
+    payerDiffers,
+    topMinters,
   };
 }
 

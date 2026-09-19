@@ -174,3 +174,23 @@ test('suppresses concentration labels when the scan saw only part of the mints',
   const tiny = gradeTarget({ ...base, maxSupply: 20000n, totalMinted: 10000n, scanTokens: 20n, scanCoverage: 1, topMinterShare: 0.8 });
   assert.ok(!tiny.risks.some(r => r.includes('top minter')));
 });
+
+test('aggregates the largest single-transaction mint and payer differences', () => {
+  const W3 = '0x1111111111111111111111111111111111111111';
+  const W4 = '0x2222222222222222222222222222222222222222';
+  const withTx = (hash, ...rest) => ({ ...log(...rest), transactionHash: hash });
+  const scan = aggregateMints([
+    withTx('0xaa', A, W1, FEE, W1, 2, 0, 1000, 0, 100),
+    withTx('0xaa', A, W1, FEE, W1, 3, 0, 1000, 0, 100), // same tx: 5 tokens
+    withTx('0xbb', A, W2, FEE, W3, 1, 0, 1000, 0, 101), // payer != minter
+    withTx('0xcc', A, W4, FEE, W4, 1, 0, 1000, 1, 105),
+  ], 120);
+  assert.equal(scan.maxTxTokens, 5n);
+  assert.equal(scan.payerDiffers, 1);
+  assert.equal(scan.topMinters[0].address.toLowerCase(), W1);
+  assert.equal(scan.topMinters[0].tokens, 5n);
+  // Older fixtures and caches have no hash: each log stands alone.
+  const plain = aggregateMints([log(A, W1, FEE, W1, 2, 0, 1000, 0, 100)], 120);
+  assert.equal(plain.maxTxTokens, 2n);
+  assert.equal(plain.payerDiffers, 0);
+});

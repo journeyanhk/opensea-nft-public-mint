@@ -43,6 +43,9 @@ export interface HistoryLine {
   topMinterShare?: number | null;
   stageCount?: number | null;
   presaleStages?: number | null;
+  maxTxTokens?: string | null;
+  payerDiffers?: number | null;
+  smartMinters?: number | null;
 }
 
 export interface GradePoint {
@@ -65,6 +68,9 @@ export interface GradePoint {
   uniqueMinters?: number | null;
   topMinterShare?: number | null;
   presaleStages?: number | null;
+  maxTxTokens?: string | null;
+  payerDiffers?: number | null;
+  smartMinters?: number | null;
 }
 
 export interface DashboardRow {
@@ -101,6 +107,10 @@ export interface DashboardRow {
   stale: boolean;
   phase: Phase;
   presaleShare: number | null;
+  batchMint: boolean;
+  maxTxTokens: string | null;
+  payerDiffers: number | null;
+  smartMinters: number | null;
   calendar: CalendarFacts | null;
   calendarMismatch: boolean;
   imageUrl: string | null;
@@ -216,6 +226,9 @@ export function loadDashboardRows(
       uniqueMinters: line.uniqueMinters ?? null,
       topMinterShare: line.topMinterShare ?? null,
       presaleStages: line.presaleStages ?? null,
+      maxTxTokens: line.maxTxTokens ?? null,
+      payerDiffers: line.payerDiffers ?? null,
+      smartMinters: line.smartMinters ?? null,
     });
     byTarget.set(key, points);
   }
@@ -253,6 +266,11 @@ export function loadDashboardRows(
       const name = entry.name ?? latest?.name ?? null;
       const owner = entry.owner ?? latest?.owner ?? null;
       const topShare = cached?.mintScan.topMinterShare ?? null;
+      const maxTxTokens = latest?.maxTxTokens ?? (cached ? cached.mintScan.maxTxTokens?.toString() ?? null : null);
+      // One transaction minting ten or more tokens is a clone-contract batch,
+      // not a human (the winning wallet on The Obscura did 1,000 in one call).
+      const batchMint = maxTxTokens !== null && BigInt(maxTxTokens) >= 10n;
+      const smartMinters = latest?.smartMinters ?? null;
 
       const minted = entry.totalMinted != null ? BigInt(entry.totalMinted) : latest?.minted != null ? BigInt(latest.minted) : null;
       const maxSupply = entry.maxSupply != null ? BigInt(entry.maxSupply) : latest?.maxSupply != null ? BigInt(latest.maxSupply) : null;
@@ -340,6 +358,10 @@ export function loadDashboardRows(
         stale,
         phase,
         presaleShare,
+        batchMint,
+        maxTxTokens,
+        payerDiffers: latest?.payerDiffers ?? null,
+        smartMinters,
         calendar,
         calendarMismatch,
         imageUrl: safeImageUrl(entry.imageUrl),
@@ -371,6 +393,8 @@ export function loadDashboardRows(
           presaleStages: row.presaleStages,
           presaleShare,
           capPerWallet: row.capPerWallet,
+          batchMint,
+          smartMinters,
           social,
         },
       });
@@ -537,6 +561,7 @@ const PENALTY_ZH: Record<Penalty, string> = {
   concentrated: "集中度高",
   "no-socials": "无社交",
   "instant-sellout": "预计秒空",
+  "batch-mint": "批量痕迹",
 };
 
 function netClass(net: string | null | undefined): string {
@@ -612,6 +637,9 @@ export function renderDashboard(rows: DashboardRow[], meta: DashboardMeta, opts:
       const instantPill = instant
         ? ` <span class="pill instant" title="预售已吃掉大部分供应、地址多且每钱包至少 5 个，公售剩余大概率被批量合约秒光">预计秒空</span>`
         : "";
+      const batchPill = row.batchMint
+        ? ` <span class="pill instant" title="单笔交易铸出大量 token（疑克隆合约批量铸造），单钱包大概率抢不到">批量痕迹</span>`
+        : "";
       const calendarBadges = [
         row.calendar ? `<span class="pill cal" title="来自 OpenSea drops 日历（提前量来源）">日历</span>` : "",
         row.calendar?.isVerified === false ? `<span class="pill unverified" title="OpenSea 未认证">未认证</span>` : "",
@@ -660,6 +688,13 @@ export function renderDashboard(rows: DashboardRow[], meta: DashboardMeta, opts:
         .filter(Boolean)
         .join(" · ");
 
+      const batchLine = row.maxTxTokens
+        ? `<span>铸造结构：单笔最多 ${escapeHtml(row.maxTxTokens)} 个${
+            row.payerDiffers ? ` · 付款人≠铸造人 ${row.payerDiffers} 笔` : ""
+          }${row.smartMinters != null ? ` · 聪明铸造者触达 ${row.smartMinters}` : ""}</span>`
+        : row.smartMinters != null
+          ? `<span>聪明铸造者触达 ${row.smartMinters}</span>`
+          : "";
       const calendarLine = row.calendar
         ? `<span>日历：收录 ${escapeHtml(row.calendar.listedAt.slice(0, 16).replace("T", " "))}Z${
             row.calendar.startTime ? ` · 开售 ${escapeHtml(toUtc8Time(new Date(row.calendar.startTime * 1000)))}` : ""
@@ -710,6 +745,7 @@ export function renderDashboard(rows: DashboardRow[], meta: DashboardMeta, opts:
         row.presaleStages !== null && row.presaleStages > 0 ? `<span>预售阶段：${row.presaleStages}</span>` : "",
         calendarLine,
         mismatchLine,
+        batchLine,
         socialBits.length > 0 ? `<span>社交：${socialBits.join(" · ")}</span>` : "",
         row.creator ? `<span>${creatorText}</span>` : "",
         qBreakdown ? `<span>${qBreakdown}</span>` : "",
@@ -731,7 +767,7 @@ export function renderDashboard(rows: DashboardRow[], meta: DashboardMeta, opts:
 
       return `<tr ${data} class="main-row">
   <td class="col-check"><input type="checkbox" class="pick" value="${escapeHtml(row.contract)}" data-chain="${escapeHtml(row.chain)}"></td>
-  <td class="col-name">${thumb}<span class="caret">▸</span><span class="name-main">${escapeHtml(row.name ?? "—")}</span>${instantPill}${calendarBadges ? " " + calendarBadges : ""}<div class="mono muted">${escapeHtml(row.contract)}</div></td>
+  <td class="col-name">${thumb}<span class="caret">▸</span><span class="name-main">${escapeHtml(row.name ?? "—")}</span>${instantPill}${batchPill}${calendarBadges ? " " + calendarBadges : ""}<div class="mono muted">${escapeHtml(row.contract)}</div></td>
   <td>${gradeCell}</td>
   <td class="num">${qCell}</td>
   <td><span class="pill phase phase-${escapeHtml(row.phase)}">${PHASE_ZH[row.phase]}</span></td>

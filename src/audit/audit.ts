@@ -11,6 +11,7 @@ import { planRpcs, resolveScanRpcs } from "../rpc-resolver";
 import { parseNftLink } from "../nft-link";
 import { resolveSlug } from "../slug-resolver";
 import { buildLocalMintPlan, fetchMintStats, PublicDrop, SEADROP_ADDRESS } from "../seadrop-public";
+import { smartOverlap } from "../scan/smart-minters";
 import {
   ChangeSummary,
   DropUpdate,
@@ -39,6 +40,8 @@ export interface AuditInput {
 
 export interface AuditOptions {
   wallets?: string[];
+  // Auto-derived winners from previous sold-out drops (see scan/smart-minters).
+  smartSet?: Set<string>;
   requestedQuantity?: number;
   lookbackDays?: number;
   maxRetries?: number; // per-window retries while scanning events
@@ -90,6 +93,7 @@ export interface AuditResult {
   changes: ChangeSummary;
   apiStages: ApiStage[] | null;
   social: Social | null;
+  smartMinters: number;
   grade: GradeResult;
   errors: string[];
 }
@@ -104,6 +108,9 @@ const EMPTY_SCAN: MintScan = {
   lastBlock: null,
   recentTokens: 0n,
   recentByWindow: {},
+  maxTxTokens: 0n,
+  payerDiffers: 0,
+  topMinters: [],
 };
 
 function apiKey(): string | null {
@@ -142,6 +149,8 @@ function serializeScan(scan: MintScan): unknown {
     totalTokens: scan.totalTokens.toString(),
     recentTokens: scan.recentTokens.toString(),
     recentByWindow: Object.fromEntries(Object.entries(scan.recentByWindow ?? {}).map(([label, value]) => [label, value.toString()])),
+    maxTxTokens: scan.maxTxTokens.toString(),
+    topMinters: scan.topMinters.map((m) => ({ address: m.address, tokens: m.tokens.toString() })),
     stages: scan.stages.map((s) => ({
       ...s,
       tokens: s.tokens.toString(),
@@ -159,6 +168,9 @@ function deserializeScan(raw: any): MintScan {
     recentByWindow: Object.fromEntries(
       Object.entries(raw.recentByWindow ?? {}).map(([label, value]) => [label, BigInt(String(value))])
     ),
+    maxTxTokens: BigInt(raw.maxTxTokens ?? 0),
+    payerDiffers: Number(raw.payerDiffers ?? 0),
+    topMinters: ((raw.topMinters ?? []) as any[]).map((m) => ({ address: String(m.address), tokens: BigInt(m.tokens ?? 0) })),
     stages: (raw.stages ?? []).map((s: any) => ({
       ...s,
       tokens: BigInt(s.tokens ?? 0),
@@ -298,6 +310,7 @@ export async function auditTarget(input: AuditInput, opts: AuditOptions = {}): P
       changes: summarizeChanges([]),
       apiStages: null,
       social: null,
+      smartMinters: 0,
       grade: {
         grade: "B",
         upperGrade: "B",
@@ -475,6 +488,7 @@ export async function auditTarget(input: AuditInput, opts: AuditOptions = {}): P
     changes,
     apiStages,
     social,
+    smartMinters: opts.smartSet ? smartOverlap(mintScan.topMinters, opts.smartSet) : 0,
     grade,
     errors,
   };

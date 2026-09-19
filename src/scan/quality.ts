@@ -135,11 +135,13 @@ export interface QualitySignals {
   presaleStages: number | null;
   presaleShare: number | null; // absorbed by the presale stages, 0-1
   capPerWallet: number | null;
+  batchMint: boolean | null; // a single tx minted a suspicious lot (likely a clone contract)
+  smartMinters: number | null; // tracked winners that touched this target
   creator: CreatorStats | null;
   social: SocialFact | null;
 }
 
-export type Penalty = "stale" | "concentrated" | "no-socials" | "instant-sellout";
+export type Penalty = "stale" | "concentrated" | "no-socials" | "instant-sellout" | "batch-mint";
 export type QualityDimension = "demand" | "participation" | "creator" | "social" | "structure";
 
 export interface QualityResult {
@@ -173,12 +175,14 @@ function demandScore(input: QualitySignals): number | null {
 }
 
 function participationScore(input: QualitySignals): number | null {
-  if (input.uniqueMinters === null) return null;
+  const smart = input.smartMinters == null ? 0 : clamp01(input.smartMinters / 5);
+  if (input.uniqueMinters === null) return smart > 0 ? smart * 0.6 : null;
   const breadth = clamp01(input.uniqueMinters / 50);
   // Unknown concentration is treated as a caution, not as clean.
   const concentration =
     input.topMinterShare === null ? 0.5 : input.topMinterShare < 0.2 ? 1 : input.topMinterShare < 0.5 ? 0.5 : 0;
-  return breadth * concentration;
+  // Known winners touching the target is a bonus: their absence proves nothing.
+  return clamp01(breadth * concentration + 0.4 * smart);
 }
 
 function creatorScore(creator: CreatorStats | null): number | null {
@@ -258,6 +262,7 @@ export function qualityScore(input: QualitySignals): QualityResult {
     penalties.push("no-socials");
   }
   if (instantSellout(input)) penalties.push("instant-sellout");
+  if (input.batchMint === true) penalties.push("batch-mint");
 
   let confidence = weightSum / 100;
   if (input.creator?.ownData) confidence = Math.min(1, confidence + 0.1);

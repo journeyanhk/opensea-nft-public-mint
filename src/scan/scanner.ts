@@ -18,6 +18,14 @@ import {
 } from "../audit/events";
 import { AuditResult, auditTarget } from "../audit/audit";
 import { CalendarSnapshot, UpsertResult, calendarVerdict, fetchCalendar, upsertCalendar } from "./calendar";
+import {
+  DEFAULT_SMART_PATH,
+  addSmartCandidates,
+  loadSmartStore,
+  saveSmartStore,
+  smartCandidates,
+  smartSet,
+} from "./smart-minters";
 import { projectedHeadroom, remainingSupply } from "../audit/score";
 import {
   ContractEntry,
@@ -141,6 +149,8 @@ export interface ScanOptions {
   calendarFn?: () => Promise<CalendarSnapshot>;
   calendarIntervalMs?: number;
   now?: () => Date;
+  smartPath?: string;
+  smartSet?: Set<string>;
   cacheDir?: string;
 }
 
@@ -211,6 +221,11 @@ export async function runScan(
 
   // The calendar is chain-agnostic and throttled separately from the scan tick:
   // it gives upcoming targets days of lead time, which is what the board is for.
+  const smartFile = opts.smartPath ?? DEFAULT_SMART_PATH;
+  const smartStore = loadSmartStore(smartFile);
+  const smart = opts.smartSet ?? smartSet(smartStore);
+  let smartDirty = false;
+
   const calendarUpdate = await refreshCalendar(state, {
     calendarFn: opts.calendarFn,
     intervalMs: opts.calendarIntervalMs,
@@ -218,6 +233,11 @@ export async function runScan(
     onProgress,
   });
   if (calendarUpdate && (calendarUpdate.added > 0 || calendarUpdate.updated > 0)) saveState(state, statePath);
+  try {
+    if (smartDirty || smartStore.updatedAt) saveSmartStore(smartStore, smartFile);
+  } catch (err) {
+    onProgress(`smart-minter store not saved — ${(err as Error).message}`);
+  }
 
   for (const chainKey of opts.chains) {
     const chain = resolveChain(chainKey);
@@ -408,7 +428,7 @@ export async function runScan(
         try {
           const result = await auditTarget(
             { chainKey, target: contract },
-            { lookbackDays: opts.lookbackDays, maxRetries: 8, cacheDir: opts.cacheDir }
+            { lookbackDays: opts.lookbackDays, maxRetries: 8, cacheDir: opts.cacheDir, smartSet: smart }
           );
           report.audited.push(result);
           const entry = state.contracts[chainKey][contract];
@@ -432,6 +452,21 @@ export async function runScan(
             entry.socialCheckedAt = entry.socialCheckedAt ?? entry.lastAuditedAt;
           }
           entry.pendingAudit = false;
+          // Sold-out drops are where the winners reveal themselves: whichever
+          // wallets filled the cap become candidates for the smart set.
+          const soldOutNow =
+            result.maxSupply !== null && result.maxSupply > 0n && result.totalMinted >= result.maxSupply;
+          if (soldOutNow) {
+            const candidates = smartCandidates(
+              result.mintScan.topMinters,
+              result.publicDrop?.maxTotalMintableByWallet ?? null
+            );
+            if (candidates.length > 0) {
+              addSmartCandidates(smartStore, candidates, `${chainKey}|${contract.toLowerCase()}`, entry.lastAuditedAt ?? new Date().toISOString());
+              for (const address of candidates) smart.add(address);
+              smartDirty = true;
+            }
+          }
           const mintedNow = result.totalMinted.toString();
           entry.quietStreak = entry.lastMintedTotal === mintedNow ? (entry.quietStreak ?? 0) + 1 : 0;
           entry.lastMintedTotal = mintedNow;
@@ -472,6 +507,9 @@ export async function runScan(
                 topMinterShare: result.mintScan.topMinterShare,
                 stageCount: result.mintScan.stages.length,
                 presaleStages: result.mintScan.stages.filter((stage) => stage.stage !== 0).length,
+                maxTxTokens: result.mintScan.maxTxTokens.toString(),
+                payerDiffers: result.mintScan.payerDiffers,
+                smartMinters: result.smartMinters,
               },
             ],
             historyPath

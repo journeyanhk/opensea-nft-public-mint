@@ -211,3 +211,18 @@ test('demand falls back to the absorbed presale share when there is no velocity 
   assert.equal(qualityScore({ ...strongSignals, velocity24h: null, presaleShare: 0.25 }).dimensions.demand, 50);
   assert.equal(qualityScore({ ...strongSignals, velocity24h: null, presaleShare: null }).dimensions.demand, null);
 });
+
+test('batch-mint evidence is a penalty and smart-minter reach is a bonus', () => {
+  const base = { ...strongSignals, batchMint: true, smartMinters: 4 };
+  assert.ok(qualityScore(base).penalties.includes('batch-mint'));
+  assert.ok(!qualityScore({ ...base, batchMint: false }).penalties.includes('batch-mint'));
+  assert.ok(!qualityScore({ ...base, batchMint: null }).penalties.includes('batch-mint'));
+
+  const weak = { ...strongSignals, uniqueMinters: 5, topMinterShare: 0.1 };
+  const withoutSmart = qualityScore({ ...weak, smartMinters: null });
+  const withSmart = qualityScore({ ...weak, smartMinters: 5 });
+  assert.equal(withoutSmart.dimensions.participation, 10);
+  assert.equal(withSmart.dimensions.participation, 50);
+  // Smart reach can only help: a known-strong target stays at 100.
+  assert.equal(qualityScore({ ...strongSignals, smartMinters: 0 }).dimensions.participation, 100);
+});

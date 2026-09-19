@@ -498,3 +498,34 @@ test('the rendered page has unique ids, main-row hooks and bindable elements', (
     assert.ok(at >= 0 && at < scriptAt, `${id} must be defined before the table script`);
   }
 });
+
+test('batch-mint traces and smart-minter reach surface on the row and in the panel', () => {
+  const now = Math.floor(Date.now() / 1000);
+  const batchState = {
+    version: 1,
+    chains: {},
+    contracts: {
+      arc: {
+        '0xbbb': {
+          firstSeenBlock: 1, lastSeenBlock: 10, lastAuditedBlock: 10, lastAuditedAt: '2026-09-19T08:00:00.000Z',
+          lastGrade: 'A', soldOutAtBlock: null, publicStart: now - 3600, pendingAudit: false, slug: 'batchy',
+          name: 'Batchy', endTime: now + 86_400, maxSupply: '1000', totalMinted: '900', owner: '0xOwner',
+          socialCheckedAt: '2026-09-19T08:00:00.000Z',
+        },
+      },
+    },
+  };
+  const batchHistory = [
+    { at: new Date(now * 1000).toISOString(), chain: 'arc', contract: '0xbbb', grade: 'A', remaining: '100', projected: '0', start: now - 3600, minted: '900', maxSupply: '1000', uniqueMinters: 120, topMinterShare: 0.3, presaleStages: 0, capPerWallet: 5, recent1h: '10', mintPriceWei: '0', maxTxTokens: '1000', payerDiffers: 12, smartMinters: 4 },
+  ];
+  const rows = loadDashboardRows(batchState, batchHistory, { version: 1, entries: {} }, () => null);
+  const row = rows[0];
+  assert.equal(row.batchMint, true);
+  assert.equal(row.smartMinters, 4);
+  assert.ok(row.quality.penalties.includes('batch-mint'));
+
+  const html = renderDashboard(rows, { generatedAt: 'now', sources: [] });
+  assert.ok(html.includes('批量痕迹'));
+  assert.ok(html.includes('单笔最多 1000 个'));
+  assert.ok(html.includes('聪明铸造者触达 4'));
+});
