@@ -597,6 +597,9 @@ test('the favorites surface: stars, tabs, snapshot, missing block and persisted 
   const html = renderDashboard(rows, { generatedAt: 'now', sources: [] }, { favorites });
 
   assert.ok(html.includes('data-favorite="1"'), 'the favorited row is marked');
+  // The star/note client reads row.dataset.contract; without the attribute the
+  // POST body loses the contract and the API answers 400.
+  assert.ok(html.match(/<tr data-chain[\s\S]*?>/)[0].includes('data-contract="0xaaa"'), 'rows must carry data-contract');
   assert.match(html, /data-snapshot="[^"]*&quot;q&quot;/, 'the snapshot travels with the row');
   assert.ok(html.includes('window.__FAVORITES__'), 'the store is embedded for the client');
   assert.ok(html.includes('window.__SERVE__ = false'));

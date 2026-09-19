@@ -708,6 +708,7 @@ export function renderDashboard(
       });
       const data = [
         `data-chain="${escapeHtml(row.chain)}"`,
+        `data-contract="${escapeHtml(row.contract)}"`,
         `data-favorite="${favorite ? "1" : "0"}"`,
         `data-slug="${escapeHtml(row.slug ?? "")}"`,
         `data-name="${escapeHtml(row.name ?? "")}"`,
