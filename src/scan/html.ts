@@ -13,6 +13,7 @@ import { BackfillRecord, formatNetUsd } from "./backfill";
 import { ContractEntry, ScanState } from "./state";
 import { creatorStatsFor, qualityScore, safeImageUrl, safeLinkUrl } from "./quality";
 import type { CreatorFact, CreatorStats, Phase, Penalty, QualityDimension, QualityResult, QualitySignals, SocialFact } from "./quality";
+import type { CalendarFacts } from "./calendar";
 import { toUtc8Time } from "../time-format";
 
 export type { Phase };
@@ -100,6 +101,8 @@ export interface DashboardRow {
   stale: boolean;
   phase: Phase;
   presaleShare: number | null;
+  calendar: CalendarFacts | null;
+  calendarMismatch: boolean;
   imageUrl: string | null;
   xFollowers: number | null;
   social: SocialFact | null;
@@ -156,10 +159,18 @@ function socialFact(entry: ContractEntry): SocialFact | null {
 // Structural facts come from the state file; change and concentration labels are
 // taken verbatim from the last audit (single source — the auditor already knows
 // about scan coverage, so a partial scan cannot produce a misleading label).
-function deriveNotes(input: { soldOut: boolean; pendingAudit: boolean; auditRisks: string[] }): string[] {
+function deriveNotes(input: {
+  soldOut: boolean;
+  pendingAudit: boolean;
+  auditRisks: string[];
+  calendarNotes?: string[];
+}): string[] {
   const notes: string[] = [];
   if (input.soldOut) notes.push("sold out");
   if (input.pendingAudit) notes.push("queued (over limit)");
+  for (const note of input.calendarNotes ?? []) {
+    if (!notes.includes(note)) notes.push(note);
+  }
   for (const risk of input.auditRisks) {
     if (!notes.includes(risk)) notes.push(risk);
   }
@@ -231,8 +242,13 @@ export function loadDashboardRows(
             quantity: executionEntry.quantity,
           }
         : null;
-      const start = entry.publicStart ?? latest?.start ?? null;
-      const endTime = entry.endTime ?? latest?.endTime ?? null;
+      const chainStart = entry.publicStart ?? latest?.start ?? null;
+      const calendar = entry.calendar ?? null;
+      const start = chainStart ?? calendar?.startTime ?? null;
+      const endTime = entry.endTime ?? latest?.endTime ?? calendar?.endTime ?? null;
+      // A start the project moved without updating the calendar (or vice versa).
+      const calendarMismatch =
+        calendar?.startTime != null && chainStart != null && Math.abs(chainStart - calendar.startTime) > 60;
       const slug = entry.slug ?? latest?.slug ?? null;
       const name = entry.name ?? latest?.name ?? null;
       const owner = entry.owner ?? latest?.owner ?? null;
@@ -299,6 +315,12 @@ export function loadDashboardRows(
           soldOut: entry.soldOutAtBlock !== null,
           pendingAudit: entry.pendingAudit,
           auditRisks: [...points].reverse().find((p) => p.risks && p.risks.length > 0)?.risks ?? [],
+          calendarNotes: [
+            calendar ? "calendar listed" : "",
+            calendar?.isVerified === false ? "unverified on OpenSea" : "",
+            calendar?.disabledReason ? `OpenSea disabled: ${calendar.disabledReason}` : "",
+            calendarMismatch ? "schedule mismatch" : "",
+          ].filter(Boolean),
         }),
         slug,
         name,
@@ -318,6 +340,8 @@ export function loadDashboardRows(
         stale,
         phase,
         presaleShare,
+        calendar,
+        calendarMismatch,
         imageUrl: safeImageUrl(entry.imageUrl),
         xFollowers: entry.xFollowers ?? null,
         social,
@@ -462,7 +486,10 @@ export function classifyPhase(input: {
   soldOut: boolean;
 }): Phase {
   const { startSec, endSec, nowSec, minted, maxSupply, stale, soldOut } = input;
-  if (startSec === null || minted === null || maxSupply === null) return 'unaudited';
+  if (startSec === null) return 'unaudited';
+  // A calendar-only target has no chain facts yet; a future start still makes it
+  // upcoming (that is the point of the calendar), anything else stays unknown.
+  if (minted === null || maxSupply === null) return startSec > nowSec ? 'upcoming' : 'unaudited';
   if (soldOut || (maxSupply > 0n && minted >= maxSupply)) return 'sold-out';
   if (endSec !== null && endSec <= nowSec) return 'ended';
   if (startSec > nowSec) return 'upcoming';
@@ -585,6 +612,15 @@ export function renderDashboard(rows: DashboardRow[], meta: DashboardMeta, opts:
       const instantPill = instant
         ? ` <span class="pill instant" title="预售已吃掉大部分供应、地址多且每钱包至少 5 个，公售剩余大概率被批量合约秒光">预计秒空</span>`
         : "";
+      const calendarBadges = [
+        row.calendar ? `<span class="pill cal" title="来自 OpenSea drops 日历（提前量来源）">日历</span>` : "",
+        row.calendar?.isVerified === false ? `<span class="pill unverified" title="OpenSea 未认证">未认证</span>` : "",
+        row.calendar?.disabledReason
+          ? `<span class="pill disabled" title="OpenSea 标记：${escapeHtml(row.calendar.disabledReason)}">平台禁用</span>`
+          : "",
+      ]
+        .filter(Boolean)
+        .join(" ");
       const qCell =
         qScore === null
           ? `<span class="pill q-none" title="数据不足，不足以评分">—</span>`
@@ -624,6 +660,23 @@ export function renderDashboard(rows: DashboardRow[], meta: DashboardMeta, opts:
         .filter(Boolean)
         .join(" · ");
 
+      const calendarLine = row.calendar
+        ? `<span>日历：收录 ${escapeHtml(row.calendar.listedAt.slice(0, 16).replace("T", " "))}Z${
+            row.calendar.startTime ? ` · 开售 ${escapeHtml(toUtc8Time(new Date(row.calendar.startTime * 1000)))}` : ""
+          }${
+            row.calendar.floorValue != null
+              ? ` · 地板 ${escapeHtml(String(row.calendar.floorValue))} ${escapeHtml(row.calendar.floorSymbol ?? "")}${
+                  row.calendar.floorUsd != null ? `（≈${row.calendar.floorUsd.toFixed(2)}）` : ""
+                }`
+              : ""
+          }${row.calendar.topOfferValue != null ? ` · 最高报价 ${escapeHtml(String(row.calendar.topOfferValue))}` : ""}${
+            row.calendar.maxSupply ? ` · 供应 ${escapeHtml(row.calendar.totalSupply ?? "?")}/${escapeHtml(row.calendar.maxSupply)}` : ""
+          }${row.calendar.stages.length > 0 ? ` · 阶段 ${row.calendar.stages.length}` : ""}</span>`
+        : "";
+      const mismatchLine = row.calendarMismatch
+        ? `<span class="warn-text">日程不一致：链上与日历的开售时间相差超过 1 分钟（项目方可能改期）</span>`
+        : "";
+
       const socialBits: string[] = [];
       if (row.social) {
         const xUrl = safeLinkUrl(row.social.twitter ? `https://x.com/${row.social.twitter.replace(/^@/, "")}` : null);
@@ -655,6 +708,8 @@ export function renderDashboard(rows: DashboardRow[], meta: DashboardMeta, opts:
           ? `<span>阶段拆分：${row.stages.map((s) => `#${s.stage} ${s.tokens}（${s.minters} 地址）`).join(" &nbsp;|&nbsp; ")}</span>`
           : "",
         row.presaleStages !== null && row.presaleStages > 0 ? `<span>预售阶段：${row.presaleStages}</span>` : "",
+        calendarLine,
+        mismatchLine,
         socialBits.length > 0 ? `<span>社交：${socialBits.join(" · ")}</span>` : "",
         row.creator ? `<span>${creatorText}</span>` : "",
         qBreakdown ? `<span>${qBreakdown}</span>` : "",
@@ -676,7 +731,7 @@ export function renderDashboard(rows: DashboardRow[], meta: DashboardMeta, opts:
 
       return `<tr ${data} class="main-row">
   <td class="col-check"><input type="checkbox" class="pick" value="${escapeHtml(row.contract)}" data-chain="${escapeHtml(row.chain)}"></td>
-  <td class="col-name">${thumb}<span class="caret">▸</span><span class="name-main">${escapeHtml(row.name ?? "—")}</span>${instantPill}<div class="mono muted">${escapeHtml(row.contract)}</div></td>
+  <td class="col-name">${thumb}<span class="caret">▸</span><span class="name-main">${escapeHtml(row.name ?? "—")}</span>${instantPill}${calendarBadges ? " " + calendarBadges : ""}<div class="mono muted">${escapeHtml(row.contract)}</div></td>
   <td>${gradeCell}</td>
   <td class="num">${qCell}</td>
   <td><span class="pill phase phase-${escapeHtml(row.phase)}">${PHASE_ZH[row.phase]}</span></td>
@@ -841,6 +896,10 @@ export function renderDashboard(rows: DashboardRow[], meta: DashboardMeta, opts:
   .q-weak { background: var(--danger-soft); color: var(--danger); }
   .q-none { background: var(--outline-soft); color: var(--fg-muted); }
   .pill.instant { background: var(--danger-soft); color: var(--danger); border-color: var(--danger-soft); }
+  .pill.cal { background: var(--info-soft); color: var(--info); }
+  .pill.unverified { background: var(--warn-soft); color: var(--warn); }
+  .pill.disabled { background: var(--danger-soft); color: var(--danger); }
+  .warn-text { color: var(--warn); }
   .g-A { background: var(--ok-soft); color: var(--ok); }
   .g-B { background: var(--warn-soft); color: var(--warn); }
   .g-C { background: var(--danger-soft); color: var(--danger); }

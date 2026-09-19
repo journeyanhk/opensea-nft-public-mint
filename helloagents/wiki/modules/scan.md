@@ -34,6 +34,12 @@
 - `--serve` 的调度器每轮扫描后跑一次有界刷新（`REFRESH_PER_TICK`，默认 20，0 = 关闭），迁移无需停服；`/api/status` 暴露 `refresh` 摘要
 - 创作者历史与 Q 分是派生数据（不落盘）：`src/scan/quality.ts` 的 `creatorStatsFor(owner, facts, …, exclude)`（按 owner 且排除目标自身）与 `qualityScore`（0–100 + `confidence`；惩罚项含 `instant-sellout`）
 
+### 需求: OpenSea 日历第二信息源（M7/A1）
+**模块:** scan
+- `src/scan/calendar.ts`：`parseCalendar`（只读页面中含 `urql_transport` 的 script push JSON，找 `dropCalendar.items`；**解析不到即 throw**）、`fetchCalendar`（固定浏览器 UA、跟随 307、15s 超时）、`calendarVerdict`（金丝雀：某链由有变 0 / 总量骤降 >80%）、`upsertCalendar`（只补日历字段，slug 已存在不覆盖）
+- `refreshCalendar`（scanner）：每 `CALENDAR_INTERVAL_MIN`（默认 15）抓一次；失败记 `calendar unavailable` 并沿用旧快照（绝不静默清空）；成功更新 `state.calendar.counts` 作为下次金丝雀基线
+- 面板：`日历/未认证/平台禁用` 徽标 + 明细（收录时间/开售/地板/最高报价/供应/阶段数）；`classifyPhase` 对「未来开售但尚无链上事实」的条目判 `upcoming` 而不是 `unaudited`
+
 ### 需求: 状态与快照
 **模块:** scan
 - `.scan-state.json`（`version: 1`）：`chains[chain] = { cursorBlock, blockTimeSec, updatedAt }`；`contracts[chain][contract] = { firstSeenBlock, lastSeenBlock, lastAuditedBlock, lastAuditedAt, lastGrade, soldOutAtBlock, publicStart, pendingAudit }`

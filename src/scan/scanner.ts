@@ -17,6 +17,7 @@ import {
   scanLogs,
 } from "../audit/events";
 import { AuditResult, auditTarget } from "../audit/audit";
+import { CalendarSnapshot, UpsertResult, calendarVerdict, fetchCalendar, upsertCalendar } from "./calendar";
 import { projectedHeadroom, remainingSupply } from "../audit/score";
 import {
   ContractEntry,
@@ -136,7 +137,49 @@ export interface ScanOptions {
   audit: boolean;
   statePath?: string;
   historyPath?: string;
+  // Tests inject these; production uses the OpenSea calendar page.
+  calendarFn?: () => Promise<CalendarSnapshot>;
+  calendarIntervalMs?: number;
+  now?: () => Date;
   cacheDir?: string;
+}
+
+export interface CalendarUpdate extends UpsertResult {
+  counts: Record<string, number>;
+  warnings: string[];
+}
+
+// Reads the OpenSea calendar at most once per interval and folds it into the
+// state. Failure is reported and ignored: the previous snapshot stays, because
+// "could not read the calendar" must never look like "the calendar is empty".
+export async function refreshCalendar(state: ScanState, opts: CalendarOptions = {}): Promise<CalendarUpdate | null> {
+  const now = opts.now?.() ?? new Date();
+  const interval = opts.intervalMs ?? Math.max(60_000, (Number(process.env.CALENDAR_INTERVAL_MIN) || 15) * 60_000);
+  const last = state.calendar?.fetchedAt ? Date.parse(state.calendar.fetchedAt) : NaN;
+  if (Number.isFinite(last) && now.getTime() - last < interval) return null;
+
+  try {
+    const snapshot = await (opts.calendarFn ?? (() => fetchCalendar()))();
+    const supported = snapshot.entries.filter((entry) => resolveChain(entry.chain));
+    const counts: Record<string, number> = {};
+    for (const entry of supported) counts[entry.chain] = (counts[entry.chain] ?? 0) + 1;
+
+    const { warnings } = calendarVerdict(state.calendar?.counts ?? null, counts);
+    const result = upsertCalendar(state, supported, snapshot.fetchedAt);
+    state.calendar = { fetchedAt: snapshot.fetchedAt, counts };
+    for (const warning of warnings) opts.onProgress?.(`calendar canary: ${warning}`);
+    return { ...result, counts, warnings };
+  } catch (err) {
+    opts.onProgress?.(`calendar unavailable — ${(err as Error).message}`);
+    return null;
+  }
+}
+
+export interface CalendarOptions {
+  calendarFn?: () => Promise<CalendarSnapshot>;
+  intervalMs?: number;
+  now?: () => Date;
+  onProgress?: (message: string) => void;
 }
 
 async function pool<T>(items: T[], limit: number, fn: (item: T) => Promise<void>): Promise<void> {
@@ -165,6 +208,16 @@ export async function runScan(
   const { state, corrupt } = loadState(statePath);
   if (corrupt) onProgress(`state file ${statePath} was unreadable — starting from empty state`);
   const reports: ChainScanReport[] = [];
+
+  // The calendar is chain-agnostic and throttled separately from the scan tick:
+  // it gives upcoming targets days of lead time, which is what the board is for.
+  const calendarUpdate = await refreshCalendar(state, {
+    calendarFn: opts.calendarFn,
+    intervalMs: opts.calendarIntervalMs,
+    now: opts.now,
+    onProgress,
+  });
+  if (calendarUpdate && (calendarUpdate.added > 0 || calendarUpdate.updated > 0)) saveState(state, statePath);
 
   for (const chainKey of opts.chains) {
     const chain = resolveChain(chainKey);

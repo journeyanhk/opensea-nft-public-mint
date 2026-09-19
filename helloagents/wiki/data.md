@@ -137,6 +137,9 @@
 | contracts[chain][addr].owner | string \| null | `owner()`（`--refresh-targets` / 审计写入）；M5b 按它聚合创作者历史 |
 | contracts[chain][addr].imageUrl / twitter / discord / website / createdDate / safelist | string \| null | `collections/<slug>`（**无需 key**）读取的合集身份字段；`--refresh-targets` 补齐 |
 | contracts[chain][addr].socialCheckedAt | string \| null | collections 已读时间；即使合集没有社交链接也会写入，避免反复请求（404 视为已读，限流/网络失败不写、下次重试） |
+| contracts[chain][addr].sources | string[] | 条目的发现来源：`onchain` / `opensea-calendar`（可并存） |
+| contracts[chain][addr].calendar | object \| null | OpenSea 日历事实：`listedAt/startTime/endTime/floorUsd/floorValue/floorSymbol/topOfferValue/volume24h*/isVerified/disabledReason/maxSupply/totalSupply/stages[]`；只补齐、不覆盖链上事实（链上开售时间优先，相差 >1 分钟标 `schedule mismatch`） |
+| ScanState.calendar | object \| undefined | `{ fetchedAt, counts }`：上次成功抓取时间（节流）与各链条目数（金丝雀基线） |
 | contracts[chain][addr].xFollowers / xCheckedAt | number \| null / string \| null | X 粉丝数与读取时间；仅 `ENABLE_X_METRICS=1` 时抓取（`api.fxtwitter.com/<handle>`），24 小时缓存，失败静默 |
 
 M5b 的派生字段（不落盘，`loadDashboardRows` 计算）：`social`（已知但为空 ≠ 未知）、`creator`（按 owner 聚合的 drop 数/售罄率/平均 24h 速度/二级成交/自有净值与 `ownData` 标记；**评分时排除目标自身**，`dropCount=0` 表示没有其它 drop → 创作者维度视为未知）、`presaleShare`（预售阶段铸出量 / 上限，来自审计缓存；用于需求代理与秒空判定）、`quality`（0–100 分 + `confidence` 覆盖率 + 维度拆分 + 惩罚项，见 `src/scan/quality.ts`）。缩略图仅在域名属于 `seadn.io` / `opensea.io` 且为 https 时才进 `src`；社交链接仅允许 http(s)。

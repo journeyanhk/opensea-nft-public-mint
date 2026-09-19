@@ -6,6 +6,7 @@
 import fs from "fs";
 import path from "path";
 import { Grade } from "../audit/score";
+import type { CalendarFacts } from "./calendar";
 
 export const DEFAULT_STATE_PATH = path.resolve(process.cwd(), ".scan-state.json");
 export const DEFAULT_HISTORY_PATH = path.resolve(process.cwd(), ".scan-history.jsonl");
@@ -44,12 +45,18 @@ export interface ContractEntry {
   socialCheckedAt: string | null; // when collections was last read (null = never)
   xFollowers: number | null; // opt-in X follower count
   xCheckedAt: string | null; // when X metrics were last read
+  // M7 (monitoring): where the entry came from and what the OpenSea calendar said.
+  sources: string[]; // e.g. ["onchain", "opensea-calendar"]
+  calendar: CalendarFacts | null;
 }
 
 export interface ScanState {
   version: 1;
   chains: Record<string, ChainCursor>;
   contracts: Record<string, Record<string, ContractEntry>>;
+  // Last successful calendar read: used to throttle the 1 MB page and to run
+  // the canary (a chain that goes from listed to empty is a parser problem).
+  calendar?: { fetchedAt: string; counts: Record<string, number> };
 }
 
 export function emptyState(): ScanState {
@@ -96,6 +103,8 @@ export function emptyContractEntry(): ContractEntry {
     socialCheckedAt: null,
     xFollowers: null,
     xCheckedAt: null,
+    sources: [],
+    calendar: null,
   };
 }
 
