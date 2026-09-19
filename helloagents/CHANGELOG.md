@@ -53,6 +53,7 @@
 - 看板：新增 `24h net / 72h net` 两列（读取 `.backfill.jsonl`，`--backfill-file` 可覆盖）、每 5 分钟自动刷新
 
 ### 修复
+- M6 面板部署后无法筛选：主行 `<tr>` 漏了脚本所选的 `class="main-row"`，`querySelectorAll("tr.main-row")` 得到 0 行，所有筛选/排序/展开都是空操作；同时短名单区块被复制了一份导致 `shortlist/copy/copyNote/commands` 四个重复 id（DevTools 报 "Duplicate form field id"）。已补上类名、删除重复区块，并新增防回归断言：渲染页面 id 唯一、主行数量与类名一致、脚本绑定所需的元素必须出现在脚本之前
 - 面板链接指向 item 页：slug 此前只存在于审计历史（且升级前的行没有），无 slug 时兜底成 `opensea.io/assets/...`（会跳到 item）。现在 `ContractEntry` 持久化 `slug/name`（每个合约只解析一次），面板优先 `/collection/<slug>`，未解析时只给浏览器链接并标 `slug?`；新增 `--refresh-targets` 一次性补齐（幂等，可重复执行）
 - 已结束/长期开放项目混入面板：引入 **phase 模型**（`upcoming` / `live-fresh` / `live` / `stale` / `sold-out` / `ended` / `unaudited`），由合约状态与廉价的链上事实判定；面板默认只显示 upcoming + live-fresh，其余分阶段隐藏并计数，开售超过一周且已结束的行不再渲染（状态保留供创作者历史）；`live`（开售 >24h）与 `unaudited` 不再靠陈旧规则放行
 - 状态补充 `endTime/maxSupply/totalMinted`：候选过滤与审计都会顺手落盘，`--refresh-targets` 对历史遗留合约补齐；`/api/status` 增加 `openseaKey: set|unset` 便于排查 slug 为何为空

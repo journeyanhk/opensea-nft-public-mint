@@ -374,3 +374,23 @@ test('refresh bookkeeping picks entries that still need facts', () => {
   assert.equal(needsRefresh({ slug: 'x', name: 'X', endTime: 1, totalMinted: '0' }), false);
   assert.equal(needsRefresh({ slug: 'x', name: 'X', endTime: 1, totalMinted: '0', maxSupply: null }), false);
 });
+
+test('the rendered page has unique ids, main-row hooks and bindable elements', () => {
+  const rows = loadDashboardRows(state, history, ledger, () => cached);
+  const html = renderDashboard(rows, { generatedAt: 'now', sources: [] }, { serve: true });
+
+  // Duplicate ids break autofill and hint at duplicated blocks.
+  const ids = [...html.matchAll(/ id="([^"]+)"/g)].map((m) => m[1]);
+  assert.deepEqual(ids.filter((v, i) => ids.indexOf(v) !== i), []);
+
+  // The table script selects rows by this class; without it every filter is a no-op.
+  assert.ok(html.includes('class="main-row"'));
+  assert.equal((html.match(/<tr data-chain/g) || []).length, (html.match(/class="main-row"/g) || []).length);
+
+  // Elements the IIFE binds to must exist before the script runs.
+  const scriptAt = html.indexOf('var table = document.getElementById');
+  for (const id of ['shortlist', 'commands', 'copy', 'copyNote']) {
+    const at = html.indexOf(`id="${id}"`);
+    assert.ok(at >= 0 && at < scriptAt, `${id} must be defined before the table script`);
+  }
+});

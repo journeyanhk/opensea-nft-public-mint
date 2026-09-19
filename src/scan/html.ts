@@ -532,7 +532,7 @@ export function renderDashboard(rows: DashboardRow[], meta: DashboardMeta, opts:
         .filter(Boolean)
         .join("");
 
-      return `<tr ${data}>
+      return `<tr ${data} class="main-row">
   <td class="col-check"><input type="checkbox" class="pick" value="${escapeHtml(row.contract)}" data-chain="${escapeHtml(row.chain)}"></td>
   <td class="col-name"><span class="caret">▸</span><span class="name-main">${escapeHtml(row.name ?? "—")}</span><div class="mono muted">${escapeHtml(row.contract)}</div></td>
   <td>${gradeCell}</td>
@@ -888,12 +888,6 @@ ${rowHtml}
 })();
 </script>
 ${serveScript}
-<div class="out">
-  <div><strong>短名单</strong> <span class="muted">勾选的目标，每行一个合约地址（可存为 @shortlist.txt）</span></div>
-  <textarea id="shortlist" readonly></textarea>
-  <div style="margin-top:6px"><button id="copy">复制</button> <span id="copyNote" class="muted"></span></div>
-  <pre id="commands" class="muted"></pre>
-</div>
 </body>
 </html>
 `;
