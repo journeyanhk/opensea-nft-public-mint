@@ -45,3 +45,15 @@ test('targets carry a pinned code hash only when it is a real hash', () => {
   assert.equal(targetCodeHash({ codeHash: 42 }), null);
   assert.equal(targetCodeHash({}), null, 'a hand-written config simply has nothing to compare');
 });
+
+test('burst config is parsed with bounded defaults and opt-ins', () => {
+  const { parseBurst, DEFAULT_BURST } = require('../dist/batch-config');
+  assert.deepEqual(parseBurst(undefined), DEFAULT_BURST);
+  assert.equal(parseBurst({ count: 99 }).count, 5, 'bounded to the documented maximum');
+  assert.equal(parseBurst({ count: 0 }).count, 1);
+  assert.equal(parseBurst({ spacingMs: 5 }).spacingMs, 50, 'a 5ms spacing is not a burst');
+  assert.equal(parseBurst({ leadMs: 10 }).leadMs, 'auto', 'too small a lead falls back to measurement');
+  assert.equal(parseBurst({ leadMs: 200 }).leadMs, 200);
+  assert.equal(parseBurst({ count: 4 }).allowOvershoot, false, 'overshoot is opt-in');
+  assert.equal(parseBurst({ count: 4, allowOvershoot: true }).allowOvershoot, true);
+});

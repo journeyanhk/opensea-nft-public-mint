@@ -27,9 +27,40 @@ export interface BatchTarget {
   supply: { totalMinted: bigint; maxSupply: bigint } | null; // null when the contract cannot answer
 }
 
+export interface BurstConfig {
+  count: number; // 1 = off (the default)
+  spacingMs: number;
+  leadMs: number | "auto";
+  allowOvershoot: boolean;
+  forceClock: boolean;
+}
+
+export const DEFAULT_BURST: BurstConfig = {
+  count: 1,
+  spacingMs: 100,
+  leadMs: "auto",
+  allowOvershoot: false,
+  forceClock: false,
+};
+
+export function parseBurst(raw: unknown): BurstConfig {
+  const value = (raw ?? {}) as Record<string, unknown>;
+  const count = Math.floor(Number(value.count ?? DEFAULT_BURST.count));
+  const spacingMs = Math.floor(Number(value.spacingMs ?? DEFAULT_BURST.spacingMs));
+  const lead = value.leadMs === undefined || value.leadMs === "auto" ? "auto" : Math.floor(Number(value.leadMs));
+  return {
+    count: Number.isFinite(count) ? Math.min(5, Math.max(1, count)) : DEFAULT_BURST.count,
+    spacingMs: Number.isFinite(spacingMs) ? Math.min(1_000, Math.max(50, spacingMs)) : DEFAULT_BURST.spacingMs,
+    leadMs: lead === "auto" || (Number.isFinite(lead) && (lead as number) >= 50) ? (lead as number | "auto") : "auto",
+    allowOvershoot: value.allowOvershoot === true,
+    forceClock: value.forceClock === true,
+  };
+}
+
 export interface BatchConfig {
   chainKey: string;
   dryRun: boolean; // sign + simulate only; no broadcast, no ledger writes
+  burst: BurstConfig;
   walletSource: "env" | "prompt";
   rpcUrls: string[];
   maxFeePerGas: bigint;
@@ -143,6 +174,7 @@ export async function loadBatchConfig(
     return {
       chainKey: chain.key,
       dryRun,
+      burst: parseBurst(raw?.burst),
       walletSource: raw?.walletSource === "prompt" ? "prompt" : "env",
       rpcUrls,
       ...resolveGas(chain.key, raw?.gas ?? {}),
@@ -263,6 +295,7 @@ export async function loadBatchConfig(
   return {
     chainKey: chain.key,
     dryRun,
+      burst: parseBurst(raw?.burst),
     walletSource: raw.walletSource === "prompt" ? "prompt" : "env",
     rpcUrls,
     ...resolveGas(chain.key, raw.gas ?? {}),

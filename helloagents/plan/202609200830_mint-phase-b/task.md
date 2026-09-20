@@ -19,11 +19,11 @@
 - [√] 2.5 `tests/gates.cjs`
 
 ## 3. B3 burst
-- [ ] 3.1 `calibrateLead`（RTT p50 + 时钟偏差 + 50ms）与偏差阈值
-- [ ] 3.2 `planBurst` nonce 计划 + 预算/过铸护栏（cap==1 默认可多发）
-- [ ] 3.3 `local-mint` 连发与结果聚合（预期内回滚 vs 真失败；gas 燃烧入账）
-- [ ] 3.4 清理 `timer.ts` 死参数（`earlyFireMs` → `leadMs`）
-- [ ] 3.5 `tests/burst.cjs`
+- [√] 3.1 `calibrateLead`（RTT p50 + 时钟偏差 + 50ms）与偏差阈值
+- [√] 3.2 `planBurst` nonce 计划 + 预算/过铸护栏（cap==1 默认可多发）
+- [√] 3.3 `local-mint` 连发与结果聚合（预期内回滚 vs 真失败；gas 燃烧入账）
+- [√] 3.4 清理 `timer.ts` 死参数（`earlyFireMs` → `leadMs`）
+- [√] 3.5 `tests/burst.cjs`
 
 ## 4. B4 协调器
 - [ ] 4.1 `src/batch-coordinator.ts`：通道分配/释放、预算预留、冲突排序

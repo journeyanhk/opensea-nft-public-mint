@@ -12,13 +12,14 @@
 import chalk from "chalk";
 import { performance } from "perf_hooks";
 import { JsonRpcProvider, Wallet, formatEther } from "ethers";
-import { blastToAll, parseRpcEndpoints, prepareBlast, waitForReceipt, PreparedBlast } from "./rpc-blast";
+import { blastToAll, parseRpcEndpoints, prepareBlast, waitForReceipt, BlastResult, PreparedBlast } from "./rpc-blast";
 import { warmConnections } from "./connection-warmer";
 import { waitForMintTime } from "./timer";
 import { explorerTx } from "./chains";
 import { toUtc8Time } from "./time-format";
 import { buildLocalMintPlan, fetchMintStats, LocalMintPlan, MintStats } from "./seadrop-public";
 import { countMintedTokens, verdict } from "./receipts";
+import { aggregateBurst, planBurst } from "./burst";
 import { classifySimulation, codeHashOf, revertDataOf, validateMintPublicCalldata, validateSignedTx } from "./gates";
 
 export interface LocalSnipeOpts {
@@ -35,6 +36,9 @@ export interface LocalSnipeOpts {
   refreshBeforeMs?: number; // re-read the drop this long before the stage opens
   expectedCodeHash?: string | null; // B2 gate 1: the code hash the audit saw
   dryRun?: boolean; // sign and simulate, never broadcast
+  // B3: consecutive nonces fired just before the open (the gate that decides
+  // whether a burst is allowed runs in the caller, which knows the config).
+  burst?: { count: number; spacingMs: number; leadMs: number };
 }
 
 // SUCCESS means the receipt proved the tokens arrived (M8/B1); PARTIAL and
@@ -49,6 +53,7 @@ export interface SnipeResult {
   mintedCount?: number;
   tokenIds?: string[];
   gasBurnedWei?: string;
+  txHashes?: string[]; // every shot of a burst, for the ledger
 }
 
 // A postponed start is adopted at most this many times before we stop re-waiting.
@@ -103,6 +108,7 @@ export async function localPublicSnipe(opts: LocalSnipeOpts): Promise<SnipeResul
   } = opts;
 
   const refreshMs = opts.refreshBeforeMs ?? 0;
+  const burst = opts.burst && opts.burst.count > 1 ? opts.burst : null;
   let targetStart = opts.targetStart;
   let planNow = plan;
 
@@ -329,45 +335,55 @@ export async function localPublicSnipe(opts: LocalSnipeOpts): Promise<SnipeResul
 
   const signStart = performance.now();
   const prepared: { idx: number; address: string; blast: PreparedBlast }[] = [];
+  const burstShots = new Map<number, PreparedBlast[]>();
   const gateErrors: string[] = [];
 
   for (const [i, { idx, wallet }] of active.entries()) {
-    const rawTx = await wallet.signTransaction({
-      to: planNow.to,
-      data: planNow.data,
-      value: planNow.value,
-      nonce: nonces[i],
-      maxFeePerGas,
-      maxPriorityFeePerGas: maxPriorityFee,
-      gasLimit: gasLimit || 250_000,
-      type: 2,
-      chainId,
-    });
+    const shotNonces = burst ? planBurst(nonces[i], burst.count) : [nonces[i]];
+    const walletsShots: PreparedBlast[] = [];
 
-    // ── Gate 2: what was signed must be exactly what was planned ────────────
-    const signed = validateSignedTx(rawTx, {
-      from: wallet.address,
-      chainId,
-      to: planNow.to,
-      nonce: nonces[i],
-      data: planNow.data,
-      value: planNow.value,
-      gasLimit: BigInt(gasLimit || 250_000),
-      maxFeePerGas,
-      maxPriorityFeePerGas: maxPriorityFee,
-    });
-    const calldata = validateMintPublicCalldata(planNow.data, {
-      nftContract,
-      feeRecipient: planNow.feeRecipient,
-      quantity: BigInt(quantity),
-    });
-    if (!signed.ok || !calldata.ok) {
-      for (const error of [...signed.errors, ...calldata.errors]) {
-        gateErrors.push(`[W${idx}] ${error}`);
+    for (const [shotIndex, shotNonce] of shotNonces.entries()) {
+      const rawTx = await wallet.signTransaction({
+        to: planNow.to,
+        data: planNow.data,
+        value: planNow.value,
+        nonce: shotNonce,
+        maxFeePerGas,
+        maxPriorityFeePerGas: maxPriorityFee,
+        gasLimit: gasLimit || 250_000,
+        type: 2,
+        chainId,
+      });
+
+      // ── Gate 2: what was signed must be exactly what was planned ──────────
+      const signed = validateSignedTx(rawTx, {
+        from: wallet.address,
+        chainId,
+        to: planNow.to,
+        nonce: shotNonce,
+        data: planNow.data,
+        value: planNow.value,
+        gasLimit: BigInt(gasLimit || 250_000),
+        maxFeePerGas,
+        maxPriorityFeePerGas: maxPriorityFee,
+      });
+      const calldata = validateMintPublicCalldata(planNow.data, {
+        nftContract,
+        feeRecipient: planNow.feeRecipient,
+        quantity: BigInt(quantity),
+      });
+      if (!signed.ok || !calldata.ok) {
+        for (const error of [...signed.errors, ...calldata.errors]) {
+          gateErrors.push(`[W${idx}] shot ${shotIndex + 1}: ${error}`);
+        }
+        continue;
       }
-      continue;
+      walletsShots.push(prepareBlast(rawTx));
     }
-    prepared.push({ idx, address: wallet.address, blast: prepareBlast(rawTx) });
+
+    if (walletsShots.length === 0) continue;
+    prepared.push({ idx, address: wallet.address, blast: walletsShots[0] });
+    if (burst && burst.count > 1) burstShots.set(idx, walletsShots);
   }
 
   if (gateErrors.length > 0) {
@@ -385,8 +401,99 @@ export async function localPublicSnipe(opts: LocalSnipeOpts): Promise<SnipeResul
 
   if (opts.dryRun) {
     console.log(chalk.bold.yellow("\n  DRY RUN — signed and simulated, nothing broadcast."));
-    for (const p of prepared) console.log(chalk.gray(`    [W${p.idx}] would send ${p.blast.txHash}`));
+    for (const p of prepared) {
+      const shots = burstShots.get(p.idx);
+      if (shots && shots.length > 1) {
+        console.log(chalk.gray(`    [W${p.idx}] would send a burst of ${shots.length}:`));
+        for (const shot of shots) console.log(chalk.gray(`         ${shot.txHash}`));
+      } else {
+        console.log(chalk.gray(`    [W${p.idx}] would send ${p.blast.txHash}`));
+      }
+    }
     return skipped();
+  }
+
+  // ── Burst: several nonces, the first shot just before the stage opens ─────
+  if (burst && burst.count > 1 && burstShots.size > 0) {
+    const stageStartMs = targetStart ? targetStart.getTime() : Date.now();
+    if (targetStart) {
+      console.log(
+        chalk.bold.yellow(
+          `\n  🔥 BURST ×${burst.count}: first shot ${burst.leadMs}ms before the open, ${burst.spacingMs}ms apart`
+        )
+      );
+      await waitForMintTime(targetStart, burst.leadMs);
+    } else {
+      console.log(chalk.bold.yellow(`\n  🚀 BURST ×${burst.count} sending now...`));
+    }
+
+    const waves: { idx: number; address: string; shots: { txHash: string; responsePromise: Promise<BlastResult[]> }[] }[] =
+      active.map(({ idx, wallet }) => ({ idx, address: wallet.address, shots: [] }));
+
+    for (let shot = 0; shot < burst.count; shot++) {
+      if (shot > 0) await new Promise((resolve) => setTimeout(resolve, burst.spacingMs));
+      const sinceStage = Math.max(0, Date.now() - stageStartMs);
+      for (const wave of waves) {
+        const blast = burstShots.get(wave.idx)?.[shot];
+        if (!blast) continue;
+        const { txHash, responsePromise } = blastToAll(blast, endpoints);
+        wave.shots.push({ txHash, responsePromise });
+      }
+      console.log(chalk.gray(`  shot ${shot + 1}/${burst.count} fired at +${sinceStage}ms after stage open`));
+    }
+
+    console.log(chalk.gray("\n  Waiting for burst receipts..."));
+    const burstResults: SnipeResult[] = wallets.map((w, idx) => ({
+      idx,
+      address: w.address,
+      txHash: null,
+      status: "SKIPPED" as const,
+    }));
+    await Promise.all(
+      waves.map(async (wave) => {
+        const responses = await Promise.all(wave.shots.map((shot) => shot.responsePromise));
+        const accepted = wave.shots.filter((_, i) =>
+          responses[i].some((r) => r.txHash !== null || (r.error ?? "").includes("already known"))
+        );
+        const shots: Parameters<typeof aggregateBurst>[0] = [];
+        for (const shot of accepted) {
+          const receipt = await waitForReceipt(shot.txHash, rpcUrls[0], 60_000);
+          if (!receipt) {
+            shots.push({ txHash: shot.txHash, status: "TIMEOUT", mintedCount: 0 });
+            continue;
+          }
+          const counted = countMintedTokens(receipt, { nftContract, wallet: wave.address });
+          const outcome = counted.logsAvailable
+            ? verdict(receipt.status, counted.count, quantity)
+            : receipt.status === "SUCCESS"
+              ? "MINTED"
+              : "REVERTED";
+          shots.push({
+            txHash: shot.txHash,
+            status: outcome === "MINTED" ? "SUCCESS" : outcome,
+            mintedCount: counted.count,
+            tokenIds: counted.tokenIds,
+            gasBurnedWei: (BigInt(receipt.gasUsed) * BigInt(receipt.effectiveGasPriceWei || "0")).toString(),
+          });
+        }
+        const aggregate = aggregateBurst(shots);
+        const result = burstResults[wave.idx];
+        result.status = aggregate.status as SnipeStatus;
+        result.txHash = aggregate.txHash ?? accepted[0]?.txHash ?? null;
+        result.mintedCount = aggregate.mintedCount;
+        result.tokenIds = aggregate.tokenIds;
+        result.gasBurnedWei = aggregate.gasBurnedWei;
+        result.txHashes = aggregate.txHashes;
+        const color = aggregate.mintedCount > 0 ? chalk.bold.green : chalk.bold.red;
+        console.log(
+          color(
+            `  [W${wave.idx}] burst ×${wave.shots.length}: ${aggregate.status} | minted ${aggregate.mintedCount}/${quantity} | gas burned ${aggregate.gasBurnedWei}`
+          )
+        );
+      })
+    );
+    console.log(chalk.bold.white("\n===== LOCAL PUBLIC MINT COMPLETE ====="));
+    return burstResults;
   }
 
   // ── Wait for the stage, then blast pre-built bytes ──

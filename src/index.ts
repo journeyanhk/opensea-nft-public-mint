@@ -30,6 +30,7 @@ const KNOWN_FLAGS = new Set([
   "--export-favorites",
   "--favorites",
   "--dry-run",
+  "--burst-count", "--burst-spacing-ms", "--burst-lead-ms", "--allow-overshoot", "--force-clock",
 ]);
 
 const HELP = `
@@ -74,6 +75,30 @@ keys from .env unless the file overrides them.
 Audit mode takes a chain from the link or --chain; @file expands one target per line.
 `;
 
+function burstOverrides(args: string[]): BatchRunOptions["burst"] {
+  const flagNumber = (flag: string): number | undefined => {
+    const index = args.indexOf(flag);
+    if (index < 0) return undefined;
+    const value = Number(args[index + 1]);
+    return Number.isFinite(value) ? value : undefined;
+  };
+  const count = flagNumber("--burst-count");
+  const spacingMs = flagNumber("--burst-spacing-ms");
+  const leadRaw = args.indexOf("--burst-lead-ms") >= 0 ? args[args.indexOf("--burst-lead-ms") + 1] : undefined;
+  const leadMs =
+    leadRaw === "auto" ? ("auto" as const) : leadRaw !== undefined && Number.isFinite(Number(leadRaw)) ? Number(leadRaw) : undefined;
+  const overshoot = args.includes("--allow-overshoot");
+  const forceClock = args.includes("--force-clock");
+  if (count === undefined && spacingMs === undefined && leadMs === undefined && !overshoot && !forceClock) return undefined;
+  return {
+    ...(count !== undefined ? { count } : {}),
+    ...(spacingMs !== undefined ? { spacingMs } : {}),
+    ...(leadMs !== undefined ? { leadMs } : {}),
+    ...(overshoot ? { allowOvershoot: true } : {}),
+    ...(forceClock ? { forceClock: true } : {}),
+  };
+}
+
 function batchRunOptions(args: string[]): BatchRunOptions {
   const watchIndex = args.indexOf("--watch");
   const watchFiles: string[] = [];
@@ -91,6 +116,7 @@ function batchRunOptions(args: string[]): BatchRunOptions {
     ledger: !args.includes("--no-ledger"),
     retryPending: args.includes("--retry-pending"),
     dryRun: args.includes("--dry-run"),
+    burst: burstOverrides(args),
   };
 }
 

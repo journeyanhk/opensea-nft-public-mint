@@ -25,6 +25,7 @@ export interface LedgerEntry {
   tokenIds?: string[];
   tokenIdsTruncated?: boolean;
   gasBurnedWei?: string;
+  txHashes?: string[]; // every shot of a burst (txHash is the one that landed)
 }
 
 export interface Ledger {

@@ -17,6 +17,7 @@ import { resolveChain } from "./chains";
 import { BatchTarget, loadBatchConfig } from "./batch-config";
 import { planRpcs, resolveRpcsForChain } from "./rpc-resolver";
 import { localPublicSnipe, SnipeResult } from "./local-mint";
+import { burstGate, calibrateLead } from "./burst";
 import { auditTarget } from "./audit/audit";
 import { waitForMintTime } from "./timer";
 import { toUtc8Time } from "./time-format";
@@ -44,6 +45,7 @@ export interface BatchRunOptions {
   ledgerPath?: string;
   maxPolls?: number; // stop polling after N cycles (tests); 0/undefined = unlimited
   dryRun?: boolean; // --dry-run forces it on; a config file may set it itself
+  burst?: Partial<{ count: number; spacingMs: number; leadMs: number | "auto"; allowOvershoot: boolean; forceClock: boolean }>;
 }
 
 function readConfig(file: string): RawConfig {
@@ -133,6 +135,7 @@ export async function runBatch(configPath: string, options: BatchRunOptions = {}
   console.log(chalk.bold.white("\nTargets"));
   let cfg = await loadBatchConfig(raw, chain, rpcUrls, { allowEmpty: watch });
   if (options.dryRun) cfg = { ...cfg, dryRun: true };
+  if (options.burst) cfg = { ...cfg, burst: { ...cfg.burst, ...options.burst } };
   if (cfg.dryRun) {
     console.log(
       chalk.bold.yellow("  DRY RUN — transactions are signed and simulated, never broadcast; the ledger is untouched.")
@@ -163,6 +166,21 @@ export async function runBatch(configPath: string, options: BatchRunOptions = {}
   }
 
   const gasReservePerTarget = BigInt(cfg.gasLimit) * cfg.maxFeePerGas;
+  // Burst spends gas on shots that are expected to revert, so affordability
+  // reserves the worst case (every shot fired) up front.
+  const burstShots = cfg.burst.count > 1 ? cfg.burst.count : 1;
+
+  let burstLead: Awaited<ReturnType<typeof calibrateLead>> | null = null;
+  if (cfg.burst.count > 1) {
+    burstLead = await calibrateLead({ rpcUrls: cfg.rpcUrls });
+    console.log(
+      chalk.gray(
+        `  burst: lead ${burstLead.leadMs}ms (rtt ${burstLead.rttMs}ms, clock skew ${burstLead.clockSkewMs}ms)${
+          burstLead.suspectClock ? " — clock looks wrong" : ""
+        }`
+      )
+    );
+  }
   const ledger: Ledger = useLedger ? loadLedger(ledgerPath) : emptyLedger();
 
   // ── 4. Queue ──────────────────────────────────────────────────────────
@@ -255,7 +273,10 @@ export async function runBatch(configPath: string, options: BatchRunOptions = {}
   if (ledgerCount > 0) console.log(chalk.gray(`  ${ledgerCount} target(s) already handled per the ledger`));
 
   // ── 5. Balance precheck (only for what can actually run) ──────────────
-  const requiredPerWallet = actionable.reduce((sum, t) => sum + t.plan.value + gasReservePerTarget, 0n);
+  const requiredPerWallet = actionable.reduce(
+    (sum, t) => sum + t.plan.value + gasReservePerTarget * BigInt(burstShots),
+    0n
+  );
 
   if (actionable.length > 0) {
     const short: string[] = [];
@@ -389,6 +410,29 @@ export async function runBatch(configPath: string, options: BatchRunOptions = {}
 
     console.log(chalk.bold.magenta(`\n━━━ ${target.label} (${target.contract}) ━━━`));
 
+    // B3: the burst decision belongs here, where the config, the per-wallet cap
+    // and the measured clock are all known. A refused burst degrades to a
+    // single transaction — never to a refusal to mint.
+    let burstForTarget: { count: number; spacingMs: number; leadMs: number } | undefined;
+    if (cfg.burst.count > 1 && burstLead) {
+      const cap = target.plan.drop.maxTotalMintableByWallet || null;
+      const gate = burstGate({
+        count: cfg.burst.count,
+        capPerWallet: cap,
+        allowOvershoot: cfg.burst.allowOvershoot,
+        clockSkewMs: burstLead.clockSkewMs,
+        leadMs: cfg.burst.leadMs === "auto" ? burstLead.leadMs : cfg.burst.leadMs,
+        forceClock: cfg.burst.forceClock,
+      });
+      if (!gate.allowed) {
+        console.log(chalk.bold.yellow(`  ⚠ burst disabled for ${target.label}: ${gate.reason} — sending a single transaction.`));
+      } else {
+        const leadMs = cfg.burst.leadMs === "auto" ? burstLead.leadMs : cfg.burst.leadMs;
+        burstForTarget = { count: cfg.burst.count, spacingMs: cfg.burst.spacingMs, leadMs };
+        console.log(chalk.gray(`  burst: ×${cfg.burst.count} at T-${leadMs}ms, ${cfg.burst.spacingMs}ms apart (${gate.reason})`));
+      }
+    }
+
     // Re-audit shortly before the stage opens: a whitelist phase can drain the
     // supply in the meantime, and the T-3s on-chain check is the last line of
     // defence rather than the first. An audit that cannot run never blocks a mint.
@@ -460,6 +504,7 @@ export async function runBatch(configPath: string, options: BatchRunOptions = {}
         refreshBeforeMs: cfg.refreshBeforeMs,
         expectedCodeHash: target.codeHash,
         dryRun: cfg.dryRun,
+        burst: burstForTarget,
       });
     } catch (err) {
       console.log(chalk.bold.red(`  ✗ ${target.label} failed: ${(err as Error).message}`));
@@ -494,6 +539,7 @@ export async function runBatch(configPath: string, options: BatchRunOptions = {}
             }
           : {}),
         ...(broadcast?.gasBurnedWei ? { gasBurnedWei: broadcast.gasBurnedWei } : {}),
+        ...(broadcast?.txHashes && broadcast.txHashes.length > 1 ? { txHashes: broadcast.txHashes } : {}),
       });
       saveLedger(ledger, ledgerPath);
     }

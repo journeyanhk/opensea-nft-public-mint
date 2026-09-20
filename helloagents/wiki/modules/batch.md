@@ -34,6 +34,13 @@
 - `resolveGas(chainKey, override)` → `{ maxFeePerGas, maxPriorityFee, gasLimit }`，tip > ceiling 抛错
 - `runBatch(configPath)` → Promise<void>：完整批量编排
 
+## burst（M8/B3）
+- `src/burst.ts`：`planBurst(baseNonce,count)`、`burstGate({count,capPerWallet,allowOvershoot,clockSkewMs,leadMs,forceClock})`、`aggregateBurst(shots)`（取落地的 shot、gas 全量求和）、`calibrateLead`（p50 RTT + 时钟偏差 + 余量，可注入 measureRtt/fetchFn/now）
+- `batch-config.burst = { count, spacingMs, leadMs, allowOvershoot, forceClock }`（`parseBurst` 夹取范围：count 1..5、spacing 50..1000、lead ≥50 或 auto）
+- `batch-runner`：批量开始时校准一次并打印 `lead/rtt/skew`；每个目标用 `burstGate` 决策（不通过则降级为单发并告警，不是拒绝执行）；余额预检按 `count × gasLimit × maxFee` 预留
+- `local-mint`：按 `count` 逐 nonce 签名并过 Gate 2；开售时先 `T-leadMs` 发第一发，随后每 `spacingMs` 一发；逐钱包 `aggregateBurst` 得最终状态与 tokenIds；`dry-run` 打印全部将发 hash
+- 账本：`txHashes`（全部 shot），`txHash` 为落地的那一笔；`gasBurnedWei` 含预期内回滚
+
 ## 数据模型
 - `targets.json`:
   - `chain`（必填）、`walletSource`、`refreshBeforeMs`、`onFailure`
