@@ -44,7 +44,10 @@
 - [√] 端口误报回退 + 真实占用判定
 - [√] nonce 空洞自动补洞（`gapFillerTx`）
 - [√] `beforeSend` 钩子 + 批量启动钱包锁
-- [ ] 接线收尾：`TargetJob` 状态机 + `--parallel`（同钱包 `acquire` 重试/续租）+ 余额由 `reservedTotal` 驱动 + `TargetSource` 接口
+- [√] `TargetJob` 状态机（`src/target-job.ts` + 3 用例）：waiting/preparing/sending/receipt/done|failed|skipped 与 `jobsToPrepare`
+- [√] 余额由 `reservedTotal` 驱动（enqueue 先 claim、pre-check 用累计预留、差额提示；`--watch` 合并周期重试）
+- [√] schedule 冲突告警（`orderJobs`，同钱包 <5s）
+- [ ] `--parallel` 并发执行（`jobsToPrepare` + `beforeSend` 通道已就绪，目标循环抽取为 job 函数即可）+ `TargetSource` 接口（B5 队列复用）
 
 ## 5. 收尾
 - [ ] 5.1 全量测试 + `--dry-run` 真链演练记录

@@ -20,6 +20,7 @@ import { planRpcs, resolveRpcsForChain } from "./rpc-resolver";
 import { localPublicSnipe, SnipeResult } from "./local-mint";
 import { burstGate, calibrateLead } from "./burst";
 import { acquireWalletLock, WalletLock } from "./wallet-lock";
+import { LaneCoordinator, orderJobs, planReservation } from "./batch-coordinator";
 import { auditTarget } from "./audit/audit";
 import { waitForMintTime } from "./timer";
 import { toUtc8Time } from "./time-format";
@@ -184,6 +185,17 @@ export async function runBatch(configPath: string, options: BatchRunOptions = {}
     );
   }
   const ledger: Ledger = useLedger ? loadLedger(ledgerPath) : emptyLedger();
+  // Worst-case spend per target, accumulated per job so a watched batch that
+  // merges a third target sees what the first two already committed.
+  const coordinator = new LaneCoordinator();
+  const reservationFor = (target: BatchTarget): bigint =>
+    planReservation({
+      value: target.plan.value,
+      gasLimit: BigInt(cfg.gasLimit),
+      maxFeePerGas: cfg.maxFeePerGas,
+      shots: burstShots,
+      overshoot: cfg.burst.count > 1 && cfg.burst.allowOvershoot,
+    });
 
   // ── 4. Queue ──────────────────────────────────────────────────────────
   const queue: BatchTarget[] = [];
@@ -203,10 +215,11 @@ export async function runBatch(configPath: string, options: BatchRunOptions = {}
     wallets.map((w, idx) => ({ idx, address: w.address, txHash: null, status: "SKIPPED" as const }));
 
   const affordable = async (target: BatchTarget): Promise<boolean> => {
-    const required = target.plan.value + gasReservePerTarget;
+    const required = reservationFor(target);
     for (const wallet of wallets) {
       const balance = await provider.getBalance(wallet.address).catch(() => null);
-      if (balance === null || balance < required) {
+      const committed = coordinator.reservedTotal(wallet.address);
+      if (balance === null || balance < committed + required) {
         if (cfg.dryRun) {
           // Rehearsing is exactly how one checks the pipeline with an empty
           // wallet; a balance problem is a warning there, not a refusal.
@@ -249,6 +262,15 @@ export async function runBatch(configPath: string, options: BatchRunOptions = {}
           continue;
         }
         affordabilityRetry.delete(key);
+        // The target just proved it fits; claim its worst case so a later
+        // --watch merge cannot spend the same balance twice.
+        for (const wallet of wallets) {
+          coordinator.reserve({ jobId: key, wallet: wallet.address, wei: reservationFor(target) });
+        }
+      } else {
+        for (const wallet of wallets) {
+          coordinator.reserve({ jobId: key, wallet: wallet.address, wei: reservationFor(target) });
+        }
       }
 
       known.add(key);
@@ -293,11 +315,21 @@ export async function runBatch(configPath: string, options: BatchRunOptions = {}
   }
 
   // ── 5. Balance precheck (only for what can actually run) ──────────────
-  // With overshoot allowed, up to k shots can land and each one pays value —
-  // free drops are unaffected (value 0), paid ones would otherwise overdraw.
-  const valueMultiplier = cfg.burst.count > 1 && cfg.burst.allowOvershoot ? BigInt(cfg.burst.count) : 1n;
-  const requiredPerWallet = actionable.reduce(
-    (sum, t) => sum + t.plan.value * valueMultiplier + gasReservePerTarget * BigInt(burstShots),
+  // Every actionable target reserves its worst case with the coordinator first;
+  // the check then compares each wallet's balance against the accumulated
+  // reservations. --watch merges land in the same pot, so a third target is
+  // refused here instead of failing at T-3s.
+  for (const target of actionable) {
+    const wei = reservationFor(target);
+    for (const wallet of wallets) {
+      coordinator.reserve({ jobId: keyOf(target), wallet: wallet.address, wei });
+    }
+  }
+  const requiredPerWallet = wallets.reduce(
+    (max, wallet) => {
+      const total = coordinator.reservedTotal(wallet.address);
+      return total > max ? total : max;
+    },
     0n
   );
 
@@ -306,17 +338,24 @@ export async function runBatch(configPath: string, options: BatchRunOptions = {}
     const balances = await Promise.all(wallets.map((w) => provider.getBalance(w.address).catch(() => null)));
     wallets.forEach((w, i) => {
       const bal = balances[i];
+      const committed = coordinator.reservedTotal(w.address);
       const text = bal === null ? "balance unreadable" : `${Number(formatEther(bal)).toFixed(6)} ${chain.nativeSymbol}`;
-      const insufficient = bal === null || bal < requiredPerWallet;
-      if (insufficient) short.push(`[W${i}] ${w.address} ${text}`);
+      const insufficient = bal === null || bal < committed;
+      if (insufficient) {
+        const gap = bal === null ? 0n : committed - bal;
+        short.push(`[W${i}] ${w.address} ${text} (committed ${formatEther(committed)}, short ${formatEther(gap)})`);
+      }
       const line = `  [W${i}] ${w.address}  ${text}`;
-      console.log(insufficient ? chalk.red(`${line}  ✗ needs ${formatEther(requiredPerWallet)}`) : chalk.gray(line));
+      console.log(insufficient ? chalk.red(`${line}  ✗ needs ${formatEther(committed)}`) : chalk.gray(line));
     });
 
     if (short.length > 0) {
       const message =
         `Wallet(s) short of funds for ${actionable.length} actionable target(s):\n  ${short.join("\n  ")}\n` +
         `  Each wallet needs ≥ ${formatEther(requiredPerWallet)} ${chain.nativeSymbol} (mint value + gasLimit × maxFee per target).`;
+      for (const target of actionable) {
+        for (const wallet of wallets) coordinator.unreserve({ jobId: keyOf(target), wallet: wallet.address });
+      }
       if (!cfg.dryRun) throw new Error(message);
       console.log(chalk.yellow(`  ⚠ ${message}`));
       console.log(chalk.yellow("  dry run continues — no transaction will be broadcast."));
@@ -326,6 +365,23 @@ export async function runBatch(configPath: string, options: BatchRunOptions = {}
   }
 
   // ── 6. Schedule + one confirmation ────────────────────────────────────
+  {
+    const { conflicts } = orderJobs(
+      actionable.map((target) => ({
+        id: target.label,
+        wallets: wallets.map((wallet) => wallet.address),
+        startMs: target.startAt.getTime(),
+        priority: 0,
+      }))
+    );
+    for (const conflict of conflicts) {
+      console.log(
+        chalk.bold.yellow(
+          `  ⚠ schedule conflict on ${conflict.wallet}: ${conflict.jobs[0]} and ${conflict.jobs[1]} start within 5s — the second will wait for the first wallet lane.`
+        )
+      );
+    }
+  }
   console.log(chalk.bold.white("\n──────── BATCH SCHEDULE ────────"));
   const scheduleTargets = cfg.targets;
   for (const t of scheduleTargets) {
