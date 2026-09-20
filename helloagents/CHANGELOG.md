@@ -7,6 +7,7 @@
 ## [Unreleased]
 
 ### 新增
+- M9/B5（第二阶段）serve 队列 API：`POST/GET /api/queue`（入队校验 + jobs+armed 列表）、`/api/queue/cancel`、`/api/queue/arm|disarm`（arm 必须回填执行器打印的 token，否则 403）；沿用既有 JSON+同源守卫
 - M9/B5（第一阶段）执行队列数据层：`src/executor/queue.ts`（磁盘队列 + rename 原子认领 + 租约/attempts 回收 + queued/claimed 两种取消语义 + 列表视图）、**arm token 第二因素**（执行器只落哈希并打印 token，武装必须回填、默认 12 小时过期）、任务携带审计快照字段（codeHash/auditedAt/grade/quality/mintPriceWei/capPerWallet）；6 个用例
 - M8/B4 `TargetSource`：`src/target-source.ts`（`fileTargetSource` / `watchTargetSource`，合并沿用 `mergeRawConfigs` 的 slug 去重；缺失 watch 文件容忍并只提示一次），runner 改为经接口读取，B5 队列可直接新增实现
 - M8/B4 `--parallel`：目标循环抽取为 `executeJob`（每目标完整流程：审计等待→burst 门→准备→通道获取→发送/爆发→回执→账本→summary），串行与并行跑同一份代码；`--parallel [N]` / `parallel`/`parallelLimit` 配置，并发上限默认 = 钱包数；`TargetJob` 状态机与 `beforeSend` 通道钩子在前几轮已就位

@@ -8,9 +8,11 @@
 // leaves open.
 
 import http from "http";
+import path from "path";
 import { maskRpc } from "../rpc-resolver";
 import { renderDashboard } from "../scan/html";
 import { resolveChain } from "../chains";
+import { cancelJob, clearArmed, enqueueJob, isArmed, listJobs, setArmed } from "../executor/queue";
 import {
   DEFAULT_FAVORITES_PATH,
   FavoriteSnapshot,
@@ -31,6 +33,7 @@ export interface ServerOptions {
   scheduler: Scheduler;
   exportsDir: string;
   favoritesPath?: string;
+  queueDir?: string;
 }
 
 function sendJson(res: http.ServerResponse, status: number, body: unknown): void {
@@ -82,6 +85,7 @@ export function sanitizeLog(lines: string[]): string[] {
 export function createServer(options: ServerOptions): http.Server {
   const { scheduler } = options;
   const favoritesPath = options.favoritesPath ?? DEFAULT_FAVORITES_PATH;
+  const queueDir = options.queueDir ?? path.resolve(process.cwd(), "queue");
   let lastScanRequest = 0;
 
   return http.createServer(async (req, res) => {
@@ -102,6 +106,40 @@ export function createServer(options: ServerOptions): http.Server {
             return sendJson(res, 400, { error: "invalid origin" });
           }
         }
+      }
+
+      // ── execution queue: the panel enqueues freely, the executor spends ──
+      if (url.pathname === "/api/queue" || url.pathname.startsWith("/api/queue/")) {
+        const action = url.pathname.replace("/api/queue", "").replace(/^\//, "");
+        if (req.method === "GET" && action === "") {
+          return sendJson(res, 200, { jobs: listJobs(queueDir, Date.now()).slice(0, 200), armed: isArmed(queueDir, Date.now()) });
+        }
+        if (req.method === "POST") {
+          const body = (await readJsonBody(req)) as Record<string, unknown>;
+          if (action === "arm") {
+            const result = setArmed(queueDir, { token: String(body.token ?? ""), nowMs: Date.now() });
+            return sendJson(res, result.ok ? 200 : 403, result.ok ? { armed: isArmed(queueDir, Date.now()) } : { error: result.reason });
+          }
+          if (action === "disarm") {
+            clearArmed(queueDir);
+            return sendJson(res, 200, { armed: { armed: false } });
+          }
+          if (action === "cancel") {
+            const id = String(body.id ?? "");
+            if (!id) return sendJson(res, 400, { error: "id is required" });
+            const result = cancelJob(queueDir, id, Date.now());
+            return sendJson(res, result.ok ? 200 : 404, result.ok ? result : { error: result.reason });
+          }
+          if (action === "") {
+            if (typeof body.chain === "string" && !resolveChain(body.chain)) {
+              return sendJson(res, 400, { error: `unsupported chain "${body.chain}"` });
+            }
+            const created = enqueueJob(queueDir, body as never, Date.now());
+            return sendJson(res, created.ok ? 200 : 400, created);
+          }
+          return sendJson(res, 404, { error: "unknown queue action" });
+        }
+        return sendJson(res, 405, { error: "method not allowed" });
       }
 
       if (url.pathname === "/api/favorites") {

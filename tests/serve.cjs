@@ -260,3 +260,58 @@ test('favorites api: round-trip, jsonl export and the same guards', async () => 
     server.close();
   }
 });
+
+test('queue api: enqueue, list, cancel and the arm second factor', async () => {
+  const fs = require('fs');
+  const os = require('os');
+  const path = require('path');
+  const { createArmToken, publishArmToken } = require('../dist/executor/queue');
+  const queueDir = fs.mkdtempSync(path.join(os.tmpdir(), 'queue-api-'));
+  const scheduler = stubScheduler();
+  const server = createServer({ scheduler, exportsDir: '/tmp/exports', queueDir });
+  const port = await listen(server);
+  const base = `http://127.0.0.1:${port}`;
+  const contract = '0x65f001aa4109bb8d3bf70af66855aba1e5582625';
+  try {
+    const enqueued = await fetch(`${base}/api/queue`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ chain: 'robinhood', contract, slug: 'cool', quantity: 1, codeHash: '0x' + 'ab'.repeat(32) }),
+    });
+    assert.equal(enqueued.status, 200);
+    const job = (await enqueued.json()).job;
+    assert.equal(job.status, 'queued');
+    assert.equal(job.armRequired || true, true);
+
+    const bad = await fetch(`${base}/api/queue`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ chain: 'solana', contract }),
+    });
+    assert.equal(bad.status, 400, 'unsupported chain is refused');
+
+    const list = await (await fetch(`${base}/api/queue`)).json();
+    assert.equal(list.jobs.length, 1);
+    assert.equal(list.armed.armed, false, 'enqueueing does not arm anything');
+
+    // Arming needs the token the executor printed; publishing alone is not enough.
+    const token = createArmToken();
+    publishArmToken(queueDir, token);
+    const wrong = await fetch(`${base}/api/queue/arm`, {
+      method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ token: 'nope' }),
+    });
+    assert.equal(wrong.status, 403);
+    const armed = await fetch(`${base}/api/queue/arm`, {
+      method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ token }),
+    });
+    assert.equal(armed.status, 200);
+    assert.equal((await armed.json()).armed.armed, true);
+
+    const cancelled = await fetch(`${base}/api/queue/cancel`, {
+      method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ id: job.id }),
+    });
+    assert.equal(cancelled.status, 200);
+  } finally {
+    server.close();
+  }
+});

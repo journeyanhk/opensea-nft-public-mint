@@ -9,9 +9,9 @@
 - [√] 1.2 `tests/queue.cjs`（6 用例）
 
 ## 2. serve（无密钥）
-- [ ] 2.1 API：POST /api/queue、GET /api/queue、POST /api/queue/cancel、POST /api/queue/arm
+- [√] 2.1 API：POST/GET /api/queue、/api/queue/cancel、/api/queue/arm|disarm（沿用 JSON+同源守卫；GET 返回 jobs+armed）
 - [ ] 2.2 面板：行/收藏「加入队列」、队列 tab、武装状态条与醒目提示
-- [ ] 2.3 `tests/serve.cjs` 端点与守卫 + 脱敏断言
+- [√] 2.3 `tests/serve.cjs` 队列端点用例（入队/非法链 400/列表不武装/错误 token 403/正确 token 200/取消）
 
 ## 3. 执行器
 - [ ] 3.1 CLI `--executor`（`.env.executor`、必须有私钥的断言）
