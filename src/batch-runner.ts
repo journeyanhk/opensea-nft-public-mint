@@ -11,6 +11,7 @@
 // keeps a restart from minting the same drop twice.
 
 import fs from "fs";
+import path from "path";
 import chalk from "chalk";
 import { JsonRpcProvider, Wallet, formatEther, formatUnits } from "ethers";
 import { resolveChain } from "./chains";
@@ -18,6 +19,7 @@ import { BatchTarget, loadBatchConfig } from "./batch-config";
 import { planRpcs, resolveRpcsForChain } from "./rpc-resolver";
 import { localPublicSnipe, SnipeResult } from "./local-mint";
 import { burstGate, calibrateLead } from "./burst";
+import { acquireWalletLock, WalletLock } from "./wallet-lock";
 import { auditTarget } from "./audit/audit";
 import { waitForMintTime } from "./timer";
 import { toUtc8Time } from "./time-format";
@@ -271,6 +273,24 @@ export async function runBatch(configPath: string, options: BatchRunOptions = {}
   const actionable = [...queue];
   const ledgerCount = cfg.targets.filter(ledgerSkipped).length;
   if (ledgerCount > 0) console.log(chalk.gray(`  ${ledgerCount} target(s) already handled per the ledger`));
+
+  // ── 4b. Wallet locks: one process per wallet, for the whole run ───────
+  // Nonces are a counter, so two processes sending from the same wallet would
+  // collide. The lock is an OS-owned socket (a crash releases it) plus a
+  // pid/token file (diagnostics + stale recovery).
+  const walletLocks: WalletLock[] = [];
+  if (!cfg.dryRun) {
+    const lockDir = path.resolve(process.cwd(), ".locks");
+    try {
+      for (const wallet of wallets) {
+        walletLocks.push(await acquireWalletLock(wallet.address, lockDir));
+      }
+      console.log(chalk.gray(`  wallet locks: ${walletLocks.length} held in ${lockDir}`));
+    } catch (err) {
+      for (const lock of walletLocks) await lock.release();
+      throw new Error(`${(err as Error).message} — another batch or the executor may be running.`);
+    }
+  }
 
   // ── 5. Balance precheck (only for what can actually run) ──────────────
   // With overshoot allowed, up to k shots can land and each one pays value —
@@ -553,6 +573,8 @@ export async function runBatch(configPath: string, options: BatchRunOptions = {}
       stop = true;
     }
   }
+
+  for (const lock of walletLocks) await lock.release();
 
   // ── 9. Summary ────────────────────────────────────────────────────────
   console.log(chalk.bold.white("\n════════ BATCH SUMMARY ════════"));

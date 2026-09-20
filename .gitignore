@@ -37,3 +37,6 @@ keys.txt
 
 # User favorites (local decisions, not scan state)
 .favorites.json
+
+# Cross-process wallet locks
+.locks/

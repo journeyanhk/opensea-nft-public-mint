@@ -19,7 +19,7 @@ import { explorerTx } from "./chains";
 import { toUtc8Time } from "./time-format";
 import { buildLocalMintPlan, fetchMintStats, LocalMintPlan, MintStats } from "./seadrop-public";
 import { countMintedTokens, verdict } from "./receipts";
-import { aggregateBurst, planBurst } from "./burst";
+import { aggregateBurst, gapFillerTx, planBurst } from "./burst";
 import { classifySimulation, codeHashOf, revertDataOf, validateMintPublicCalldata, validateSignedTx } from "./gates";
 
 export interface LocalSnipeOpts {
@@ -39,6 +39,10 @@ export interface LocalSnipeOpts {
   // B3: consecutive nonces fired just before the open (the gate that decides
   // whether a burst is allowed runs in the caller, which knows the config).
   burst?: { count: number; spacingMs: number; leadMs: number };
+  // B4: acquire the wallet lane here — after signing and the gates, before the
+  // send. Preparing does not hold the lane, sending does; the returned function
+  // releases it.
+  beforeSend?: () => Promise<() => void>;
 }
 
 // SUCCESS means the receipt proved the tokens arrived (M8/B1); PARTIAL and
@@ -400,7 +404,16 @@ export async function localPublicSnipe(opts: LocalSnipeOpts): Promise<SnipeResul
     )
   );
 
+  let releaseLane: (() => void) | null = null;
+  try {
+    releaseLane = (await opts.beforeSend?.()) ?? null;
+  } catch (err) {
+    console.log(chalk.bold.red(`  ✗ Could not take the wallet lane: ${(err as Error).message}`));
+    return skipped();
+  }
+
   if (opts.dryRun) {
+    releaseLane?.();
     console.log(chalk.bold.yellow("\n  DRY RUN — signed and simulated, nothing broadcast."));
     for (const p of prepared) {
       const shots = burstShots.get(p.idx);
@@ -492,12 +505,46 @@ export async function localPublicSnipe(opts: LocalSnipeOpts): Promise<SnipeResul
         const lowest = accepted[0];
         const lowestSettled = lowest ? shots.some((shot) => shot.txHash === lowest.txHash && shot.status !== "TIMEOUT") : true;
         if (accepted.length > 1 && !lowestSettled) {
-          result.nonceGap = true;
-          console.log(
-            chalk.bold.yellow(
-              `  ⚠ [W${wave.idx}] nonce gap: ${lowest?.txHash} (lowest nonce) has no receipt while a later shot landed — replace that nonce before the next run or it may stall.`
-            )
-          );
+          // Fill the hole now: the next target that reads a pending nonce from
+          // this wallet would otherwise stall behind it.
+          const index = active.findIndex((entry) => entry.idx === wave.idx);
+          const missingNonce = nonces[index];
+          const wallet = wallets[wave.idx];
+          let filled = false;
+          try {
+            const filler = await wallet.signTransaction(
+              gapFillerTx({
+                wallet: wave.address,
+                nonce: missingNonce,
+                gasLimit: gasLimit || 250_000,
+                maxFeePerGas,
+                maxPriorityFeePerGas: maxPriorityFee,
+                chainId,
+              })
+            );
+            const { txHash: fillerHash, responsePromise } = blastToAll(filler, endpoints);
+            const responses = await responsePromise;
+            const seen = responses.some((r) => r.txHash !== null || (r.error ?? "").includes("already known"));
+            if (seen) {
+              const fillerReceipt = await waitForReceipt(fillerHash, rpcUrls[0], 45_000);
+              filled = fillerReceipt?.status === "SUCCESS";
+              console.log(
+                filled
+                  ? chalk.gray(`  ✓ [W${wave.idx}] nonce gap filled with a 0-value self-transfer (${fillerHash})`)
+                  : chalk.bold.yellow(`  ⚠ [W${wave.idx}] gap filler ${fillerHash} did not confirm — replace nonce ${missingNonce} manually before the next run.`)
+              );
+            }
+          } catch (err) {
+            console.log(chalk.bold.yellow(`  ⚠ [W${wave.idx}] gap filler failed: ${(err as Error).message}`));
+          }
+          if (!filled) {
+            result.nonceGap = true;
+            console.log(
+              chalk.bold.yellow(
+                `  ⚠ [W${wave.idx}] nonce gap: ${lowest?.txHash} (lowest nonce) has no receipt while a later shot landed — replace that nonce before the next run or it may stall.`
+              )
+            );
+          }
         }
         const color = aggregate.mintedCount > 0 ? chalk.bold.green : chalk.bold.red;
         console.log(
@@ -507,6 +554,7 @@ export async function localPublicSnipe(opts: LocalSnipeOpts): Promise<SnipeResul
         );
       })
     );
+    releaseLane?.();
     console.log(chalk.bold.white("\n===== LOCAL PUBLIC MINT COMPLETE ====="));
     return burstResults;
   }
@@ -621,6 +669,7 @@ export async function localPublicSnipe(opts: LocalSnipeOpts): Promise<SnipeResul
     })
   );
 
+  releaseLane?.();
   console.log(chalk.bold.white("\n===== LOCAL PUBLIC MINT COMPLETE ====="));
   return finish();
 }

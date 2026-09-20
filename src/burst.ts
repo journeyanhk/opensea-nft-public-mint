@@ -26,6 +26,41 @@ export function planBurst(baseNonce: number, count: number): number[] {
   return Array.from({ length: Math.max(0, count) }, (_, index) => baseNonce + index);
 }
 
+// A hole in the nonce sequence blocks every later transaction from that wallet,
+// including the next target's. Reverts spend the nonce, so a hole can only come
+// from a transport-level rejection; a zero-value self-transfer with the missing
+// nonce is the cheapest way to fill it.
+export function gapFillerTx(input: {
+  wallet: string;
+  nonce: number;
+  gasLimit: number;
+  maxFeePerGas: bigint;
+  maxPriorityFeePerGas: bigint;
+  chainId: bigint;
+}): {
+  to: string;
+  data: string;
+  value: bigint;
+  nonce: number;
+  gasLimit: number;
+  maxFeePerGas: bigint;
+  maxPriorityFeePerGas: bigint;
+  type: 2;
+  chainId: bigint;
+} {
+  return {
+    to: input.wallet,
+    data: "0x",
+    value: 0n,
+    nonce: input.nonce,
+    gasLimit: input.gasLimit,
+    maxFeePerGas: input.maxFeePerGas,
+    maxPriorityFeePerGas: input.maxPriorityFeePerGas,
+    type: 2,
+    chainId: input.chainId,
+  };
+}
+
 export interface BurstPolicyInput {
   count: number;
   capPerWallet: number | null;

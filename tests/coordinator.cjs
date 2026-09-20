@@ -27,24 +27,63 @@ test('planReservation covers gas for every shot and value only when overshoot ca
 
 test('a lane is exclusive until released, and a crashed lease expires', () => {
   const coordinator = new LaneCoordinator();
-  const first = coordinator.acquire({ jobId: 'job-a', wallet: W1, reserveWei: 100n, nowMs: 1_000, leaseMs: 60_000 });
+  const first = coordinator.acquire({ jobId: 'job-a', wallet: W1, nowMs: 1_000, leaseMs: 60_000 });
   assert.equal(first.ok, true);
-  const second = coordinator.acquire({ jobId: 'job-b', wallet: W1, reserveWei: 100n, nowMs: 1_001 });
+  const second = coordinator.acquire({ jobId: 'job-b', wallet: W1, nowMs: 1_001 });
   assert.equal(second.ok, false);
   assert.match(second.reason, /job-a/);
 
   // A different wallet is a different lane: parallel is the point.
-  assert.equal(coordinator.acquire({ jobId: 'job-b', wallet: W2, reserveWei: 100n, nowMs: 1_001 }).ok, true);
+  assert.equal(coordinator.acquire({ jobId: 'job-b', wallet: W2, nowMs: 1_001 }).ok, true);
 
   // Only the owner can release; an expired lease frees the lane by itself.
   assert.equal(coordinator.release(W1, 'job-b'), false);
   assert.equal(coordinator.release(W1, 'job-a'), true);
-  assert.equal(coordinator.acquire({ jobId: 'job-b', wallet: W1, reserveWei: 100n, nowMs: 2_000 }).ok, true);
+  assert.equal(coordinator.acquire({ jobId: 'job-b', wallet: W1, nowMs: 2_000 }).ok, true);
 
   const expired = coordinator.expire(70_000);
   assert.ok(expired.includes(W1));
-  assert.equal(coordinator.acquire({ jobId: 'job-c', wallet: W1, reserveWei: 5n, nowMs: 70_001 }).ok, true);
+  assert.equal(coordinator.acquire({ jobId: 'job-c', wallet: W1, nowMs: 70_001 }).ok, true);
+  coordinator.reserve({ jobId: 'job-c', wallet: W1, wei: 5n });
   assert.equal(coordinator.snapshot().find((lane) => lane.wallet === W1).reservedWei, 5n);
+});
+
+test('a lease must be renewed or it is treated as a crash', () => {
+  const coordinator = new LaneCoordinator();
+  coordinator.acquire({ jobId: 'job-a', wallet: W1, nowMs: 0, leaseMs: 1_000 });
+  // The holder keeps proving it is alive: an expire inside the renewed window
+  // must not hand the wallet to somebody else.
+  assert.equal(coordinator.renew({ wallet: W1, jobId: 'job-a', nowMs: 900, leaseMs: 1_000 }), true);
+  assert.deepEqual(coordinator.expire(1_500), []);
+  assert.equal(coordinator.acquire({ jobId: 'job-b', wallet: W1, nowMs: 1_500 }).ok, false);
+  // Nobody renewed past 1_900: recovery, not preemption.
+  assert.deepEqual(coordinator.expire(2_000), [W1]);
+  assert.equal(coordinator.acquire({ jobId: 'job-b', wallet: W1, nowMs: 2_000 }).ok, true);
+  // Only the holder may renew.
+  assert.equal(coordinator.renew({ wallet: W1, jobId: 'job-a', nowMs: 2_100 }), false);
+});
+
+test('reservations accumulate per job instead of overwriting the lane', () => {
+  const coordinator = new LaneCoordinator();
+  assert.deepEqual(coordinator.reserve({ jobId: 'job-a', wallet: W1, wei: 100n }), { ok: true });
+  assert.deepEqual(coordinator.reserve({ jobId: 'job-b', wallet: W1, wei: 50n }), { ok: true });
+  assert.equal(coordinator.reservedTotal(W1), 150n);
+  assert.deepEqual(coordinator.reservedBy(W1), { 'job-a': 100n, 'job-b': 50n });
+
+  // A third target merged by --watch is rejected against a limit, with the gap.
+  const rejected = coordinator.reserve({ jobId: 'job-c', wallet: W1, wei: 900n, limitWei: 1_000n });
+  assert.equal(rejected.ok, false);
+  assert.equal(rejected.shortfallWei, 50n);
+
+  // Releasing the send lane does not release the money.
+  coordinator.acquire({ jobId: 'job-a', wallet: W1, nowMs: 0 });
+  assert.equal(coordinator.release(W1, 'job-a'), true);
+  assert.equal(coordinator.reservedTotal(W1), 150n);
+  assert.equal(coordinator.unreserve({ jobId: 'job-a', wallet: W1 }), 100n);
+  assert.equal(coordinator.reservedTotal(W1), 50n);
+  // Reserving twice for the same job replaces its own claim, never adds to it.
+  coordinator.reserve({ jobId: 'job-b', wallet: W1, wei: 80n });
+  assert.equal(coordinator.reservedTotal(W1), 80n);
 });
 
 test('orderJobs sorts by start, maps the conflicts and breaks ties by priority', () => {
@@ -82,4 +121,28 @@ test('the wallet lock is exclusive across processes and recovers a dead holder',
   assert.equal(recovered.recovered, true);
   await recovered.release();
   assert.equal(fs.existsSync(lockFile), false, 'release removes the file');
+});
+
+test('the wallet mutex survives an unrelated port occupant and reports a live holder', async () => {
+  const net = require('node:net');
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'wallet-port-'));
+  // An unrelated service sits on the port this wallet would hash to.
+  const squatter = net.createServer((socket) => socket.destroy());
+  await new Promise((resolve) => squatter.listen({ host: '127.0.0.1', port: 0 }, resolve));
+  const taken = squatter.address().port;
+  try {
+    const lock = await acquireWalletLock(W1, dir, { port: taken });
+    assert.equal(lock.port, taken + 1, 'it steps over an unrelated occupant');
+    assert.equal(fs.existsSync(path.join(dir, W1 + '.lock')), true);
+    await lock.release();
+
+    // A live holder (our own pid) is reported instead of being stolen.
+    fs.writeFileSync(
+      path.join(dir, W1 + '.lock'),
+      JSON.stringify({ version: 2, pid: process.pid, token: 'held', port: taken + 20 })
+    );
+    await assert.rejects(() => acquireWalletLock(W1, dir, { port: taken + 20 }), /locked by pid/);
+  } finally {
+    await new Promise((resolve) => squatter.close(resolve));
+  }
 });

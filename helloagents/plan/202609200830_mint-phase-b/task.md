@@ -35,7 +35,16 @@
 - [√] 4.1 `src/batch-coordinator.ts`：`LaneCoordinator`（独占租约/仅持有者释放/过期自动回收）、`planReservation`（gas×发数，overshoot 时 value×发数）、`orderJobs`（按开售排序 + 5s 窗口同钱包冲突）
 - [√] 4.2 `src/wallet-lock.ts`：OS 端口互斥（进程死即释放）+ pid/token 文件（只认 ESRCH 才回收旧锁）
 - [ ] 4.3 `--parallel` 接线（默认串行不变）
-- [ ] 4.4 `tests/coordinator.cjs`
+- [√] 4.4 `tests/coordinator.cjs`
+
+## review15 修复（B4，同日）
+
+- [√] 租约 `renew` + 竞争用例；`expire` 语义改为崩溃回收
+- [√] 累计预留（`reserve/unreserve/reservedTotal` + 上限/缺口）
+- [√] 端口误报回退 + 真实占用判定
+- [√] nonce 空洞自动补洞（`gapFillerTx`）
+- [√] `beforeSend` 钩子 + 批量启动钱包锁
+- [ ] 接线收尾：`TargetJob` 状态机 + `--parallel`（同钱包 `acquire` 重试/续租）+ 余额由 `reservedTotal` 驱动 + `TargetSource` 接口
 
 ## 5. 收尾
 - [ ] 5.1 全量测试 + `--dry-run` 真链演练记录

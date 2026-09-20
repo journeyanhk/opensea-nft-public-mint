@@ -1,6 +1,6 @@
 const { test } = require('node:test');
 const assert = require('node:assert/strict');
-const { planBurst, burstGate, aggregateBurst, calibrateLead } = require('../dist/burst');
+const { planBurst, burstGate, aggregateBurst, calibrateLead, gapFillerTx } = require('../dist/burst');
 
 test('planBurst hands out one nonce per shot, in order', () => {
   assert.deepEqual(planBurst(15, 1), [15]);
@@ -117,4 +117,21 @@ test('calibrateLead observes a second boundary instead of trusting a truncated t
   const gate = burstGate({ count: 3, capPerWallet: 1, allowOvershoot: false, clockSkewMs: blind.clockSkewMs, leadMs: blind.leadMs });
   assert.equal(gate.allowed, true, 'an unknown clock is not a reason to refuse');
   assert.match(gate.reason, /unknown/i);
+});
+
+test('gapFillerTx builds a zero-value self transfer on the missing nonce', () => {
+  const filler = gapFillerTx({
+    wallet: '0x65f001aa4109bb8d3bf70af66855aba1e5582625',
+    nonce: 15,
+    gasLimit: 250_000,
+    maxFeePerGas: 2_000_000_000n,
+    maxPriorityFeePerGas: 50_000_000n,
+    chainId: 4663n,
+  });
+  assert.equal(filler.to, '0x65f001aa4109bb8d3bf70af66855aba1e5582625'.toLowerCase());
+  assert.equal(filler.value, 0n, 'filling a hole must not spend value');
+  assert.equal(filler.data, '0x');
+  assert.equal(filler.nonce, 15);
+  assert.equal(filler.gasLimit, 250_000);
+  assert.equal(filler.chainId, 4663n);
 });

@@ -8,8 +8,10 @@
 //   2. a pid/token file for diagnostics and stale-file recovery. It is written
 //      only after the mutex is held, and it is removed only by its owner.
 //
-// The pattern (and the "only ESRCH proves the process is gone" rule) is taken
-// from mint-desk's run-lock, which solves the same problem for its own runner.
+// An unrelated service can occupy the derived port by chance, so a taken port is
+// stepped over unless the lock file names a live holder — "the port is busy" and
+// "the wallet is in use" are different statements. The pattern (and the "only
+// ESRCH proves the process is gone" rule) is taken from mint-desk's run-lock.
 
 import net from "node:net";
 import path from "node:path";
@@ -19,6 +21,12 @@ import { createHash, randomUUID } from "node:crypto";
 export interface WalletLock {
   release: () => Promise<void>;
   recovered: boolean;
+  port: number;
+}
+
+export interface WalletLockOptions {
+  port?: number; // override the hashed port (tests, or a known-good port)
+  portTries?: number; // how many consecutive ports to try when one is taken
 }
 
 function processExists(pid: number): boolean {
@@ -36,11 +44,15 @@ function lockPort(wallet: string): number {
   return 20000 + (createHash("sha256").update(wallet.toLowerCase()).digest().readUInt32BE(0) % 40000);
 }
 
-export async function acquireWalletLock(wallet: string, dir: string): Promise<WalletLock> {
-  const key = wallet.toLowerCase();
-  const port = lockPort(key);
-  fs.mkdirSync(dir, { recursive: true });
+function readLockFile(file: string): { pid?: unknown; token?: unknown } | null {
+  try {
+    return JSON.parse(fs.readFileSync(file, "utf8")) as { pid?: unknown; token?: unknown };
+  } catch {
+    return null;
+  }
+}
 
+async function listenOn(port: number): Promise<net.Server | { code: string }> {
   const server = net.createServer((socket) => socket.destroy());
   try {
     await new Promise<void>((resolve, reject) => {
@@ -50,20 +62,56 @@ export async function acquireWalletLock(wallet: string, dir: string): Promise<Wa
         resolve();
       });
     });
-  } catch {
-    throw new Error(`wallet ${key} is already in use by another process (mutex port ${port} is taken)`);
+    return server;
+  } catch (err) {
+    server.close();
+    return { code: (err as NodeJS.ErrnoException).code ?? "EUNKNOWN" };
   }
-  const close = (): Promise<void> => new Promise((resolve) => server.close(() => resolve()));
+}
 
+export async function acquireWalletLock(
+  wallet: string,
+  dir: string,
+  options: WalletLockOptions = {}
+): Promise<WalletLock> {
+  const key = wallet.toLowerCase();
+  const basePort = options.port ?? lockPort(key);
+  const tries = Math.max(1, options.portTries ?? 4);
+  fs.mkdirSync(dir, { recursive: true });
   const file = path.join(dir, `${key}.lock`);
+
+  let server: net.Server | null = null;
+  let port = basePort;
+  for (let offset = 0; offset < tries; offset++) {
+    const candidate = basePort + offset;
+    const attempt = await listenOn(candidate);
+    if (!("code" in attempt)) {
+      server = attempt;
+      port = candidate;
+      break;
+    }
+    if (attempt.code !== "EADDRINUSE") {
+      throw new Error(`wallet ${key}: cannot bind mutex port ${candidate} (${attempt.code})`);
+    }
+    const holder = readLockFile(file);
+    const holderPid = Number(holder?.pid);
+    if (holder && Number.isSafeInteger(holderPid) && holderPid > 0 && processExists(holderPid)) {
+      throw new Error(`wallet ${key} is locked by pid ${holderPid}`);
+    }
+    // No live holder: an unrelated occupant, step over it.
+  }
+  if (!server) {
+    throw new Error(`wallet ${key}: no free mutex port in ${basePort}..${basePort + tries - 1}`);
+  }
+  const bound = server;
+  const close = (): Promise<void> => new Promise((resolve) => bound.close(() => resolve()));
+
   const token = randomUUID();
   let recovered = false;
   try {
     if (fs.existsSync(file)) {
-      let previous: { pid?: unknown } | null = null;
-      try {
-        previous = JSON.parse(fs.readFileSync(file, "utf8"));
-      } catch {
+      const previous = readLockFile(file);
+      if (previous === null) {
         throw new Error(`wallet lock file ${file} is unreadable — check the process before removing it`);
       }
       const pid = Number(previous?.pid);
@@ -86,11 +134,12 @@ export async function acquireWalletLock(wallet: string, dir: string): Promise<Wa
   let released = false;
   return {
     recovered,
+    port,
     release: async () => {
       if (released) return;
       released = true;
       try {
-        const current = JSON.parse(fs.readFileSync(file, "utf8")) as { token?: string };
+        const current = readLockFile(file);
         if (current?.token === token) fs.unlinkSync(file);
       } catch {
         // already gone
