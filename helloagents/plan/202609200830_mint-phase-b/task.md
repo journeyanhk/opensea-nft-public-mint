@@ -41,5 +41,6 @@
 - [√] Gate 3：开售前跳过、开售后并行；`refreshBeforeMs` 3s→5s
 - [√] SeaDrop 自定义错误按选择器解码（4byte 核对；两种 NotActive 元数）+ 未知选择器兜底；测试用真实选择器
 - [√] `--dry-run` 余额不足仅警告
+- [√] **修复**：dry-run 写 PENDING 账本导致真实运行被拒（三处写入统一守卫 + 不变式测试；受影响运行用 `--retry-pending` 恢复）
 - [√] favorites API 输入校验（链白名单/地址正则/长度/体积）
 - [√] 门 1 代理盲区（EIP-1967）记录为后续项，未实现

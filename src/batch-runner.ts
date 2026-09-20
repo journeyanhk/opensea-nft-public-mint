@@ -62,6 +62,12 @@ function readConfig(file: string): RawConfig {
 
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
+// A dry run must never touch the ledger. A stray PENDING entry reads as "this
+// may already be on chain" and silently blocks the next real run.
+export function shouldWriteLedger(useLedger: boolean, dryRun: boolean): boolean {
+  return useLedger && !dryRun;
+}
+
 export async function runBatch(configPath: string, options: BatchRunOptions = {}): Promise<void> {
   const watch = options.watch === true;
   const watchFiles = options.watchFiles ?? [];
@@ -404,7 +410,7 @@ export async function runBatch(configPath: string, options: BatchRunOptions = {}
           console.log(chalk.bold.yellow(`  skipping ${target.label}: audit grade ${audit.grade.grade}`));
           const results = skippedAll();
           summary.push({ label: target.label, results });
-          if (useLedger) {
+          if (shouldWriteLedger(useLedger, cfg.dryRun)) {
             recordEntry(ledger, cfg.chainKey, target.contract, {
               status: "SKIPPED",
               txHash: null,
@@ -426,7 +432,7 @@ export async function runBatch(configPath: string, options: BatchRunOptions = {}
     // between broadcast and receipt then blocks a duplicate send.
     const priorAttempts = entryOf(ledger, cfg.chainKey, target.contract)?.attempts ?? 0;
     const attempts = priorAttempts + 1;
-    if (useLedger) {
+    if (shouldWriteLedger(useLedger, cfg.dryRun)) {
       recordEntry(ledger, cfg.chainKey, target.contract, {
         status: "PENDING",
         txHash: null,
@@ -464,7 +470,7 @@ export async function runBatch(configPath: string, options: BatchRunOptions = {}
 
     summary.push({ label: target.label, results });
 
-    if (useLedger && !cfg.dryRun) {
+    if (shouldWriteLedger(useLedger, cfg.dryRun)) {
       const broadcast = results.find((r) => r.txHash !== null);
       const status = broadcast
         ? broadcast.status
