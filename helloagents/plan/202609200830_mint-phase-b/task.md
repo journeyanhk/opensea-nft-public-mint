@@ -48,7 +48,7 @@
 - [√] 余额由 `reservedTotal` 驱动（enqueue 先 claim、pre-check 用累计预留、差额提示；`--watch` 合并周期重试）
 - [√] schedule 冲突告警（`orderJobs`，同钱包 <5s）
 - [√] `--parallel` 并发执行（目标循环抽取为 `executeJob`，串并行共用；并发上限默认 = 钱包数）
-- [ ] `TargetSource` 接口（B5 队列复用；现为配置文件 + watch 文件）
+- [√] `TargetSource` 接口（`src/target-source.ts` + 3 用例；runner 经接口读取，B5 队列直接新增实现）
 
 ## 5. 收尾
 - [ ] 5.1 全量测试 + `--dry-run` 真链演练记录

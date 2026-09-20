@@ -27,7 +27,8 @@ import { toUtc8Time } from "./time-format";
 import { askYesNo, closePrompts } from "./prompt";
 import { walletKeysFromEnv } from "./wallet-keys";
 import { promptKeys } from "./wizard";
-import { RawConfig, diffKeys, mergeRawConfigs } from "./batch-watch";
+import { RawConfig, diffKeys } from "./batch-watch";
+import { fileTargetSource, TargetSource, watchTargetSource } from "./target-source";
 import {
   DEFAULT_LEDGER_PATH,
   Ledger,
@@ -51,6 +52,7 @@ export interface BatchRunOptions {
   burst?: Partial<{ count: number; spacingMs: number; leadMs: number | "auto"; allowOvershoot: boolean; forceClock: boolean }>;
   parallel?: boolean;
   parallelLimit?: number;
+  targetSource?: TargetSource; // tests and B5 inject one; default = config + watch files
 }
 
 function readConfig(file: string): RawConfig {
@@ -83,21 +85,13 @@ export async function runBatch(configPath: string, options: BatchRunOptions = {}
   const retryPending = options.retryPending === true;
   const ledgerPath = options.ledgerPath ?? DEFAULT_LEDGER_PATH;
 
-  // Watched files may not exist yet (the scanner exports them later); a missing
-  // one is an empty config, not an error. The main file must exist.
-  const missingWatchFiles = new Set<string>();
-  const readWatchFile = (file: string): RawConfig => {
-    if (fs.existsSync(file)) {
-      if (missingWatchFiles.delete(file)) console.log(chalk.gray(`  ${file} appeared`));
-      return readConfig(file);
-    }
-    if (!missingWatchFiles.has(file)) {
-      missingWatchFiles.add(file);
-      console.log(chalk.gray(`  waiting for ${file} (not created yet)`));
-    }
-    return { targets: [] };
-  };
-  const loadMerged = (): RawConfig => mergeRawConfigs(readConfig(configPath), watchFiles.map(readWatchFile));
+  // Where targets come from: the config file, plus the files --watch merges in.
+  // B5 adds a queue source behind the same interface.
+  const targetSource: TargetSource = options.targetSource ?? watchTargetSource(configPath, watchFiles, {
+    onAppear: (file) => console.log(chalk.gray(`  ${file} appeared`)),
+    onMissing: (file) => console.log(chalk.gray(`  waiting for ${file} (not created yet)`)),
+  });
+  const loadMerged = (): RawConfig => targetSource.read();
 
   let raw = loadMerged();
   const chain = resolveChain(raw?.chain);
