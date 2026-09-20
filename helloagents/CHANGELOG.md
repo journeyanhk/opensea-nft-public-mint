@@ -7,6 +7,7 @@
 ## [Unreleased]
 
 ### 新增
+- M9/B5（第一阶段）执行队列数据层：`src/executor/queue.ts`（磁盘队列 + rename 原子认领 + 租约/attempts 回收 + queued/claimed 两种取消语义 + 列表视图）、**arm token 第二因素**（执行器只落哈希并打印 token，武装必须回填、默认 12 小时过期）、任务携带审计快照字段（codeHash/auditedAt/grade/quality/mintPriceWei/capPerWallet）；6 个用例
 - M8/B4 `TargetSource`：`src/target-source.ts`（`fileTargetSource` / `watchTargetSource`，合并沿用 `mergeRawConfigs` 的 slug 去重；缺失 watch 文件容忍并只提示一次），runner 改为经接口读取，B5 队列可直接新增实现
 - M8/B4 `--parallel`：目标循环抽取为 `executeJob`（每目标完整流程：审计等待→burst 门→准备→通道获取→发送/爆发→回执→账本→summary），串行与并行跑同一份代码；`--parallel [N]` / `parallel`/`parallelLimit` 配置，并发上限默认 = 钱包数；`TargetJob` 状态机与 `beforeSend` 通道钩子在前几轮已就位
 - M8/B4 收尾增量：`src/target-job.ts`（JobState 状态机 + `createJobs`/`advance`/`jobsToPrepare`，为 `--parallel` 与 B5 执行器共用）；runner 的余额校验改为**每目标最坏预留驱动**（`reserve` 幂等、`--watch` 合并先 claim、差额提示与周期重试）；schedule 阶段用 `orderJobs` 打印同钱包 <5s 冲突

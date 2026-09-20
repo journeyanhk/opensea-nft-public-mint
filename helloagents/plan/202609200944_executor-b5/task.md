@@ -5,8 +5,8 @@
 ---
 
 ## 1. 队列数据层
-- [ ] 1.1 `src/executor/queue.ts`：enqueue/claimNext（rename 原子认领）/complete/fail/cancel/reclaimStale + 输入校验
-- [ ] 1.2 `tests/queue.cjs`
+- [√] 1.1 `src/executor/queue.ts`：enqueue/claimNext（rename 原子认领、只认 `startAt-2h` 窗口内的任务）/complete/fail/cancel（queued 直接取消、claimed 置 cancelRequested）/reclaimStale（租约过期回收、attempts 上限）/listJobs + 输入校验 + arm（`publishArmToken` 只落哈希、`setArmed` 需回填 token、12h 过期）
+- [√] 1.2 `tests/queue.cjs`（6 用例）
 
 ## 2. serve（无密钥）
 - [ ] 2.1 API：POST /api/queue、GET /api/queue、POST /api/queue/cancel、POST /api/queue/arm

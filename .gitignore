@@ -40,3 +40,6 @@ keys.txt
 
 # Cross-process wallet locks
 .locks/
+
+# Execution queue (local state)
+queue/
