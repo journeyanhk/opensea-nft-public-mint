@@ -268,6 +268,13 @@ export async function localPublicSnipe(opts: LocalSnipeOpts): Promise<SnipeResul
       return skipped();
     }
     console.log(chalk.gray(`  ✓ Gate 1: contract code hash matches the audit (${actual.slice(0, 12)}…)`));
+  } else {
+    // Silence here reads as "the gate passed"; it did not run at all.
+    console.log(
+      chalk.yellow(
+        "  · Gate 1 skipped: no codeHash pinned in the target — add the audit's code hash to enable the contract-identity check."
+      )
+    );
   }
 
   // ── Gate 3: a pending simulation per wallet (gate 2 runs on the signature) ─

@@ -63,6 +63,7 @@
 - 看板：新增 `24h net / 72h net` 两列（读取 `.backfill.jsonl`，`--backfill-file` 可覆盖）、每 5 分钟自动刷新
 
 ### 修复
+- Gate 1 未钉 codeHash 时打印 `· Gate 1 skipped`（原为静默跳过，容易被误读成"通过"）；README 补充取值与三条门的日志判读
 - review13（B1/B2 部署前）：① Gate 3 改为开售后才跑且并行（开售前只会 NotActive，串行会挤掉 T-0 预算），`refreshBeforeMs` 默认 3s→5s；② SeaDrop revert 改按**选择器**解码（文本匹配永不命中自定义错误；`NotActive` 同时支持 `()` 与 `(uint256,uint256,uint256)` 两种元数）；③ `--dry-run` 下余额不足降级为警告；④ `POST /api/favorites` 增加链白名单、地址正则、note/slug 长度与 snapshot 体积校验
 - 收藏星标点击 400：行模板漏发 `data-contract`，客户端 `row.dataset.contract` 为 undefined 被 `JSON.stringify` 丢弃，服务端按「缺合约」拒绝（备注/标记编辑同一路径）；补上属性并加断言 + 浏览器取 dataset 的端到端校验
 - review12（阶段 A 部署前）：① `refreshCalendar` 改为只保留本次扫描配置的链（原按「已注册链」过滤，Ethereum/Base 条目会长期占着状态且永远不审计），金丝雀基线同样按配置链计算；② 日历新建条目置 `pendingAudit=true`（原状态既无事件又无 `publicStart`，不在任何候选种子列表里，永远不会被审计）；③ 日历新增 `publicStartTime`（最后阶段＝公售猜测），面板开售回退与 `schedule mismatch` 只与它比较（最早阶段通常只是预售波次），明细标注「最早为预售阶段」；④ `ScanState.calendar.warnings` 持久化并经 `/api/status` 暴露
