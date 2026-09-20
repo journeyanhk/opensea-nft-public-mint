@@ -18,6 +18,7 @@ import { waitForMintTime } from "./timer";
 import { explorerTx } from "./chains";
 import { toUtc8Time } from "./time-format";
 import { buildLocalMintPlan, fetchMintStats, LocalMintPlan, MintStats } from "./seadrop-public";
+import { countMintedTokens, verdict } from "./receipts";
 
 export interface LocalSnipeOpts {
   nftContract: string;
@@ -33,13 +34,18 @@ export interface LocalSnipeOpts {
   refreshBeforeMs?: number; // re-read the drop this long before the stage opens
 }
 
-export type SnipeStatus = "SUCCESS" | "REVERTED" | "TIMEOUT" | "REJECTED" | "SKIPPED";
+// SUCCESS means the receipt proved the tokens arrived (M8/B1); PARTIAL and
+// NO_MINT are what a status==1 receipt can also mean.
+export type SnipeStatus = "SUCCESS" | "PARTIAL" | "NO_MINT" | "REVERTED" | "TIMEOUT" | "REJECTED" | "SKIPPED";
 
 export interface SnipeResult {
   idx: number;
   address: string;
   txHash: string | null;
   status: SnipeStatus;
+  mintedCount?: number;
+  tokenIds?: string[];
+  gasBurnedWei?: string;
 }
 
 // A postponed start is adopted at most this many times before we stop re-waiting.
@@ -331,6 +337,7 @@ export async function localPublicSnipe(opts: LocalSnipeOpts): Promise<SnipeResul
   const statusByIdx = new Map<number, SnipeStatus>(
     settled.map((s) => [s.idx, acceptedByIdx.has(s.idx) ? "TIMEOUT" : "REJECTED"] as const)
   );
+  const mintedByIdx = new Map<number, { count: number; tokenIds: string[]; gasBurnedWei: string }>();
 
   // One result per wallet: wallets dropped before signing stay SKIPPED.
   const results: SnipeResult[] = wallets.map((w, idx) => ({
@@ -343,6 +350,12 @@ export async function localPublicSnipe(opts: LocalSnipeOpts): Promise<SnipeResul
     for (const { idx } of prepared) {
       results[idx].txHash = acceptedByIdx.get(idx) ?? null;
       results[idx].status = statusByIdx.get(idx) ?? "REJECTED";
+      const minted = mintedByIdx.get(idx);
+      if (minted) {
+        results[idx].mintedCount = minted.count;
+        results[idx].tokenIds = minted.tokenIds;
+        results[idx].gasBurnedWei = minted.gasBurnedWei;
+      }
     }
     return results;
   };
@@ -362,10 +375,25 @@ export async function localPublicSnipe(opts: LocalSnipeOpts): Promise<SnipeResul
         console.log(chalk.yellow(`  [W${idx}] TIMEOUT — check: ${explorerTx(chainId, txHash)}`));
         return;
       }
-      statusByIdx.set(idx, receipt.status === "SUCCESS" ? "SUCCESS" : "REVERTED");
-      const color = receipt.status === "SUCCESS" ? chalk.bold.green : chalk.bold.red;
+      // A non-reverted receipt can still have minted nothing (a race the clone
+      // contracts win) or fewer tokens than requested. Count what arrived.
+      const counted = countMintedTokens(receipt, { nftContract, wallet: results[idx].address });
+      const outcome = counted.logsAvailable
+        ? verdict(receipt.status, counted.count, quantity)
+        : receipt.status === "SUCCESS"
+          ? "MINTED"
+          : "REVERTED"; // no log data: fall back to the old status-only reading
+      const status: SnipeStatus = outcome === "MINTED" ? "SUCCESS" : outcome;
+      statusByIdx.set(idx, status);
+      if (counted.logsAvailable) {
+        const gasBurnedWei = (BigInt(receipt.gasUsed) * BigInt(receipt.effectiveGasPriceWei || "0")).toString();
+        mintedByIdx.set(idx, { count: counted.count, tokenIds: counted.tokenIds, gasBurnedWei });
+      }
+      const color = status === "SUCCESS" ? chalk.bold.green : status === "PARTIAL" ? chalk.bold.yellow : chalk.bold.red;
       console.log(
-        color(`  [W${idx}] Block: ${receipt.block} | Pos: ${receipt.position} | ${receipt.status} | Gas: ${receipt.gasUsed}`)
+        color(
+          `  [W${idx}] Block: ${receipt.block} | Pos: ${receipt.position} | ${status} | minted ${counted.logsAvailable ? counted.count : "?"}/${quantity} | Gas: ${receipt.gasUsed}`
+        )
       );
       console.log(chalk.gray(`  [W${idx}] Track: ${explorerTx(chainId, txHash)}`));
     })

@@ -452,6 +452,7 @@ export async function runBatch(configPath: string, options: BatchRunOptions = {}
         : results.every((r) => r.status === "SKIPPED" || r.status === "REJECTED")
           ? "SKIPPED"
           : "REJECTED";
+      const TOKEN_ID_LIMIT = 200;
       recordEntry(ledger, cfg.chainKey, target.contract, {
         status,
         txHash: broadcast?.txHash ?? null,
@@ -459,6 +460,15 @@ export async function runBatch(configPath: string, options: BatchRunOptions = {}
         quantity: target.quantity,
         slug: target.slug,
         attempts,
+        // B1: what actually arrived, so cost basis and net stop being fiction.
+        ...(broadcast?.mintedCount !== undefined ? { mintedCount: broadcast.mintedCount } : {}),
+        ...(broadcast?.tokenIds && broadcast.tokenIds.length > 0
+          ? {
+              tokenIds: broadcast.tokenIds.slice(0, TOKEN_ID_LIMIT),
+              ...(broadcast.tokenIds.length > TOKEN_ID_LIMIT ? { tokenIdsTruncated: true } : {}),
+            }
+          : {}),
+        ...(broadcast?.gasBurnedWei ? { gasBurnedWei: broadcast.gasBurnedWei } : {}),
       });
       saveLedger(ledger, ledgerPath);
     }

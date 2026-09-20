@@ -42,6 +42,7 @@ export interface BackfillRecord {
   floorSymbol: string | null;
   floorUsd: number | null;
   lowAtomic: string | null;
+  mintedCount?: number;
   salesCount: number | null;
   uniqueBuyers: number | null;
   netUsd: number | null;
@@ -418,8 +419,10 @@ export async function runBackfill(ledger: Ledger, opts: BackfillOptions): Promis
       continue;
     }
 
-    const netUsd =
-      floorUsd !== null && costUsd !== null ? floorUsd * item.entry.quantity - costUsd : null;
+    // A PARTIAL/NO_MINT entry spent gas but holds fewer tokens (or none):
+    // value what arrived, never what was requested.
+    const mintedCount = item.entry.mintedCount ?? item.entry.quantity;
+    const netUsd = floorUsd !== null && costUsd !== null ? floorUsd * mintedCount - costUsd : null;
 
     records.push({
       at: new Date(deps.now()).toISOString(),
@@ -429,6 +432,7 @@ export async function runBackfill(ledger: Ledger, opts: BackfillOptions): Promis
       checkpointHours: item.checkpointHours,
       mintAt: item.entry.at,
       quantity: item.entry.quantity,
+      mintedCount,
       mintValueWei: receipt ? receipt.valueWei.toString() : null,
       gasCostWei: receipt ? (receipt.gasUsed * receipt.effectiveGasPrice).toString() : null,
       costWei: costWei === null ? null : costWei.toString(),

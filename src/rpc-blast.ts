@@ -127,7 +127,14 @@ export async function waitForReceipt(
   txHash: string,
   rpcUrl: string,
   timeoutMs: number = 30000
-): Promise<{ block: number; position: number; gasUsed: number; status: string } | null> {
+): Promise<{
+  block: number;
+  position: number;
+  gasUsed: number;
+  status: "SUCCESS" | "REVERTED";
+  logs: { address: string; topics: string[]; data: string }[];
+  effectiveGasPriceWei: string;
+} | null> {
   const start = Date.now();
 
   while (Date.now() - start < timeoutMs) {
@@ -152,6 +159,10 @@ export async function waitForReceipt(
           position: parseInt(receipt.transactionIndex, 16),
           gasUsed: parseInt(receipt.gasUsed, 16),
           status: receipt.status === "0x1" ? "SUCCESS" : "REVERTED",
+          // Needed to count what actually arrived (M8/B1) and to account for gas
+          // burned by burst transactions that were expected to revert.
+          logs: Array.isArray(receipt.logs) ? receipt.logs : [],
+          effectiveGasPriceWei: String(receipt.effectiveGasPrice ?? "0x0"),
         };
       }
     } catch {}

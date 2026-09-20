@@ -7,6 +7,7 @@
 ## [Unreleased]
 
 ### 新增
+- M8/B1 回执核数量：`src/receipts.ts`（ERC-721/1155 日志解析 + `logsAvailable`）、`verdict` 四态；`SUCCESS` 现在是「真的到账」，新增 `PARTIAL`/`NO_MINT` 终态（绝不重发）；账本 `mintedCount/tokenIds/gasBurnedWei`；回填按实际到账摊成本；面板执行列 `SUCCESS ×N`；`waitForReceipt` 返回 logs 与 effectiveGasPrice
 - M7/C 收藏与筛选保持：星标 → `.favorites.json`（原子写）+ `GET/POST /api/favorites` + `?format=jsonl` 分析导出；收藏写入**信号快照**（人工确认过的标注数据，日后与账本/回填关联）；tab「全部/收藏」与「已不在板面」分区；明细可改观察/准备/放弃与备注；一键导出 `targets.json`（接批量执行）与 `favorites.jsonl`；`--export-favorites` CLI；筛选/排序/tab 持久化到 URL hash（`复制筛选链接`），静态页回退 localStorage 并提示
 - M7/A2 保守估值与流动性：新增 `src/scan/valuation.ts`（买家中位数等权、lowerQuartile×0.8 折扣、`min(floor, 下四分位×0.8, topOffer)`、地板偏离标记、证据门槛 ≥3 笔/≥2 买家/近 6h）；面板流动性标签（未开售行不给地板与利润暗示）；创作者维度 `withSales` 有界加成
 - M7/A3+A4 铸造结构与聪明铸造者：`aggregateMints` 新增 `maxTxTokens`（按 `transactionHash` 归组）、`payerDiffers`、`topMinters`；新增 `src/scan/smart-minters.ts`（售罄 drop 的吃满/重复铸造地址自动进入 `.smart-minters.json`，≥2 次合格）与 `AuditResult.smartMinters`；面板加「批量痕迹」徽标（单笔 ≥10 个）+ Q 分惩罚 `batch-mint`、明细「铸造结构」行、参与维度 `smartMinters` 加成

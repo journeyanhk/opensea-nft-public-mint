@@ -617,3 +617,33 @@ test('the favorites surface: stars, tabs, snapshot, missing block and persisted 
   assert.ok(empty.includes('data-favorite="0"'));
   assert.ok(empty.includes('收藏 (0)'));
 });
+
+test('the execution column shows what the receipt proved, not just the status', () => {
+  const now = Math.floor(Date.now() / 1000);
+  const execState = {
+    version: 1,
+    chains: {},
+    contracts: {
+      arc: {
+        '0xeee': {
+          firstSeenBlock: 1, lastSeenBlock: 10, lastAuditedBlock: 10, lastAuditedAt: '2026-09-19T08:00:00.000Z',
+          lastGrade: 'A', soldOutAtBlock: null, publicStart: now - 3600, pendingAudit: false, slug: 's',
+          name: 'S', endTime: now + 86_400, maxSupply: '1000', totalMinted: '500', owner: '0xOwner',
+          socialCheckedAt: 't',
+        },
+      },
+    },
+  };
+  const execLedger = {
+    version: 1,
+    entries: {
+      arc: {
+        '0xeee': { status: 'PARTIAL', txHash: '0xdead', at: '2026-09-19T09:00:00.000Z', quantity: 2, slug: 's', attempts: 1, mintedCount: 1, tokenIds: [' 7'] },
+      },
+    },
+  };
+  const rows = loadDashboardRows(execState, [], execLedger, () => null);
+  assert.equal(rows[0].execution.mintedCount, 1);
+  const html = renderDashboard(rows, { generatedAt: 'now', sources: [] });
+  assert.ok(html.includes('执行：PARTIAL ×1'));
+});

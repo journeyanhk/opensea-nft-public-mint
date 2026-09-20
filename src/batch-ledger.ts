@@ -11,7 +11,7 @@ import { SnipeStatus } from "./local-mint";
 
 export const DEFAULT_LEDGER_PATH = path.resolve(process.cwd(), ".batch-state.json");
 
-export type LedgerStatus = SnipeStatus | "PENDING";
+export type LedgerStatus = SnipeStatus | "PARTIAL" | "NO_MINT" | "PENDING";
 
 export interface LedgerEntry {
   status: LedgerStatus;
@@ -20,6 +20,11 @@ export interface LedgerEntry {
   quantity: number;
   slug: string | null; // original config input, reused by backfill
   attempts: number; // sends that were started (PENDING writes)
+  // What the receipt proved (M8/B1). Absent on pre-B1 entries.
+  mintedCount?: number;
+  tokenIds?: string[];
+  tokenIdsTruncated?: boolean;
+  gasBurnedWei?: string;
 }
 
 export interface Ledger {
@@ -71,7 +76,12 @@ export function shouldSkipLedger(
   opts: { retryPending?: boolean; stageOpen?: boolean; maxRevertAttempts?: number } = {}
 ): boolean {
   if (!entry) return false;
-  if (entry.status === "SUCCESS" || entry.status === "TIMEOUT") return true;
+  // PARTIAL and NO_MINT touched the chain just like SUCCESS/TIMEOUT; a NO_MINT
+  // in particular must never be resent (the nonce is spent, and a retry is how
+  // people pay twice for nothing).
+  if (entry.status === "SUCCESS" || entry.status === "TIMEOUT" || entry.status === "PARTIAL" || entry.status === "NO_MINT") {
+    return true;
+  }
   if (entry.status === "REVERTED") {
     const attempts = entry.attempts ?? 0;
     return !(opts.stageOpen === true && attempts < (opts.maxRevertAttempts ?? 2));

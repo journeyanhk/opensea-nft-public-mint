@@ -87,7 +87,7 @@ export interface DashboardRow {
   lastAuditedAt: string | null;
   pendingAudit: boolean;
   soldOut: boolean;
-  execution: { status: string; txHash: string | null; at: string; quantity: number } | null;
+  execution: { status: string; txHash: string | null; at: string; quantity: number; mintedCount: number | null } | null;
   stages: { stage: number; tokens: string; minters: number }[];
   topMinterShare: number | null;
   nets: Record<string, string>; // checkpoint hours -> net in native units
@@ -260,6 +260,7 @@ export function loadDashboardRows(
             txHash: executionEntry.txHash,
             at: executionEntry.at,
             quantity: executionEntry.quantity,
+            mintedCount: executionEntry.mintedCount ?? null,
           }
         : null;
       const chainStart = entry.publicStart ?? latest?.start ?? null;
@@ -822,7 +823,9 @@ export function renderDashboard(
         row.slug ? `<span>slug：<span class="mono">${escapeHtml(row.slug)}</span></span>` : "",
         row.owner ? `<span>owner：<span class="mono">${escapeHtml(row.owner)}</span></span>` : "",
         row.execution
-          ? `<span>执行：${escapeHtml(row.execution.status)}${txUrl ? ` <a href="${escapeHtml(txUrl)}" target="_blank" rel="noreferrer">tx</a>` : ""}</span>`
+          ? `<span>执行：${escapeHtml(row.execution.status)}${
+              row.execution.mintedCount !== null ? ` ×${row.execution.mintedCount}` : ""
+            }${txUrl ? ` <a href="${escapeHtml(txUrl)}" target="_blank" rel="noreferrer">tx</a>` : ""}</span>`
           : "",
         row.nets["24"] ? `<span>24时净值：<span class="${netClass(row.nets["24"])}">${escapeHtml(row.nets["24"])}</span></span>` : "",
         row.nets["72"] ? `<span>72时净值：<span class="${netClass(row.nets["72"])}">${escapeHtml(row.nets["72"])}</span></span>` : "",
