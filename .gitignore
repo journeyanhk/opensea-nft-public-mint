@@ -43,3 +43,5 @@ keys.txt
 
 # Execution queue (local state)
 queue/
+
+.env.executor

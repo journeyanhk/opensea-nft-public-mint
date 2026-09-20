@@ -54,6 +54,7 @@ export interface BatchRunOptions {
   parallel?: boolean;
   parallelLimit?: number;
   targetSource?: TargetSource; // tests and B5 inject one; default = config + watch files
+  assumeYes?: boolean; // the executor is armed by hand, so it does not ask again
 }
 
 function readConfig(file: string): RawConfig {
@@ -412,7 +413,7 @@ export async function runBatch(configPath: string, options: BatchRunOptions = {}
     return;
   }
 
-  if (!(await askYesNo(chalk.bold(watch ? "Watch for targets and run them unattended?" : "Run this batch unattended?"), false))) {
+  if (!options.assumeYes && !(await askYesNo(chalk.bold(watch ? "Watch for targets and run them unattended?" : "Run this batch unattended?"), false))) {
     console.log(chalk.yellow("\n  Cancelled — nothing was sent.\n"));
     closePrompts();
     return;

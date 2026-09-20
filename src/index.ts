@@ -32,6 +32,7 @@ const KNOWN_FLAGS = new Set([
   "--dry-run",
   "--burst-count", "--burst-spacing-ms", "--burst-lead-ms", "--allow-overshoot", "--force-clock",
   "--parallel",
+  "--executor", "--queue-dir", "--interval-ms", "--once",
 ]);
 
 const HELP = `
@@ -56,6 +57,9 @@ Usage
                                   discover new drops on-chain, audit the candidates; incremental cursor in .scan-state.json
   npm start -- --backfill [--ledger <file>] [--backfill-after 24,72] [--backfill-file <file>]
                                   settle cost and floor-price checkpoints for minted targets; idempotent
+  npm start -- --executor [--queue-dir <dir>] [--interval-ms N] [--once] [--dry-run]
+                                  drain the execution queue written by the panel
+                                  (loads .env.executor, refuses to start without keys)
   npm start -- --batch <file> --dry-run
                                   sign and simulate every transaction, broadcast nothing (no ledger writes)
   npm start -- --export-favorites [<file.jsonl>] [--favorites <file>]
@@ -140,8 +144,12 @@ async function main(): Promise<void> {
   // Serve mode is physically separated from key material: it loads .env.serve
   // (or the process environment) and refuses to run if a private key is present.
   const serve = args.includes("--serve");
+  const executor = args.includes("--executor");
   if (serve) {
     dotenv.config({ path: process.env.SERVE_ENV_FILE ?? path.resolve(process.cwd(), ".env.serve") });
+  } else if (executor) {
+    // The executor is the only process that holds keys and drains the queue.
+    dotenv.config({ path: process.env.EXECUTOR_ENV_FILE ?? path.resolve(process.cwd(), ".env.executor") });
   } else {
     dotenv.config({ path: path.resolve(process.cwd(), ".env") });
   }
@@ -165,6 +173,19 @@ async function main(): Promise<void> {
     const batchIndex = args.indexOf("--batch");
     if (args.includes("--audit")) {
       await runAuditCommand(args);
+    } else if (args.includes("--executor")) {
+      const { runExecutor } = await import("./executor/run");
+      const value = (flag: string): string | undefined => {
+        const index = args.indexOf(flag);
+        return index >= 0 ? args[index + 1] : undefined;
+      };
+      await runExecutor({
+        queueDir: value("--queue-dir"),
+        ledgerPath: value("--ledger"),
+        intervalMs: Number(value("--interval-ms")) || undefined,
+        once: args.includes("--once"),
+        dryRun: args.includes("--dry-run"),
+      });
     } else if (args.includes("--export-favorites")) {
       const { runExportFavoritesCommand } = await import("./scan/favorites-cli");
       await runExportFavoritesCommand(args);

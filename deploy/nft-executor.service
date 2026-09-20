@@ -1,0 +1,41 @@
+# 执行器：唯一持有私钥并花钱的进程。与 nft-serve 分离，队列走本地目录，
+# 不监听任何端口（钱包互斥锁使用 127.0.0.1 的临时端口，由 OS 管理）。
+#
+# 安装：
+#   sudo cp deploy/nft-executor.service /etc/systemd/system/
+#   sudo systemctl daemon-reload && sudo systemctl enable --now nft-executor
+# 首次启动看 arm token：
+#   journalctl -u nft-executor -n 20 --no-pager | grep "arm token"
+# 把 token 填进面板「队列」页的武装输入框（12 小时后自动失效，需重启执行器重新领取）。
+
+[Unit]
+Description=NFT mint executor (queue drainer, holds keys)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=nft
+Group=nft
+WorkingDirectory=/home/nft/opensea-nft-public-mint
+# 只允许这一个单元看到私钥
+EnvironmentFile=/home/nft/opensea-nft-public-mint/.env.executor
+ExecStart=/usr/bin/node /home/nft/opensea-nft-public-mint/dist/index.js --executor
+Restart=always
+RestartSec=5
+# 日志不要泄漏 arm token/私钥：journald 只有本机可读，仍避免调试输出
+StandardOutput=journal
+StandardError=journal
+
+# 加固：与 nft-serve 同级，但不暴露任何端口
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=read-only
+ReadWritePaths=/home/nft/opensea-nft-public-mint
+ProtectKernelTunables=true
+ProtectControlGroups=true
+RestrictSUIDSGID=true
+
+[Install]
+WantedBy=multi-user.target

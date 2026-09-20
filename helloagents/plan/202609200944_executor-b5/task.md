@@ -14,8 +14,8 @@
 - [√] 2.3 `tests/serve.cjs` 队列端点用例（入队/非法链 400/列表不武装/错误 token 403/正确 token 200/取消）
 
 ## 3. 执行器
-- [ ] 3.1 CLI `--executor`（`.env.executor`、必须有私钥的断言）
-- [ ] 3.2 循环：reclaim → claim → 构造配置 → 复用管线（三道门/burst/账本）→ 写回
+- [√] 3.1 CLI `--executor`（`.env.executor`/`EXECUTOR_ENV_FILE`、必须有私钥的反向断言）+ `.env.executor.example` + `deploy/nft-executor.service`
+- [√] 3.2 循环：reclaim → arm 检查 → claim → `jobToRawConfig` + `TargetSource` → 复用 runBatch（含三道门/burst/账本）→ 结果**从账本派生**写回；`--once`/`--interval-ms`/心跳文件；`--dry-run` 只读预演不消费任务
 - [ ] 3.3 与 CLI 的互斥锁；`deploy/nft-executor.service`
 - [ ] 3.4 `tests/executor.cjs`
 

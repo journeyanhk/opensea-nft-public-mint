@@ -147,6 +147,19 @@ export function enqueueJob(dir: string, input: JobInput, nowMs: number): { ok: t
   return { ok: true, job };
 }
 
+// Read-only peek for a rehearsal: what would be claimed right now, without
+// touching the queue.
+export function nextEligible(dir: string, opts: { nowMs: number; claimWindowMs?: number }): QueueJob | null {
+  const window = opts.claimWindowMs ?? 2 * 3_600_000;
+  return (
+    jobList(dir)
+      .map(readJson)
+      .filter((job): job is QueueJob => job !== null && job.status === "queued" && !job.cancelRequested)
+      .filter((job) => job.startAtMs === null || job.startAtMs - opts.nowMs <= window)
+      .sort((a, b) => a.createdAt.localeCompare(b.createdAt))[0] ?? null
+  );
+}
+
 // Claiming is a rename: the OS guarantees exactly one process wins it.
 export function claimNext(
   dir: string,
