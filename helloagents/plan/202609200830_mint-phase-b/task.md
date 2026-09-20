@@ -50,6 +50,13 @@
 - [√] `--parallel` 并发执行（目标循环抽取为 `executeJob`，串并行共用；并发上限默认 = 钱包数）
 - [√] `TargetSource` 接口（`src/target-source.ts` + 3 用例；runner 经接口读取，B5 队列直接新增实现）
 
+## review16 修复（B4 接线，同日）
+
+- [√] runner 传入 `beforeSend`（`acquireLanes`：整组获取/半拿回滚/重试/续租/释放 + 晚发告警 + 开售结束拒绝）
+- [√] `local-mint` 拿到通道后重读 nonce、按需重签并重跑门 2
+- [√] `TargetJob.advance` 接入任务日志（prepare/lane/receipt/done|failed）
+- [√] 并行日志措辞、钱包锁占用提示；新增两条串行化用例（共 169 用例）
+
 ## 5. 收尾
 - [ ] 5.1 全量测试 + `--dry-run` 真链演练记录
 - [√] 5.2 README（新 flag/语义）、wiki（batch/ledger/backfill）、CHANGELOG

@@ -3,7 +3,7 @@ const assert = require('node:assert/strict');
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
-const { LaneCoordinator, planReservation, orderJobs } = require('../dist/batch-coordinator');
+const { LaneCoordinator, planReservation, orderJobs, acquireLanes } = require('../dist/batch-coordinator');
 const { acquireWalletLock } = require('../dist/wallet-lock');
 
 const W1 = '0x65f001aa4109bb8d3bf70af66855aba1e5582625';
@@ -145,4 +145,65 @@ test('the wallet mutex survives an unrelated port occupant and reports a live ho
   } finally {
     await new Promise((resolve) => squatter.close(resolve));
   }
+});
+
+test('acquireLanes releases half-grabbed wallets and only returns once every lane is free', async () => {
+  const coordinator = new LaneCoordinator();
+  coordinator.acquire({ jobId: 'first', wallet: W1, nowMs: 0, leaseMs: 600_000 });
+  const sleepers = [];
+  let now = 0;
+  const promise = acquireLanes({
+    coordinator,
+    jobId: 'second',
+    wallets: [W1, W2],
+    now: () => now,
+    sleep: (ms) => new Promise((resolve) => sleepers.push(() => { now += ms; resolve(); })),
+    startRenewals: false,
+    retryMs: 250,
+  });
+  await Promise.resolve();
+  await Promise.resolve();
+  await Promise.resolve();
+  assert.equal(coordinator.snapshot().find((lane) => lane.wallet === W2).owner, null, 'the half-grabbed lane is released while waiting');
+  assert.equal(sleepers.length, 1, 'it is waiting to retry');
+
+  coordinator.release(W1, 'first');
+  sleepers.shift()();
+  const lease = await promise;
+  assert.equal(coordinator.snapshot().find((lane) => lane.wallet === W1).owner, 'second');
+  assert.equal(coordinator.snapshot().find((lane) => lane.wallet === W2).owner, 'second');
+  assert.ok(lease.waitedMs >= 250);
+
+  lease.release();
+  assert.equal(coordinator.snapshot().find((lane) => lane.wallet === W1).owner, null);
+  assert.equal(coordinator.snapshot().find((lane) => lane.wallet === W2).owner, null);
+});
+
+test('two jobs sharing a wallet are serialised: the second waits for the first release', async () => {
+  const coordinator = new LaneCoordinator();
+  const first = await acquireLanes({ coordinator, jobId: 'job-a', wallets: [W1], startRenewals: false });
+  const sleepers = [];
+  let now = 0;
+  let resolved = false;
+  const secondPromise = acquireLanes({
+    coordinator,
+    jobId: 'job-b',
+    wallets: [W1],
+    now: () => now,
+    sleep: (ms) => new Promise((resolve) => sleepers.push(() => { now += ms; resolve(); })),
+    startRenewals: false,
+    retryMs: 250,
+  }).then((lease) => { resolved = true; return lease; });
+
+  await Promise.resolve(); await Promise.resolve(); await Promise.resolve();
+  assert.equal(sleepers.length, 1, 'the second job is waiting, not sending');
+  await Promise.resolve();
+  assert.equal(resolved, false, 'it must not proceed while the first holds the lane');
+
+  first.release();
+  sleepers.shift()();
+  const second = await secondPromise;
+  assert.ok(second.waitedMs >= 250, 'the wait is reported');
+  assert.equal(coordinator.snapshot().find((lane) => lane.wallet === W1).owner, 'job-b');
+  second.release();
 });

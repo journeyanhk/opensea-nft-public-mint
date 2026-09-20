@@ -157,6 +157,73 @@ export interface ScheduledJob {
   priority?: number;
 }
 
+export interface LaneLease {
+  release: () => void;
+  waitedMs: number;
+}
+
+// Take every wallet this job needs, or none of them: a half-held set would let
+// another job start preparing against a wallet we are about to use. On failure
+// the lanes grabbed in that round are handed back and we retry, so two jobs
+// sharing a wallet are serialised exactly where it matters (the send), while
+// their preparation overlaps.
+export async function acquireLanes(input: {
+  coordinator: LaneCoordinator;
+  jobId: string;
+  wallets: string[];
+  now?: () => number;
+  sleep?: (ms: number) => Promise<void>;
+  leaseMs?: number;
+  renewEveryMs?: number;
+  retryMs?: number;
+  startRenewals?: boolean;
+  onWait?: (waiting: string[], waitedMs: number) => void;
+}): Promise<LaneLease> {
+  const now = input.now ?? (() => Date.now());
+  const sleep = input.sleep ?? ((ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms)));
+  const retryMs = input.retryMs ?? 250;
+  const leaseMs = input.leaseMs ?? 60_000;
+  const startedAt = now();
+
+  for (;;) {
+    // Recover any lane whose owner stopped renewing before deciding we are blocked.
+    input.coordinator.expire(now());
+    const grabbed: string[] = [];
+    let waiting: string[] = [];
+    for (const wallet of input.wallets) {
+      const result = input.coordinator.acquire({ jobId: input.jobId, wallet, nowMs: now(), leaseMs });
+      if (result.ok) grabbed.push(wallet);
+      else waiting.push(wallet);
+    }
+    if (waiting.length === 0) {
+      const renewEvery = input.renewEveryMs ?? 10_000;
+      const timer =
+        input.startRenewals === false
+          ? null
+          : setInterval(() => {
+              for (const wallet of input.wallets) {
+                input.coordinator.renew({ wallet, jobId: input.jobId, nowMs: now(), leaseMs });
+              }
+            }, renewEvery);
+      // A lease timer must never keep the process alive on its own.
+      (timer as NodeJS.Timeout | null)?.unref?.();
+      let released = false;
+      return {
+        waitedMs: now() - startedAt,
+        release: () => {
+          if (released) return;
+          released = true;
+          if (timer) clearInterval(timer);
+          for (const wallet of input.wallets) input.coordinator.release(wallet, input.jobId);
+        },
+      };
+    }
+    for (const wallet of grabbed) input.coordinator.release(wallet, input.jobId);
+    input.onWait?.(waiting, now() - startedAt);
+    await sleep(retryMs);
+  }
+}
+
 // Ordering is by start time; priority only breaks ties (two targets opening at
 // the same moment). A conflict is two jobs sharing a wallet within the window —
 // the runner warns about those because the second one will have to wait.

@@ -68,7 +68,7 @@
 - 看板：新增 `24h net / 72h net` 两列（读取 `.backfill.jsonl`，`--backfill-file` 可覆盖）、每 5 分钟自动刷新
 
 ### 修复
-- review15（B4 首增量）：① 通道租约加 `renew`（等待回执期间续租，`expire` 只回收崩溃）；② 预留改为按任务累计（`reserve/unreserve/reservedTotal`，可带上限与缺口差额，`--watch` 合并不再覆盖）；③ 钱包锁 `EADDRINUSE` 时区分「无关服务占用」（顺延端口）与「另一实例持锁」（按 pid 报占用）；④ burst nonce 空洞自动补洞（同 nonce 0 值自转账，成功即清除标记）；⑤ `local-mint` 新增 `beforeSend` 钩子（准备不占通道、发送才占）与批量启动时的进程级钱包锁
+- review16（B4 关键接线缺失）：`--parallel` 此前从未传 `beforeSend`，通道协调器在 runner 里零调用，并行时两个共享钱包的任务会读到同一个 pending nonce 各自广播。现已：① runner 在 `localPublicSnipe` 调用中传入 `beforeSend`（`acquireLanes` 整组获取/半拿回滚/失败重试 + 10s 续租 + 释放；等待超时打印晚发毫秒；开售已结束则拒绝发送）；② `local-mint` 在拿到通道后**重读 nonce 并按需重签 + 重跑门 2**；③ `TargetJob` 状态机接入日志（prepare/lane/receipt/done|failed）；④ 并行日志改为诚实措辞（发送按钱包串行），钱包锁占用提示写明「另一个 batch 或执行器正在使用该钱包」- review15（B4 首增量）：① 通道租约加 `renew`（等待回执期间续租，`expire` 只回收崩溃）；② 预留改为按任务累计（`reserve/unreserve/reservedTotal`，可带上限与缺口差额，`--watch` 合并不再覆盖）；③ 钱包锁 `EADDRINUSE` 时区分「无关服务占用」（顺延端口）与「另一实例持锁」（按 pid 报占用）；④ burst nonce 空洞自动补洞（同 nonce 0 值自转账，成功即清除标记）；⑤ `local-mint` 新增 `beforeSend` 钩子（准备不占通道、发送才占）与批量启动时的进程级钱包锁
 - review14（B3）：① `calibrateLead` 改为**观测秒跳变**估时钟偏差（原公式用秒级截断的时间戳，天然 +0–1000ms 正偏，约一半概率把 burst 随机降级；现精度约 ±100ms，观测不到时标 unknown 且不拒绝）；② `--allow-overshoot` 且付费时余额预留计入 `value × count`（原先只乘 gas，付费项目会超支）；③ burst 检测最低 nonce 空洞并打印 **nonce gap** 警告、写入账本 `nonceGap`
 - dry-run 会写 PENDING 账本（`batch-runner.ts` 的 PENDING 与 audit-SKIPPED 两处未受保护），导致下一次真实运行报「already handled per the ledger」而拒绝发送：三处写入统一收敛到 `shouldWriteLedger(useLedger, dryRun)`，并加源码不变式测试（recordEntry 数量必须等于守卫数量）；受影响的运行用 `--retry-pending` 恢复
 - Gate 1 未钉 codeHash 时打印 `· Gate 1 skipped`（原为静默跳过，容易被误读成"通过"）；README 补充取值与三条门的日志判读

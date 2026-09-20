@@ -20,7 +20,8 @@ import { planRpcs, resolveRpcsForChain } from "./rpc-resolver";
 import { localPublicSnipe, SnipeResult } from "./local-mint";
 import { burstGate, calibrateLead } from "./burst";
 import { acquireWalletLock, WalletLock } from "./wallet-lock";
-import { LaneCoordinator, orderJobs, planReservation } from "./batch-coordinator";
+import { acquireLanes, LaneCoordinator, orderJobs, planReservation } from "./batch-coordinator";
+import { advance, createJobs, JobEvent } from "./target-job";
 import { auditTarget } from "./audit/audit";
 import { waitForMintTime } from "./timer";
 import { toUtc8Time } from "./time-format";
@@ -469,6 +470,16 @@ export async function runBatch(configPath: string, options: BatchRunOptions = {}
   // The per-target flow (audit wait, burst gate, prepare, send, receipts, ledger)
   // lives in one job function so both modes run exactly the same code.
   const executeJob = async (target: BatchTarget): Promise<void> => {
+    // One job = one target; the state machine is the same one the executor will
+    // drive in B5, so the log lines already speak its language.
+    const job = createJobs(
+      [{ id: keyOf(target), contract: target.contract, startMs: target.startAt.getTime(), wallets: wallets.map((w) => w.address) }],
+      Date.now()
+    )[0];
+    const setState = (event: JobEvent): void => {
+      if (advance(job, event)) console.log(chalk.gray(`  job ${job.id.slice(0, 12)} → ${job.state}`));
+    };
+    setState("prepare");
 
       if (target.plan.drop.endTime * 1000 <= Date.now()) {
         console.log(chalk.yellow(`\n━━━ ${target.label} — public stage already ended, skipping ━━━`));
@@ -573,6 +584,28 @@ export async function runBatch(configPath: string, options: BatchRunOptions = {}
           expectedCodeHash: target.codeHash,
           dryRun: cfg.dryRun,
           burst: burstForTarget,
+          // B4: preparation overlaps, the send does not. The lane is taken after
+          // the gates and before the wait, so a second job sharing this wallet
+          // waits here instead of signing the same nonce.
+          beforeSend: async () => {
+            const lease = await acquireLanes({
+              coordinator,
+              jobId: job.id,
+              wallets: wallets.map((wallet) => wallet.address),
+              onWait: (waiting, waitedMs) =>
+                console.log(chalk.gray(`  waiting for the wallet lane (${Math.round(waitedMs)}ms): ${waiting.length} wallet(s) busy`)),
+            });
+            const lateMs = Date.now() - target.startAt.getTime();
+            if (target.startAt.getTime() > 0 && lateMs > 0) {
+              console.log(chalk.bold.yellow(`  ⚠ lane busy: firing ${Math.round(lateMs)}ms after the open`));
+            }
+            if (target.plan.drop.endTime * 1000 <= Date.now()) {
+              lease.release();
+              throw new Error("the stage ended while waiting for the wallet lane");
+            }
+            setState("lane");
+            return () => lease.release();
+          },
         });
       } catch (err) {
         console.log(chalk.bold.red(`  ✗ ${target.label} failed: ${(err as Error).message}`));
@@ -583,8 +616,9 @@ export async function runBatch(configPath: string, options: BatchRunOptions = {}
 
       summary.push({ label: target.label, results });
 
+      setState("receipt");
       if (shouldWriteLedger(useLedger, cfg.dryRun)) {
-        const broadcast = results.find((r) => r.txHash !== null);
+      const broadcast = results.find((r) => r.txHash !== null);
         const status = broadcast
           ? broadcast.status
           : results.every((r) => r.status === "SKIPPED" || r.status === "REJECTED")
@@ -613,6 +647,8 @@ export async function runBatch(configPath: string, options: BatchRunOptions = {}
         saveLedger(ledger, ledgerPath);
       }
 
+      if (!results.some((r) => r.status === "SUCCESS")) setState("fail");
+      else setState("done");
       if (cfg.onFailure === "stop" && !results.some((r) => r.status === "SUCCESS")) {
         console.log(chalk.bold.yellow(`\n  onFailure=stop — no success on ${target.label}, ending the batch here.`));
         stop = true;
@@ -622,7 +658,11 @@ export async function runBatch(configPath: string, options: BatchRunOptions = {}
   const pending = new Set<Promise<void>>();
   const parallelLimit = cfg.parallel ? Math.max(1, cfg.parallelLimit ?? wallets.length) : 1;
   if (cfg.parallel) {
-    console.log(chalk.gray(`  parallel: up to ${parallelLimit} job(s) at once (${wallets.length} wallet(s))`));
+    console.log(
+      chalk.gray(
+        `  parallel: up to ${parallelLimit} job(s) preparing at once; sends serialise per wallet (${wallets.length} shared wallet(s))`
+      )
+    );
   }
   while (!stop || pending.size > 0) {
     if (queue.length === 0) {

@@ -343,8 +343,15 @@ export async function localPublicSnipe(opts: LocalSnipeOpts): Promise<SnipeResul
   const burstShots = new Map<number, PreparedBlast[]>();
   const gateErrors: string[] = [];
 
-  for (const [i, { idx, wallet }] of active.entries()) {
-    const shotNonces = burst ? planBurst(nonces[i], burst.count) : [nonces[i]];
+  // Signs every shot for one wallet from a given base nonce and re-proves the
+  // result with gate 2. Called once before the lane is held and again afterwards
+  // if another job spent a nonce in the meantime.
+  const signShots = async (
+    wallet: Wallet,
+    idx: number,
+    baseNonce: number
+  ): Promise<PreparedBlast[] | null> => {
+    const shotNonces = burst ? planBurst(baseNonce, burst.count) : [baseNonce];
     const walletsShots: PreparedBlast[] = [];
 
     for (const [shotIndex, shotNonce] of shotNonces.entries()) {
@@ -386,7 +393,13 @@ export async function localPublicSnipe(opts: LocalSnipeOpts): Promise<SnipeResul
       walletsShots.push(prepareBlast(rawTx));
     }
 
-    if (walletsShots.length === 0) continue;
+    if (walletsShots.length === 0) return null;
+    return walletsShots;
+  };
+
+  for (const [i, { idx, wallet }] of active.entries()) {
+    const walletsShots = await signShots(wallet, idx, nonces[i]);
+    if (!walletsShots) continue;
     prepared.push({ idx, address: wallet.address, blast: walletsShots[0] });
     if (burst && burst.count > 1) burstShots.set(idx, walletsShots);
   }
@@ -410,6 +423,34 @@ export async function localPublicSnipe(opts: LocalSnipeOpts): Promise<SnipeResul
   } catch (err) {
     console.log(chalk.bold.red(`  ✗ Could not take the wallet lane: ${(err as Error).message}`));
     return skipped();
+  }
+
+  // The lane is ours now, so no other job can be spending from these wallets.
+  // Re-read the pending nonce: the one read before the lane may have been spent
+  // while we waited, and signing the same nonce twice is what a parallel run
+  // must never do.
+  if (opts.beforeSend) {
+    const freshNonces = await Promise.all(
+      active.map(({ wallet }) => provider.getTransactionCount(wallet.address, "pending"))
+    );
+    for (const [i, { idx, wallet }] of active.entries()) {
+      if (freshNonces[i] === nonces[i]) continue;
+      console.log(
+        chalk.bold.yellow(`  ⚠ [W${idx}] nonce moved ${nonces[i]} → ${freshNonces[i]} while waiting for the lane — re-signing.`)
+      );
+      const shots = await signShots(wallet, idx, freshNonces[i]);
+      nonces[i] = freshNonces[i];
+      if (!shots) continue;
+      const slot = prepared.find((entry) => entry.idx === idx);
+      if (slot) slot.blast = shots[0];
+      if (burst && burst.count > 1) burstShots.set(idx, shots);
+    }
+    if (gateErrors.length > 0) {
+      releaseLane?.();
+      console.log(chalk.bold.red("\n  ✗ Gate 2 failed after re-signing — refusing to broadcast anything."));
+      for (const error of gateErrors) console.log(chalk.red(`      ${error}`));
+      return skipped();
+    }
   }
 
   if (opts.dryRun) {
