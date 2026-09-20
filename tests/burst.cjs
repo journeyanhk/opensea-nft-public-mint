@@ -60,36 +60,61 @@ test('aggregateBurst keeps the shot that landed and accounts for every bit of ga
   assert.equal(allReverted.status, 'REVERTED');
 });
 
-test('calibrateLead measures RTT and clock skew from the latest block', async () => {
-  // 200ms past a second boundary keeps the second-granular block timestamp
-  // honest: the truncation error stays inside the range we assert.
-  const now = 1_758_000_000_200;
+test('calibrateLead observes a second boundary instead of trusting a truncated timestamp', async () => {
+  // A fake chain: the block timestamp steps by one second when the local clock
+  // crosses a boundary, the local clock is 120ms behind it, and blocks arrive
+  // every 100ms. The old formula (now - ts*1000) would read +900ms here.
+  const skewMs = 120;
+  const blockIntervalMs = 100;
+  let localNow = 1_758_000_000_000;
+  const sleep = async (ms) => {
+    localNow += ms;
+  };
+  const fetchFn = async (_url, init) => {
+    const body = JSON.parse(String(init.body));
+    if (body.method === "eth_blockNumber") {
+      return { ok: true, json: async () => ({ result: "0x" + Math.floor(localNow / blockIntervalMs).toString(16) }) };
+    }
+    const ts = Math.floor((localNow - skewMs) / 1000);
+    return { ok: true, json: async () => ({ result: { number: "0x1", timestamp: String(ts) } }) };
+  };
+
   const calibrated = await calibrateLead({
     rpcUrls: ['https://rpc.example'],
-    now: () => now,
-    rounds: 3,
-    measureRtt: async () => 50,
-    fetchFn: async () => ({
-      ok: true,
-      json: async () => ({ result: { number: '0x1', timestamp: String(Math.floor((now - 120) / 1000)) } }),
-    }),
+    now: () => localNow,
+    sleep,
+    fetchFn,
+    measureRtt: async () => 60,
+    timeoutMs: 3000,
   });
-  assert.equal(calibrated.rttMs, 50);
-  // Block timestamps are second-granular, so the skew estimate is 120ms plus
-  // the truncation error; the invariant that matters is the lead formula.
-  assert.ok(calibrated.clockSkewMs >= 120 && calibrated.clockSkewMs < 1120, `skew ${calibrated.clockSkewMs}`);
-  assert.equal(calibrated.leadMs, 50 + Math.max(0, calibrated.clockSkewMs) + 50, 'rtt + skew + margin');
+  assert.equal(calibrated.rttMs, 60);
+  assert.ok(calibrated.clockSkewMs !== null, 'the boundary was observed');
+  assert.ok(
+    Math.abs(calibrated.clockSkewMs - skewMs) <= 150,
+    `skew ${calibrated.clockSkewMs} should be within 150ms of ${skewMs}`
+  );
   assert.equal(calibrated.suspectClock, false);
+  assert.equal(calibrated.leadMs, 60 + Math.max(0, calibrated.clockSkewMs) + 50, 'rtt + skew + margin');
 
-  const skewed = await calibrateLead({
+  // No boundary observed (a slow or stuck RPC): skew is unknown, and the gate
+  // must not randomly disable the burst because of an unmeasurable clock.
+  const blind = await calibrateLead({
     rpcUrls: ['https://rpc.example'],
-    now: () => now,
-    rounds: 1,
+    now: () => localNow,
+    sleep,
+    fetchFn: async (_url, init) => {
+      const body = JSON.parse(String(init.body));
+      if (body.method === "eth_blockNumber") return { ok: true, json: async () => ({ result: "0x1" }) };
+      return { ok: true, json: async () => ({ result: { number: "0x1", timestamp: "1758000000" } }) };
+    },
     measureRtt: async () => 40,
-    fetchFn: async () => ({
-      ok: true,
-      json: async () => ({ result: { number: '0x1', timestamp: String(Math.floor((now - 900) / 1000)) } }),
-    }),
+    timeoutMs: 500,
   });
-  assert.equal(skewed.suspectClock, true, 'a 900ms skew is not trustworthy');
+  assert.equal(blind.clockSkewMs, null);
+  assert.equal(blind.suspectClock, false);
+  assert.equal(blind.leadMs, 40 + 50, 'rtt + margin only');
+
+  const gate = burstGate({ count: 3, capPerWallet: 1, allowOvershoot: false, clockSkewMs: blind.clockSkewMs, leadMs: blind.leadMs });
+  assert.equal(gate.allowed, true, 'an unknown clock is not a reason to refuse');
+  assert.match(gate.reason, /unknown/i);
 });

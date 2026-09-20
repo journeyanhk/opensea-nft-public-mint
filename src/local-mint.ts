@@ -54,6 +54,7 @@ export interface SnipeResult {
   tokenIds?: string[];
   gasBurnedWei?: string;
   txHashes?: string[]; // every shot of a burst, for the ledger
+  nonceGap?: boolean; // a burst left a hole in the nonce sequence
 }
 
 // A postponed start is adopted at most this many times before we stop re-waiting.
@@ -484,6 +485,20 @@ export async function localPublicSnipe(opts: LocalSnipeOpts): Promise<SnipeResul
         result.tokenIds = aggregate.tokenIds;
         result.gasBurnedWei = aggregate.gasBurnedWei;
         result.txHashes = aggregate.txHashes;
+        // A hole in the nonce sequence: the lowest shot never produced a
+        // receipt while a later one did. Reverts spend the nonce, so this can
+        // only come from a transport-level rejection — and it will stall the
+        // next target that reads a pending nonce. Say it loudly.
+        const lowest = accepted[0];
+        const lowestSettled = lowest ? shots.some((shot) => shot.txHash === lowest.txHash && shot.status !== "TIMEOUT") : true;
+        if (accepted.length > 1 && !lowestSettled) {
+          result.nonceGap = true;
+          console.log(
+            chalk.bold.yellow(
+              `  ⚠ [W${wave.idx}] nonce gap: ${lowest?.txHash} (lowest nonce) has no receipt while a later shot landed — replace that nonce before the next run or it may stall.`
+            )
+          );
+        }
         const color = aggregate.mintedCount > 0 ? chalk.bold.green : chalk.bold.red;
         console.log(
           color(

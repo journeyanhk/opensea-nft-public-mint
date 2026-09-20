@@ -35,6 +35,7 @@
 - `runBatch(configPath)` → Promise<void>：完整批量编排
 
 ## burst（M8/B3）
+- `calibrateLead` 的时钟偏差**必须**用秒跳变观测（直接 `now − ts×1000` 会因秒级截断产生 0–1000ms 假偏差，约一半概率误触发 500ms 阈值）；观测不到时 `clockSkewMs = null` 且 `burstGate` 放行并标注 unknown
 - `src/burst.ts`：`planBurst(baseNonce,count)`、`burstGate({count,capPerWallet,allowOvershoot,clockSkewMs,leadMs,forceClock})`、`aggregateBurst(shots)`（取落地的 shot、gas 全量求和）、`calibrateLead`（p50 RTT + 时钟偏差 + 余量，可注入 measureRtt/fetchFn/now）
 - `batch-config.burst = { count, spacingMs, leadMs, allowOvershoot, forceClock }`（`parseBurst` 夹取范围：count 1..5、spacing 50..1000、lead ≥50 或 auto）
 - `batch-runner`：批量开始时校准一次并打印 `lead/rtt/skew`；每个目标用 `burstGate` 决策（不通过则降级为单发并告警，不是拒绝执行）；余额预检按 `count × gasLimit × maxFee` 预留

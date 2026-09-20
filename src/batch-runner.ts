@@ -175,9 +175,9 @@ export async function runBatch(configPath: string, options: BatchRunOptions = {}
     burstLead = await calibrateLead({ rpcUrls: cfg.rpcUrls });
     console.log(
       chalk.gray(
-        `  burst: lead ${burstLead.leadMs}ms (rtt ${burstLead.rttMs}ms, clock skew ${burstLead.clockSkewMs}ms)${
-          burstLead.suspectClock ? " — clock looks wrong" : ""
-        }`
+        `  burst: lead ${burstLead.leadMs}ms (rtt ${burstLead.rttMs}ms, clock skew ${
+          burstLead.clockSkewMs === null ? "unknown" : `${burstLead.clockSkewMs}ms`
+        })${burstLead.suspectClock ? " — clock looks wrong" : ""}`
       )
     );
   }
@@ -273,8 +273,11 @@ export async function runBatch(configPath: string, options: BatchRunOptions = {}
   if (ledgerCount > 0) console.log(chalk.gray(`  ${ledgerCount} target(s) already handled per the ledger`));
 
   // ── 5. Balance precheck (only for what can actually run) ──────────────
+  // With overshoot allowed, up to k shots can land and each one pays value —
+  // free drops are unaffected (value 0), paid ones would otherwise overdraw.
+  const valueMultiplier = cfg.burst.count > 1 && cfg.burst.allowOvershoot ? BigInt(cfg.burst.count) : 1n;
   const requiredPerWallet = actionable.reduce(
-    (sum, t) => sum + t.plan.value + gasReservePerTarget * BigInt(burstShots),
+    (sum, t) => sum + t.plan.value * valueMultiplier + gasReservePerTarget * BigInt(burstShots),
     0n
   );
 
@@ -540,6 +543,7 @@ export async function runBatch(configPath: string, options: BatchRunOptions = {}
           : {}),
         ...(broadcast?.gasBurnedWei ? { gasBurnedWei: broadcast.gasBurnedWei } : {}),
         ...(broadcast?.txHashes && broadcast.txHashes.length > 1 ? { txHashes: broadcast.txHashes } : {}),
+        ...(broadcast?.nonceGap ? { nonceGap: true } : {}),
       });
       saveLedger(ledger, ledgerPath);
     }

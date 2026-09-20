@@ -25,6 +25,12 @@
 - [√] 3.4 清理 `timer.ts` 死参数（`earlyFireMs` → `leadMs`）
 - [√] 3.5 `tests/burst.cjs`
 
+## review14 修复（B3，同日）
+
+- [√] `calibrateLead` 秒跳变观测（±100ms）+ `clockSkewMs: null` 语义（unknown 不拒绝）
+- [√] overshoot 预算 `value × count`
+- [√] nonce gap 检测/告警/入账
+
 ## 4. B4 协调器
 - [ ] 4.1 `src/batch-coordinator.ts`：通道分配/释放、预算预留、冲突排序
 - [ ] 4.2 跨进程钱包锁（OS 端口互斥 + pid + token）

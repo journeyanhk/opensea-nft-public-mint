@@ -64,6 +64,7 @@
 - 看板：新增 `24h net / 72h net` 两列（读取 `.backfill.jsonl`，`--backfill-file` 可覆盖）、每 5 分钟自动刷新
 
 ### 修复
+- review14（B3）：① `calibrateLead` 改为**观测秒跳变**估时钟偏差（原公式用秒级截断的时间戳，天然 +0–1000ms 正偏，约一半概率把 burst 随机降级；现精度约 ±100ms，观测不到时标 unknown 且不拒绝）；② `--allow-overshoot` 且付费时余额预留计入 `value × count`（原先只乘 gas，付费项目会超支）；③ burst 检测最低 nonce 空洞并打印 **nonce gap** 警告、写入账本 `nonceGap`
 - dry-run 会写 PENDING 账本（`batch-runner.ts` 的 PENDING 与 audit-SKIPPED 两处未受保护），导致下一次真实运行报「already handled per the ledger」而拒绝发送：三处写入统一收敛到 `shouldWriteLedger(useLedger, dryRun)`，并加源码不变式测试（recordEntry 数量必须等于守卫数量）；受影响的运行用 `--retry-pending` 恢复
 - Gate 1 未钉 codeHash 时打印 `· Gate 1 skipped`（原为静默跳过，容易被误读成"通过"）；README 补充取值与三条门的日志判读
 - review13（B1/B2 部署前）：① Gate 3 改为开售后才跑且并行（开售前只会 NotActive，串行会挤掉 T-0 预算），`refreshBeforeMs` 默认 3s→5s；② SeaDrop revert 改按**选择器**解码（文本匹配永不命中自定义错误；`NotActive` 同时支持 `()` 与 `(uint256,uint256,uint256)` 两种元数）；③ `--dry-run` 下余额不足降级为警告；④ `POST /api/favorites` 增加链白名单、地址正则、note/slug 长度与 snapshot 体积校验
