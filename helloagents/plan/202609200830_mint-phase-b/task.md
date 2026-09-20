@@ -32,8 +32,8 @@
 - [√] nonce gap 检测/告警/入账
 
 ## 4. B4 协调器
-- [ ] 4.1 `src/batch-coordinator.ts`：通道分配/释放、预算预留、冲突排序
-- [ ] 4.2 跨进程钱包锁（OS 端口互斥 + pid + token）
+- [√] 4.1 `src/batch-coordinator.ts`：`LaneCoordinator`（独占租约/仅持有者释放/过期自动回收）、`planReservation`（gas×发数，overshoot 时 value×发数）、`orderJobs`（按开售排序 + 5s 窗口同钱包冲突）
+- [√] 4.2 `src/wallet-lock.ts`：OS 端口互斥（进程死即释放）+ pid/token 文件（只认 ESRCH 才回收旧锁）
 - [ ] 4.3 `--parallel` 接线（默认串行不变）
 - [ ] 4.4 `tests/coordinator.cjs`
 

@@ -7,6 +7,7 @@
 ## [Unreleased]
 
 ### 新增
+- M8/B4（第一增量）协调器内核：`src/batch-coordinator.ts`（钱包通道独占/租约/过期回收、最坏预算 `planReservation`、`orderJobs` 排序与同钱包冲突窗口）与 `src/wallet-lock.ts`（跨进程钱包锁：OS 端口互斥 + pid/token 文件，只认 ESRCH 回收）
 - M8/B3 burst：`src/burst.ts`（nonce 计划/门控/结果聚合/提前量校准）+ `local-mint` 连发路径（T-lead 首发、spacing 连发、逐钱包聚合、gas 全量入账）+ `batch-config.burst` 与 CLI `--burst-count/--burst-spacing-ms/--burst-lead-ms/--allow-overshoot/--force-clock`；账本新增 `txHashes`
 - M8/B2 执行三道门 + dry-run：`src/gates.ts`（签名复核/calldata 解码/模拟分类/codeHash）、审计记录合约字节码哈希并经 `--export` 落 targets.json、`local-mint` 在签名前后 fail-closed 检查、`--dry-run` 全流程演练不广播不写账本
 - M8/B1 回执核数量：`src/receipts.ts`（ERC-721/1155 日志解析 + `logsAvailable`）、`verdict` 四态；`SUCCESS` 现在是「真的到账」，新增 `PARTIAL`/`NO_MINT` 终态（绝不重发）；账本 `mintedCount/tokenIds/gasBurnedWei`；回填按实际到账摊成本；面板执行列 `SUCCESS ×N`；`waitForReceipt` 返回 logs 与 effectiveGasPrice
