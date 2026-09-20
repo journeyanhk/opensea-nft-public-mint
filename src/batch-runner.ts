@@ -49,6 +49,8 @@ export interface BatchRunOptions {
   maxPolls?: number; // stop polling after N cycles (tests); 0/undefined = unlimited
   dryRun?: boolean; // --dry-run forces it on; a config file may set it itself
   burst?: Partial<{ count: number; spacingMs: number; leadMs: number | "auto"; allowOvershoot: boolean; forceClock: boolean }>;
+  parallel?: boolean;
+  parallelLimit?: number;
 }
 
 function readConfig(file: string): RawConfig {
@@ -139,6 +141,7 @@ export async function runBatch(configPath: string, options: BatchRunOptions = {}
   let cfg = await loadBatchConfig(raw, chain, rpcUrls, { allowEmpty: watch });
   if (options.dryRun) cfg = { ...cfg, dryRun: true };
   if (options.burst) cfg = { ...cfg, burst: { ...cfg.burst, ...options.burst } };
+  if (options.parallel) cfg = { ...cfg, parallel: true, ...(options.parallelLimit ? { parallelLimit: options.parallelLimit } : {}) };
   if (cfg.dryRun) {
     console.log(
       chalk.bold.yellow("  DRY RUN — transactions are signed and simulated, never broadcast; the ledger is untouched.")
@@ -468,9 +471,171 @@ export async function runBatch(configPath: string, options: BatchRunOptions = {}
     }
   };
 
-  // ── 8. Execute the queue in start-time order ──────────────────────────
-  while (!stop) {
+  // ── 8. Execute the queue: serially by default, concurrently with --parallel ──
+  // The per-target flow (audit wait, burst gate, prepare, send, receipts, ledger)
+  // lives in one job function so both modes run exactly the same code.
+  const executeJob = async (target: BatchTarget): Promise<void> => {
+
+      if (target.plan.drop.endTime * 1000 <= Date.now()) {
+        console.log(chalk.yellow(`\n━━━ ${target.label} — public stage already ended, skipping ━━━`));
+        summary.push({ label: target.label, results: skippedAll() });
+        return;
+      }
+
+      console.log(chalk.bold.magenta(`\n━━━ ${target.label} (${target.contract}) ━━━`));
+
+      // B3: the burst decision belongs here, where the config, the per-wallet cap
+      // and the measured clock are all known. A refused burst degrades to a
+      // single transaction — never to a refusal to mint.
+      let burstForTarget: { count: number; spacingMs: number; leadMs: number } | undefined;
+      if (cfg.burst.count > 1 && burstLead) {
+        const cap = target.plan.drop.maxTotalMintableByWallet || null;
+        const gate = burstGate({
+          count: cfg.burst.count,
+          capPerWallet: cap,
+          allowOvershoot: cfg.burst.allowOvershoot,
+          clockSkewMs: burstLead.clockSkewMs,
+          leadMs: cfg.burst.leadMs === "auto" ? burstLead.leadMs : cfg.burst.leadMs,
+          forceClock: cfg.burst.forceClock,
+        });
+        if (!gate.allowed) {
+          console.log(chalk.bold.yellow(`  ⚠ burst disabled for ${target.label}: ${gate.reason} — sending a single transaction.`));
+        } else {
+          const leadMs = cfg.burst.leadMs === "auto" ? burstLead.leadMs : cfg.burst.leadMs;
+          burstForTarget = { count: cfg.burst.count, spacingMs: cfg.burst.spacingMs, leadMs };
+          console.log(chalk.gray(`  burst: ×${cfg.burst.count} at T-${leadMs}ms, ${cfg.burst.spacingMs}ms apart (${gate.reason})`));
+        }
+      }
+
+      // Re-audit shortly before the stage opens: a whitelist phase can drain the
+      // supply in the meantime, and the T-3s on-chain check is the last line of
+      // defence rather than the first. An audit that cannot run never blocks a mint.
+      if (cfg.auditBeforeMs > 0 && target.startAt.getTime() > Date.now()) {
+        const deadline = target.startAt.getTime() - cfg.auditBeforeMs;
+        if (deadline > Date.now()) {
+          if (watch) await waitWithPolling(deadline);
+          else await waitForMintTime(new Date(deadline), 0);
+        } else {
+          console.log(chalk.gray("  audit window already open — checking now"));
+        }
+        try {
+          const audit = await auditTarget(
+            { chainKey: cfg.chainKey, target: target.contract },
+            { wallets: wallets.map((w) => w.address), requestedQuantity: target.quantity }
+          );
+          console.log(chalk.gray(`  audit: ${audit.grade.grade} — ${audit.grade.reason}`));
+          if (cfg.auditSkipGrades.includes(audit.grade.grade)) {
+            console.log(chalk.bold.yellow(`  skipping ${target.label}: audit grade ${audit.grade.grade}`));
+            const results = skippedAll();
+            summary.push({ label: target.label, results });
+            if (shouldWriteLedger(useLedger, cfg.dryRun)) {
+              recordEntry(ledger, cfg.chainKey, target.contract, {
+                status: "SKIPPED",
+                txHash: null,
+                at: new Date().toISOString(),
+                quantity: target.quantity,
+                slug: target.slug,
+                attempts: entryOf(ledger, cfg.chainKey, target.contract)?.attempts ?? 0,
+              });
+              saveLedger(ledger, ledgerPath);
+            }
+            return;
+          }
+        } catch (err) {
+          console.log(chalk.yellow(`  audit unavailable, continuing: ${(err as Error).message}`));
+        }
+      }
+
+      // Once bytes may reach the chain, the ledger must already say so: a crash
+      // between broadcast and receipt then blocks a duplicate send.
+      const priorAttempts = entryOf(ledger, cfg.chainKey, target.contract)?.attempts ?? 0;
+      const attempts = priorAttempts + 1;
+      if (shouldWriteLedger(useLedger, cfg.dryRun)) {
+        recordEntry(ledger, cfg.chainKey, target.contract, {
+          status: "PENDING",
+          txHash: null,
+          at: new Date().toISOString(),
+          quantity: target.quantity,
+          slug: target.slug,
+          attempts,
+        });
+        saveLedger(ledger, ledgerPath);
+      }
+
+      let results: SnipeResult[];
+      try {
+        results = await localPublicSnipe({
+          nftContract: target.contract,
+          quantity: target.quantity,
+          walletKeys: keys,
+          rpcUrls: cfg.rpcUrls,
+          maxFeePerGas: cfg.maxFeePerGas,
+          maxPriorityFee: cfg.maxPriorityFee,
+          gasLimit: cfg.gasLimit,
+          targetStart: target.startAt.getTime() > Date.now() ? target.startAt : null,
+          plan: target.plan,
+          maxValueWei: target.maxValueWei,
+          refreshBeforeMs: cfg.refreshBeforeMs,
+          expectedCodeHash: target.codeHash,
+          dryRun: cfg.dryRun,
+          burst: burstForTarget,
+        });
+      } catch (err) {
+        console.log(chalk.bold.red(`  ✗ ${target.label} failed: ${(err as Error).message}`));
+        console.log(chalk.yellow("  ledger stays PENDING — pass --retry-pending to send again"));
+        summary.push({ label: target.label, results: skippedAll() });
+        return;
+      }
+
+      summary.push({ label: target.label, results });
+
+      if (shouldWriteLedger(useLedger, cfg.dryRun)) {
+        const broadcast = results.find((r) => r.txHash !== null);
+        const status = broadcast
+          ? broadcast.status
+          : results.every((r) => r.status === "SKIPPED" || r.status === "REJECTED")
+            ? "SKIPPED"
+            : "REJECTED";
+        const TOKEN_ID_LIMIT = 200;
+        recordEntry(ledger, cfg.chainKey, target.contract, {
+          status,
+          txHash: broadcast?.txHash ?? null,
+          at: new Date().toISOString(),
+          quantity: target.quantity,
+          slug: target.slug,
+          attempts,
+          // B1: what actually arrived, so cost basis and net stop being fiction.
+          ...(broadcast?.mintedCount !== undefined ? { mintedCount: broadcast.mintedCount } : {}),
+          ...(broadcast?.tokenIds && broadcast.tokenIds.length > 0
+            ? {
+                tokenIds: broadcast.tokenIds.slice(0, TOKEN_ID_LIMIT),
+                ...(broadcast.tokenIds.length > TOKEN_ID_LIMIT ? { tokenIdsTruncated: true } : {}),
+              }
+            : {}),
+          ...(broadcast?.gasBurnedWei ? { gasBurnedWei: broadcast.gasBurnedWei } : {}),
+          ...(broadcast?.txHashes && broadcast.txHashes.length > 1 ? { txHashes: broadcast.txHashes } : {}),
+          ...(broadcast?.nonceGap ? { nonceGap: true } : {}),
+        });
+        saveLedger(ledger, ledgerPath);
+      }
+
+      if (cfg.onFailure === "stop" && !results.some((r) => r.status === "SUCCESS")) {
+        console.log(chalk.bold.yellow(`\n  onFailure=stop — no success on ${target.label}, ending the batch here.`));
+        stop = true;
+      }
+  };
+
+  const pending = new Set<Promise<void>>();
+  const parallelLimit = cfg.parallel ? Math.max(1, cfg.parallelLimit ?? wallets.length) : 1;
+  if (cfg.parallel) {
+    console.log(chalk.gray(`  parallel: up to ${parallelLimit} job(s) at once (${wallets.length} wallet(s))`));
+  }
+  while (!stop || pending.size > 0) {
     if (queue.length === 0) {
+      if (pending.size > 0) {
+        await Promise.all([...pending]);
+        continue;
+      }
       if (!watch) break;
       await sleep(intervalMs);
       await poll();
@@ -478,157 +643,19 @@ export async function runBatch(configPath: string, options: BatchRunOptions = {}
     }
 
     const target = queue.shift()!;
-    const key = keyOf(target);
-    executed.add(key);
+    executed.add(keyOf(target));
 
-    if (target.plan.drop.endTime * 1000 <= Date.now()) {
-      console.log(chalk.yellow(`\n━━━ ${target.label} — public stage already ended, skipping ━━━`));
-      summary.push({ label: target.label, results: skippedAll() });
+    if (!cfg.parallel) {
+      await executeJob(target);
       continue;
     }
-
-    console.log(chalk.bold.magenta(`\n━━━ ${target.label} (${target.contract}) ━━━`));
-
-    // B3: the burst decision belongs here, where the config, the per-wallet cap
-    // and the measured clock are all known. A refused burst degrades to a
-    // single transaction — never to a refusal to mint.
-    let burstForTarget: { count: number; spacingMs: number; leadMs: number } | undefined;
-    if (cfg.burst.count > 1 && burstLead) {
-      const cap = target.plan.drop.maxTotalMintableByWallet || null;
-      const gate = burstGate({
-        count: cfg.burst.count,
-        capPerWallet: cap,
-        allowOvershoot: cfg.burst.allowOvershoot,
-        clockSkewMs: burstLead.clockSkewMs,
-        leadMs: cfg.burst.leadMs === "auto" ? burstLead.leadMs : cfg.burst.leadMs,
-        forceClock: cfg.burst.forceClock,
-      });
-      if (!gate.allowed) {
-        console.log(chalk.bold.yellow(`  ⚠ burst disabled for ${target.label}: ${gate.reason} — sending a single transaction.`));
-      } else {
-        const leadMs = cfg.burst.leadMs === "auto" ? burstLead.leadMs : cfg.burst.leadMs;
-        burstForTarget = { count: cfg.burst.count, spacingMs: cfg.burst.spacingMs, leadMs };
-        console.log(chalk.gray(`  burst: ×${cfg.burst.count} at T-${leadMs}ms, ${cfg.burst.spacingMs}ms apart (${gate.reason})`));
-      }
-    }
-
-    // Re-audit shortly before the stage opens: a whitelist phase can drain the
-    // supply in the meantime, and the T-3s on-chain check is the last line of
-    // defence rather than the first. An audit that cannot run never blocks a mint.
-    if (cfg.auditBeforeMs > 0 && target.startAt.getTime() > Date.now()) {
-      const deadline = target.startAt.getTime() - cfg.auditBeforeMs;
-      if (deadline > Date.now()) {
-        if (watch) await waitWithPolling(deadline);
-        else await waitForMintTime(new Date(deadline), 0);
-      } else {
-        console.log(chalk.gray("  audit window already open — checking now"));
-      }
-      try {
-        const audit = await auditTarget(
-          { chainKey: cfg.chainKey, target: target.contract },
-          { wallets: wallets.map((w) => w.address), requestedQuantity: target.quantity }
-        );
-        console.log(chalk.gray(`  audit: ${audit.grade.grade} — ${audit.grade.reason}`));
-        if (cfg.auditSkipGrades.includes(audit.grade.grade)) {
-          console.log(chalk.bold.yellow(`  skipping ${target.label}: audit grade ${audit.grade.grade}`));
-          const results = skippedAll();
-          summary.push({ label: target.label, results });
-          if (shouldWriteLedger(useLedger, cfg.dryRun)) {
-            recordEntry(ledger, cfg.chainKey, target.contract, {
-              status: "SKIPPED",
-              txHash: null,
-              at: new Date().toISOString(),
-              quantity: target.quantity,
-              slug: target.slug,
-              attempts: entryOf(ledger, cfg.chainKey, target.contract)?.attempts ?? 0,
-            });
-            saveLedger(ledger, ledgerPath);
-          }
-          continue;
-        }
-      } catch (err) {
-        console.log(chalk.yellow(`  audit unavailable, continuing: ${(err as Error).message}`));
-      }
-    }
-
-    // Once bytes may reach the chain, the ledger must already say so: a crash
-    // between broadcast and receipt then blocks a duplicate send.
-    const priorAttempts = entryOf(ledger, cfg.chainKey, target.contract)?.attempts ?? 0;
-    const attempts = priorAttempts + 1;
-    if (shouldWriteLedger(useLedger, cfg.dryRun)) {
-      recordEntry(ledger, cfg.chainKey, target.contract, {
-        status: "PENDING",
-        txHash: null,
-        at: new Date().toISOString(),
-        quantity: target.quantity,
-        slug: target.slug,
-        attempts,
-      });
-      saveLedger(ledger, ledgerPath);
-    }
-
-    let results: SnipeResult[];
-    try {
-      results = await localPublicSnipe({
-        nftContract: target.contract,
-        quantity: target.quantity,
-        walletKeys: keys,
-        rpcUrls: cfg.rpcUrls,
-        maxFeePerGas: cfg.maxFeePerGas,
-        maxPriorityFee: cfg.maxPriorityFee,
-        gasLimit: cfg.gasLimit,
-        targetStart: target.startAt.getTime() > Date.now() ? target.startAt : null,
-        plan: target.plan,
-        maxValueWei: target.maxValueWei,
-        refreshBeforeMs: cfg.refreshBeforeMs,
-        expectedCodeHash: target.codeHash,
-        dryRun: cfg.dryRun,
-        burst: burstForTarget,
-      });
-    } catch (err) {
-      console.log(chalk.bold.red(`  ✗ ${target.label} failed: ${(err as Error).message}`));
-      console.log(chalk.yellow("  ledger stays PENDING — pass --retry-pending to send again"));
-      summary.push({ label: target.label, results: skippedAll() });
-      continue;
-    }
-
-    summary.push({ label: target.label, results });
-
-    if (shouldWriteLedger(useLedger, cfg.dryRun)) {
-      const broadcast = results.find((r) => r.txHash !== null);
-      const status = broadcast
-        ? broadcast.status
-        : results.every((r) => r.status === "SKIPPED" || r.status === "REJECTED")
-          ? "SKIPPED"
-          : "REJECTED";
-      const TOKEN_ID_LIMIT = 200;
-      recordEntry(ledger, cfg.chainKey, target.contract, {
-        status,
-        txHash: broadcast?.txHash ?? null,
-        at: new Date().toISOString(),
-        quantity: target.quantity,
-        slug: target.slug,
-        attempts,
-        // B1: what actually arrived, so cost basis and net stop being fiction.
-        ...(broadcast?.mintedCount !== undefined ? { mintedCount: broadcast.mintedCount } : {}),
-        ...(broadcast?.tokenIds && broadcast.tokenIds.length > 0
-          ? {
-              tokenIds: broadcast.tokenIds.slice(0, TOKEN_ID_LIMIT),
-              ...(broadcast.tokenIds.length > TOKEN_ID_LIMIT ? { tokenIdsTruncated: true } : {}),
-            }
-          : {}),
-        ...(broadcast?.gasBurnedWei ? { gasBurnedWei: broadcast.gasBurnedWei } : {}),
-        ...(broadcast?.txHashes && broadcast.txHashes.length > 1 ? { txHashes: broadcast.txHashes } : {}),
-        ...(broadcast?.nonceGap ? { nonceGap: true } : {}),
-      });
-      saveLedger(ledger, ledgerPath);
-    }
-
-    if (cfg.onFailure === "stop" && !results.some((r) => r.status === "SUCCESS")) {
-      console.log(chalk.bold.yellow(`\n  onFailure=stop — no success on ${target.label}, ending the batch here.`));
-      stop = true;
-    }
+    // Lanes serialise a wallet anyway, so more jobs than wallets only wastes
+    // memory; a finished job frees its slot here.
+    if (pending.size >= parallelLimit) await Promise.race(pending);
+    const job = executeJob(target).finally(() => pending.delete(job));
+    pending.add(job);
   }
+  await Promise.all([...pending]);
 
   for (const lock of walletLocks) await lock.release();
 

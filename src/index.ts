@@ -31,6 +31,7 @@ const KNOWN_FLAGS = new Set([
   "--favorites",
   "--dry-run",
   "--burst-count", "--burst-spacing-ms", "--burst-lead-ms", "--allow-overshoot", "--force-clock",
+  "--parallel",
 ]);
 
 const HELP = `
@@ -75,6 +76,13 @@ keys from .env unless the file overrides them.
 Audit mode takes a chain from the link or --chain; @file expands one target per line.
 `;
 
+function parallelLimitOf(args: string[]): number | undefined {
+  const index = args.indexOf("--parallel");
+  if (index < 0) return undefined;
+  const value = Number(args[index + 1]);
+  return Number.isFinite(value) && value >= 1 ? Math.floor(value) : undefined;
+}
+
 function burstOverrides(args: string[]): BatchRunOptions["burst"] {
   const flagNumber = (flag: string): number | undefined => {
     const index = args.indexOf(flag);
@@ -117,6 +125,8 @@ function batchRunOptions(args: string[]): BatchRunOptions {
     retryPending: args.includes("--retry-pending"),
     dryRun: args.includes("--dry-run"),
     burst: burstOverrides(args),
+    parallel: args.includes("--parallel"),
+    parallelLimit: parallelLimitOf(args),
   };
 }
 

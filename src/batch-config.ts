@@ -61,6 +61,8 @@ export interface BatchConfig {
   chainKey: string;
   dryRun: boolean; // sign + simulate only; no broadcast, no ledger writes
   burst: BurstConfig;
+  parallel: boolean; // run targets concurrently, one lane per wallet
+  parallelLimit: number | null; // max jobs in flight (null = one per wallet)
   walletSource: "env" | "prompt";
   rpcUrls: string[];
   maxFeePerGas: bigint;
@@ -175,6 +177,8 @@ export async function loadBatchConfig(
       chainKey: chain.key,
       dryRun,
       burst: parseBurst(raw?.burst),
+      parallel: raw?.parallel === true,
+      parallelLimit: Number.isFinite(Number(raw?.parallelLimit)) ? Math.max(1, Math.floor(Number(raw.parallelLimit))) : null,
       walletSource: raw?.walletSource === "prompt" ? "prompt" : "env",
       rpcUrls,
       ...resolveGas(chain.key, raw?.gas ?? {}),
@@ -296,6 +300,8 @@ export async function loadBatchConfig(
     chainKey: chain.key,
     dryRun,
       burst: parseBurst(raw?.burst),
+    parallel: raw?.parallel === true,
+    parallelLimit: Number.isFinite(Number(raw?.parallelLimit)) ? Math.max(1, Math.floor(Number(raw.parallelLimit))) : null,
     walletSource: raw.walletSource === "prompt" ? "prompt" : "env",
     rpcUrls,
     ...resolveGas(chain.key, raw.gas ?? {}),

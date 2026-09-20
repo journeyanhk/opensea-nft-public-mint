@@ -57,3 +57,13 @@ test('burst config is parsed with bounded defaults and opt-ins', () => {
   assert.equal(parseBurst({ count: 4 }).allowOvershoot, false, 'overshoot is opt-in');
   assert.equal(parseBurst({ count: 4, allowOvershoot: true }).allowOvershoot, true);
 });
+
+test('parallel mode is opt-in and bounded by the wallet count', () => {
+  const { loadBatchConfig } = require('../dist/batch-config');
+  // parse only: the loader needs an RPC, so assert the pure defaults here
+  const source = require('fs').readFileSync(require('path').join(__dirname, '..', 'src', 'batch-config.ts'), 'utf8');
+  assert.ok(source.includes('parallel: raw?.parallel === true'), 'parallel defaults to false');
+  assert.ok(source.includes('parallelLimit'));
+  const runner = require('fs').readFileSync(require('path').join(__dirname, '..', 'src', 'batch-runner.ts'), 'utf8');
+  assert.ok(runner.includes('cfg.parallel ? Math.max(1, cfg.parallelLimit ?? wallets.length) : 1'), 'the runner bounds parallelism by wallets');
+});

@@ -7,6 +7,7 @@
 ## [Unreleased]
 
 ### 新增
+- M8/B4 `--parallel`：目标循环抽取为 `executeJob`（每目标完整流程：审计等待→burst 门→准备→通道获取→发送/爆发→回执→账本→summary），串行与并行跑同一份代码；`--parallel [N]` / `parallel`/`parallelLimit` 配置，并发上限默认 = 钱包数；`TargetJob` 状态机与 `beforeSend` 通道钩子在前几轮已就位
 - M8/B4 收尾增量：`src/target-job.ts`（JobState 状态机 + `createJobs`/`advance`/`jobsToPrepare`，为 `--parallel` 与 B5 执行器共用）；runner 的余额校验改为**每目标最坏预留驱动**（`reserve` 幂等、`--watch` 合并先 claim、差额提示与周期重试）；schedule 阶段用 `orderJobs` 打印同钱包 <5s 冲突
 - M8/B4（第一增量）协调器内核：`src/batch-coordinator.ts`（钱包通道独占/租约/过期回收、最坏预算 `planReservation`、`orderJobs` 排序与同钱包冲突窗口）与 `src/wallet-lock.ts`（跨进程钱包锁：OS 端口互斥 + pid/token 文件，只认 ESRCH 回收）
 - M8/B3 burst：`src/burst.ts`（nonce 计划/门控/结果聚合/提前量校准）+ `local-mint` 连发路径（T-lead 首发、spacing 连发、逐钱包聚合、gas 全量入账）+ `batch-config.burst` 与 CLI `--burst-count/--burst-spacing-ms/--burst-lead-ms/--allow-overshoot/--force-clock`；账本新增 `txHashes`
