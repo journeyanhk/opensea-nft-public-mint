@@ -36,3 +36,12 @@ test('gas overrides win, and a tip above the ceiling is refused', () => {
   assert.equal(resolveGas('robinhood', { maxFeeGwei: 3 }).maxFeePerGas, 3000000000n);
   assert.throws(() => resolveGas('robinhood', { maxFeeGwei: 1, priorityGwei: 2 }));
 });
+
+test('targets carry a pinned code hash only when it is a real hash', () => {
+  const { targetCodeHash } = require('../dist/batch-config');
+  const hash = '0x' + 'ab'.repeat(32);
+  assert.equal(targetCodeHash({ codeHash: hash }), hash);
+  assert.equal(targetCodeHash({ codeHash: '0xabc' }), null);
+  assert.equal(targetCodeHash({ codeHash: 42 }), null);
+  assert.equal(targetCodeHash({}), null, 'a hand-written config simply has nothing to compare');
+});

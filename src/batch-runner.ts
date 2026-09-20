@@ -43,6 +43,7 @@ export interface BatchRunOptions {
   retryPending?: boolean;
   ledgerPath?: string;
   maxPolls?: number; // stop polling after N cycles (tests); 0/undefined = unlimited
+  dryRun?: boolean; // --dry-run forces it on; a config file may set it itself
 }
 
 function readConfig(file: string): RawConfig {
@@ -125,6 +126,12 @@ export async function runBatch(configPath: string, options: BatchRunOptions = {}
   // ── 2. Targets ────────────────────────────────────────────────────────
   console.log(chalk.bold.white("\nTargets"));
   let cfg = await loadBatchConfig(raw, chain, rpcUrls, { allowEmpty: watch });
+  if (options.dryRun) cfg = { ...cfg, dryRun: true };
+  if (cfg.dryRun) {
+    console.log(
+      chalk.bold.yellow("  DRY RUN — transactions are signed and simulated, never broadcast; the ledger is untouched.")
+    );
+  }
 
   // ── 3. Wallets ────────────────────────────────────────────────────────
   console.log(chalk.bold.white("\nWallets"));
@@ -435,6 +442,8 @@ export async function runBatch(configPath: string, options: BatchRunOptions = {}
         plan: target.plan,
         maxValueWei: target.maxValueWei,
         refreshBeforeMs: cfg.refreshBeforeMs,
+        expectedCodeHash: target.codeHash,
+        dryRun: cfg.dryRun,
       });
     } catch (err) {
       console.log(chalk.bold.red(`  ✗ ${target.label} failed: ${(err as Error).message}`));
@@ -445,7 +454,7 @@ export async function runBatch(configPath: string, options: BatchRunOptions = {}
 
     summary.push({ label: target.label, results });
 
-    if (useLedger) {
+    if (useLedger && !cfg.dryRun) {
       const broadcast = results.find((r) => r.txHash !== null);
       const status = broadcast
         ? broadcast.status

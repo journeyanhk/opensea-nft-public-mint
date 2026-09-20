@@ -19,6 +19,7 @@ import { explorerTx } from "./chains";
 import { toUtc8Time } from "./time-format";
 import { buildLocalMintPlan, fetchMintStats, LocalMintPlan, MintStats } from "./seadrop-public";
 import { countMintedTokens, verdict } from "./receipts";
+import { classifySimulation, codeHashOf, validateMintPublicCalldata, validateSignedTx } from "./gates";
 
 export interface LocalSnipeOpts {
   nftContract: string;
@@ -32,6 +33,8 @@ export interface LocalSnipeOpts {
   plan: LocalMintPlan;
   maxValueWei?: bigint; // refuse to send when the fresh total exceeds this
   refreshBeforeMs?: number; // re-read the drop this long before the stage opens
+  expectedCodeHash?: string | null; // B2 gate 1: the code hash the audit saw
+  dryRun?: boolean; // sign and simulate, never broadcast
 }
 
 // SUCCESS means the receipt proved the tokens arrived (M8/B1); PARTIAL and
@@ -253,6 +256,50 @@ export async function localPublicSnipe(opts: LocalSnipeOpts): Promise<SnipeResul
     if (!(await checkSupply(planNow.drop.maxTotalMintableByWallet))) return skipped();
   }
 
+  // ── Gate 1: the contract must still be the one the audit saw ─────────────
+  if (opts.expectedCodeHash) {
+    const actual = codeHashOf(await provider.getCode(nftContract));
+    if (actual !== opts.expectedCodeHash) {
+      console.log(
+        chalk.bold.red(
+          `  ✗ Contract code changed since the audit (${actual ?? "no code at this address"} vs ${opts.expectedCodeHash}) — refusing to sign.`
+        )
+      );
+      return skipped();
+    }
+    console.log(chalk.gray(`  ✓ Gate 1: contract code hash matches the audit (${actual.slice(0, 12)}…)`));
+  }
+
+  // ── Gate 3: a pending simulation per wallet (gate 2 runs on the signature) ─
+  const stageOpen = targetStart ? Date.now() >= targetStart.getTime() : true;
+  const dropped: number[] = [];
+  for (const { idx, wallet } of active) {
+    try {
+      await provider.send("eth_call", [
+        { from: wallet.address, to: planNow.to, data: planNow.data, value: `0x${planNow.value.toString(16)}` },
+        "pending",
+      ]);
+      console.log(chalk.gray(`  ✓ [W${idx}] Gate 3: simulation passed`));
+    } catch (err) {
+      const anyErr = err as { shortMessage?: string; info?: { error?: { message?: string } }; message?: string };
+      const text = anyErr.shortMessage ?? anyErr.info?.error?.message ?? anyErr.message ?? "";
+      const outcome = classifySimulation({ ok: false, errorText: text, stageOpen });
+      if (outcome.pass) {
+        console.log(chalk.gray(`  · [W${idx}] Gate 3: ${outcome.label}`));
+      } else {
+        dropped.push(idx);
+        console.log(chalk.bold.red(`  ✗ [W${idx}] Gate 3: ${outcome.label} — dropping this wallet.`));
+      }
+    }
+  }
+  if (dropped.length > 0) {
+    active = active.filter(({ idx }) => !dropped.includes(idx));
+    if (active.length === 0) {
+      console.log(chalk.bold.red("  ✗ Every wallet failed the simulation — skipping this target."));
+      return skipped();
+    }
+  }
+
   // Re-warm after the wait: keep-alive sockets are usually torn down by the far
   // end long before T-0, and the blast must not pay for a fresh handshake.
   await warmConnections(rpcUrls);
@@ -267,6 +314,7 @@ export async function localPublicSnipe(opts: LocalSnipeOpts): Promise<SnipeResul
 
   const signStart = performance.now();
   const prepared: { idx: number; address: string; blast: PreparedBlast }[] = [];
+  const gateErrors: string[] = [];
 
   for (const [i, { idx, wallet }] of active.entries()) {
     const rawTx = await wallet.signTransaction({
@@ -280,14 +328,51 @@ export async function localPublicSnipe(opts: LocalSnipeOpts): Promise<SnipeResul
       type: 2,
       chainId,
     });
+
+    // ── Gate 2: what was signed must be exactly what was planned ────────────
+    const signed = validateSignedTx(rawTx, {
+      from: wallet.address,
+      chainId,
+      to: planNow.to,
+      nonce: nonces[i],
+      data: planNow.data,
+      value: planNow.value,
+      gasLimit: BigInt(gasLimit || 250_000),
+      maxFeePerGas,
+      maxPriorityFeePerGas: maxPriorityFee,
+    });
+    const calldata = validateMintPublicCalldata(planNow.data, {
+      nftContract,
+      feeRecipient: planNow.feeRecipient,
+      quantity: BigInt(quantity),
+    });
+    if (!signed.ok || !calldata.ok) {
+      for (const error of [...signed.errors, ...calldata.errors]) {
+        gateErrors.push(`[W${idx}] ${error}`);
+      }
+      continue;
+    }
     prepared.push({ idx, address: wallet.address, blast: prepareBlast(rawTx) });
   }
+
+  if (gateErrors.length > 0) {
+    console.log(chalk.bold.red("\n  ✗ Gate 2 failed — refusing to broadcast anything."));
+    for (const error of gateErrors) console.log(chalk.red(`      ${error}`));
+    return skipped();
+  }
+  console.log(chalk.gray(`  ✓ Gate 2: ${prepared.length} signed transaction(s) re-validated field by field`));
 
   console.log(
     chalk.green(
       `  ✓ Signed and serialised ${prepared.length} transaction(s) in ${(performance.now() - signStart).toFixed(1)}ms — zero compute left at fire time`
     )
   );
+
+  if (opts.dryRun) {
+    console.log(chalk.bold.yellow("\n  DRY RUN — signed and simulated, nothing broadcast."));
+    for (const p of prepared) console.log(chalk.gray(`    [W${p.idx}] would send ${p.blast.txHash}`));
+    return skipped();
+  }
 
   // ── Wait for the stage, then blast pre-built bytes ──
   if (targetStart) {

@@ -134,6 +134,8 @@ export async function exportTargets(results: AuditResult[], opts: ExportOptions)
         slug: r.contract,
         quantity: opts.quantity,
         maxPriceEth: opts.maxPriceEth === "current" ? (current === "0.0" ? "0" : current) : opts.maxPriceEth,
+        // The execution re-checks this before signing (B2 gate 1).
+        ...(r.codeHash ? { codeHash: r.codeHash } : {}),
         startAt: "auto",
       };
     }),

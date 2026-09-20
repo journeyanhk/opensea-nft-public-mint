@@ -48,6 +48,7 @@ export interface ContractEntry {
   // M7 (monitoring): where the entry came from and what the OpenSea calendar said.
   sources: string[]; // e.g. ["onchain", "opensea-calendar"]
   calendar: CalendarFacts | null;
+  codeHash: string | null; // bytecode hash from the last audit (B2 gate 1)
 }
 
 export interface ScanState {
@@ -105,6 +106,7 @@ export function emptyContractEntry(): ContractEntry {
     xCheckedAt: null,
     sources: [],
     calendar: null,
+    codeHash: null,
   };
 }
 

@@ -21,6 +21,7 @@ export interface BatchTarget {
   slug: string; // original config input, kept for the ledger and backfill
   quantity: number;
   maxValueWei: bigint; // ceiling for mintPrice × quantity, per wallet
+  codeHash: string | null; // code hash the audit saw, re-checked before signing
   startAt: Date;
   plan: LocalMintPlan;
   supply: { totalMinted: bigint; maxSupply: bigint } | null; // null when the contract cannot answer
@@ -28,6 +29,7 @@ export interface BatchTarget {
 
 export interface BatchConfig {
   chainKey: string;
+  dryRun: boolean; // sign + simulate only; no broadcast, no ledger writes
   walletSource: "env" | "prompt";
   rpcUrls: string[];
   maxFeePerGas: bigint;
@@ -57,6 +59,13 @@ function parseSkipGrades(value: unknown): Grade[] {
 
 // SeaDrop reports an unset per-wallet cap as 0, which means "no limit" rather
 // than "mint nothing".
+// Gate 1 only compares a hash the audit actually produced; anything else is
+// treated as "not pinned" rather than failing the whole target.
+export function targetCodeHash(entry: unknown): string | null {
+  const value = (entry as { codeHash?: unknown })?.codeHash;
+  return typeof value === "string" && /^0x[0-9a-f]{64}$/i.test(value) ? value : null;
+}
+
 export function clampQuantity(quantity: number, maxTotalMintableByWallet: number): number {
   const wanted = Number.isFinite(quantity) && quantity >= 1 ? Math.floor(quantity) : 1;
   if (maxTotalMintableByWallet > 0 && wanted > maxTotalMintableByWallet) {
@@ -124,12 +133,14 @@ export async function loadBatchConfig(
   if (rpcUrls.length === 0) {
     throw new Error("No usable RPC endpoint — the batch would have nothing to send through.");
   }
+  const dryRun = raw?.dryRun === true;
   if (!Array.isArray(raw?.targets) || raw.targets.length === 0) {
     // --watch starts before the scanner has exported anything, so an empty file
     // is a valid starting state there.
     if (!options.allowEmpty) throw new Error("The batch config lists no targets.");
     return {
       chainKey: chain.key,
+      dryRun,
       walletSource: raw?.walletSource === "prompt" ? "prompt" : "env",
       rpcUrls,
       ...resolveGas(chain.key, raw?.gas ?? {}),
@@ -238,6 +249,9 @@ export async function loadBatchConfig(
       slug: input,
       quantity,
       maxValueWei,
+      // Pinned by --audit / --export; absent for hand-written configs, in which
+      // case gate 1 simply has nothing to compare against.
+      codeHash: targetCodeHash(entry),
       startAt,
       plan,
       supply: stats ? { totalMinted: stats.totalMinted, maxSupply: stats.maxSupply } : null,
@@ -246,6 +260,7 @@ export async function loadBatchConfig(
 
   return {
     chainKey: chain.key,
+    dryRun,
     walletSource: raw.walletSource === "prompt" ? "prompt" : "env",
     rpcUrls,
     ...resolveGas(chain.key, raw.gas ?? {}),

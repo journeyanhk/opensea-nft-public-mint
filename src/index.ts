@@ -29,6 +29,7 @@ const KNOWN_FLAGS = new Set([
   "--serve",
   "--export-favorites",
   "--favorites",
+  "--dry-run",
 ]);
 
 const HELP = `
@@ -53,6 +54,8 @@ Usage
                                   discover new drops on-chain, audit the candidates; incremental cursor in .scan-state.json
   npm start -- --backfill [--ledger <file>] [--backfill-after 24,72] [--backfill-file <file>]
                                   settle cost and floor-price checkpoints for minted targets; idempotent
+  npm start -- --batch <file> --dry-run
+                                  sign and simulate every transaction, broadcast nothing (no ledger writes)
   npm start -- --export-favorites [<file.jsonl>] [--favorites <file>]
                                   dump every favorite with the signals seen when it was starred (analysis input)
   npm start -- --refresh-targets [--limit N] [--chain <key>] [--state <file>]
@@ -87,6 +90,7 @@ function batchRunOptions(args: string[]): BatchRunOptions {
     watchIntervalMs: Number.isFinite(seconds) && seconds > 0 ? Math.round(seconds * 1000) : undefined,
     ledger: !args.includes("--no-ledger"),
     retryPending: args.includes("--retry-pending"),
+    dryRun: args.includes("--dry-run"),
   };
 }
 

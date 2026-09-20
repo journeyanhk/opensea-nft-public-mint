@@ -12,11 +12,11 @@
 - [√] 1.5 `tests/receipts.cjs`（真实回执 fixture + 真值表）+ 账本/回填/面板断言
 
 ## 2. B2 三道门
-- [ ] 2.1 codeHash：`buildLocalMintPlan` 返回、审计落状态、导出进 targets.json、T-3s 复核
-- [ ] 2.2 `validateSigned`（Transaction.from 逐字段 + calldata 解码断言）；篡改必须被拒
-- [ ] 2.3 pending 模拟门 + revert 原因解码（NotActive 视为通过）
-- [ ] 2.4 `--dry-run`（签名 + 模拟，不广播）
-- [ ] 2.5 `tests/gates.cjs`
+- [√] 2.1 codeHash：`buildLocalMintPlan` 返回、审计落状态、导出进 targets.json、T-3s 复核
+- [√] 2.2 `validateSigned`（Transaction.from 逐字段 + calldata 解码断言）；篡改必须被拒
+- [√] 2.3 pending 模拟门 + revert 原因解码（NotActive 视为通过）
+- [√] 2.4 `--dry-run`（签名 + 模拟，不广播）
+- [√] 2.5 `tests/gates.cjs`
 
 ## 3. B3 burst
 - [ ] 3.1 `calibrateLead`（RTT p50 + 时钟偏差 + 50ms）与偏差阈值

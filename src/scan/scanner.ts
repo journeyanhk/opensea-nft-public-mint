@@ -458,6 +458,7 @@ export async function runScan(
           entry.slug = result.slug ?? entry.slug;
           entry.name = result.name ?? entry.name;
           entry.owner = result.owner ?? entry.owner;
+          entry.codeHash = result.codeHash ?? entry.codeHash;
           if (result.social) {
             entry.imageUrl = result.social.imageUrl ?? entry.imageUrl;
             entry.twitter = result.social.twitter ?? entry.twitter;

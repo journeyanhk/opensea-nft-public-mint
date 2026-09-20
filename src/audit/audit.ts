@@ -12,6 +12,7 @@ import { parseNftLink } from "../nft-link";
 import { resolveSlug } from "../slug-resolver";
 import { buildLocalMintPlan, fetchMintStats, PublicDrop, SEADROP_ADDRESS } from "../seadrop-public";
 import { smartOverlap } from "../scan/smart-minters";
+import { codeHashOf } from "../gates";
 import {
   ChangeSummary,
   DropUpdate,
@@ -94,6 +95,7 @@ export interface AuditResult {
   apiStages: ApiStage[] | null;
   social: Social | null;
   smartMinters: number;
+  codeHash: string | null; // bytecode hash at audit time (B2 gate 1)
   grade: GradeResult;
   errors: string[];
 }
@@ -260,6 +262,8 @@ export async function auditTarget(input: AuditInput, opts: AuditOptions = {}): P
   );
 
   const provider = new JsonRpcProvider(rpcUrl);
+  // Pin the bytecode now: an execution must refuse to sign if it changed.
+  const codeHash = codeHashOf(await provider.getCode(contract).catch(() => null));
   const seadrop = new Contract(
     SEADROP_ADDRESS,
     [
@@ -311,6 +315,7 @@ export async function auditTarget(input: AuditInput, opts: AuditOptions = {}): P
       apiStages: null,
       social: null,
       smartMinters: 0,
+      codeHash: null,
       grade: {
         grade: "B",
         upperGrade: "B",
@@ -489,6 +494,7 @@ export async function auditTarget(input: AuditInput, opts: AuditOptions = {}): P
     apiStages,
     social,
     smartMinters: opts.smartSet ? smartOverlap(mintScan.topMinters, opts.smartSet) : 0,
+    codeHash,
     grade,
     errors,
   };

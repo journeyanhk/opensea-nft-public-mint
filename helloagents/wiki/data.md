@@ -89,6 +89,8 @@
 | entries[chain][contract].txHash | string \| null | 非空即代表已广播，重启后不再重发 |
 | entries[chain][contract].at | string | ISO 时间 |
 | entries[chain][contract].quantity | number | 每钱包数量 |
+| entries[chain][contract].mintedCount / tokenIds | number \| undefined / string[] \| undefined | 回执证明的**实际到账**数量与 tokenId（上限 200 条 + `tokenIdsTruncated`）；旧数据缺省时回填按 `quantity` 兜底 |
+| entries[chain][contract].gasBurnedWei | string \| undefined | 该笔回执实际消耗的 gas（burst 的预期内回滚也计入，用于如实报告成本） |
 | entries[chain][contract].slug | string \| null | 配置原始输入（供 M3c 回填复用） |
 | entries[chain][contract].attempts | number | 发送尝试次数（REVERTED 在公售开放期最多重试 2 次） |
 
@@ -141,6 +143,8 @@
 | contracts[chain][addr].calendar | object \| null | OpenSea 日历事实：`listedAt/startTime（最早阶段）/publicStartTime（最后阶段＝公售猜测）/endTime/floorUsd/floorValue/floorSymbol/topOfferValue/volume24h*/isVerified/disabledReason/maxSupply/totalSupply/stages[]`；只补齐、不覆盖链上事实（链上开售时间优先，与 `publicStartTime` 相差 >1 分钟标 `schedule mismatch`）；日历新建条目置 `pendingAudit=true` |
 | ScanState.calendar | object \| undefined | `{ fetchedAt, counts, warnings? }`：上次成功抓取时间（节流）、**配置链**的条目数（金丝雀基线）与最近一次金丝雀告警；`/api/status` 直接暴露 |
 | contracts[chain][addr].xFollowers / xCheckedAt | number \| null / string \| null | X 粉丝数与读取时间；仅 `ENABLE_X_METRICS=1` 时抓取（`api.fxtwitter.com/<handle>`），24 小时缓存，失败静默 |
+
+M8/B2 的 `codeHash`：审计结果与 `contracts[chain][addr].codeHash` 记录 NFT 合约字节码哈希（`keccak256(eth_getCode)`），`--export` 写入 `targets.json` 的 `codeHash`，执行端签名前重读比对（不一致即拒绝签名）。
 
 M7/C 的收藏存储：`.favorites.json`（`version: 1, updatedAt, favorites: { "chain|contract": { chain, contract, slug, name, addedAt, updatedAt, status: watching|ready|dismissed, note, snapshot } }`）。`snapshot` 记录**收藏那一刻**的信号（grade/q/confidence/phase/start/mintPriceWei/remaining/maxSupply/minted/velocity24h/uniqueMinters/topMinterShare/smartMinters/batchMint/penalties/calendarListed/creatorDropCount），供日后与账本/回填按 `chain|contract` 关联分析；编辑只改传入字段、不覆盖首个快照，缺失/损坏/未来版本的文件一律按空处理。面板筛选/排序/tab 存 URL hash（`nftPanelState` 仅作无 hash 时的默认值）。
 

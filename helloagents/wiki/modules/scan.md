@@ -61,6 +61,19 @@
 - server：`GET /api/favorites`（`?format=jsonl` 带下载头）、`POST /api/favorites`（add/update/remove，JSON + 同源守卫）
 - CLI：`--export-favorites <file>`（`--favorites <store>` 指定输入）；`--report` / `--scan --report` 读取收藏并嵌入页面
 
+### 需求: 回执核数量（M8/B1）
+**模块:** receipts / local-mint / batch-ledger / backfill
+- `src/receipts.ts` 纯函数：`countMintedTokens`（ERC-721 `Transfer(0→wallet)`、ERC-1155 `TransferSingle/TransferBatch`；`logsAvailable` 区分「看不到日志」与「没铸到」）、`verdict`（MINTED/PARTIAL/NO_MINT/REVERTED）
+- `local-mint`：回执后用 verdict 取代 `receipt.status`；`SnipeResult` 带 `mintedCount/tokenIds/gasBurnedWei`
+- 账本：`PARTIAL/NO_MINT` 与 SUCCESS/TIMEOUT 同为终态（`shouldSkipLedger`）；回填按 `mintedCount` 摊净值；面板执行列显示实际数量
+
+### 需求: 执行三道门与 dry-run（M8/B2）
+**模块:** gates / local-mint / batch-config
+- `src/gates.ts` 纯函数：`validateSignedTx`（逐字段 + 反序列化校验）、`validateMintPublicCalldata`（解码 `mintPublic` 断言 nft/feeRecipient/minterIfNotPayer/quantity）、`classifySimulation`（开售前 revert 放行；开售后 revert 或 payment/供应/allowlist 类致命）、`codeHashOf`（空代码 → null）
+- `codeHash` 由 audit 读取并落状态、`--export` 写进 targets.json；`batch-config` 用 `targetCodeHash` 只接受真实哈希
+- `local-mint` 顺序：Gate 1（codeHash）→ Gate 3（pending 模拟，丢弃失败钱包）→ 签名 → Gate 2（复核）→（dry-run 到此为止）→ 等待开售 → 齐发
+- `--dry-run`（CLI 或配置 `dryRun: true`）不写账本（含 PENDING）
+
 ### 需求: 状态与快照
 **模块:** scan
 - `.scan-state.json`（`version: 1`）：`chains[chain] = { cursorBlock, blockTimeSec, updatedAt }`；`contracts[chain][contract] = { firstSeenBlock, lastSeenBlock, lastAuditedBlock, lastAuditedAt, lastGrade, soldOutAtBlock, publicStart, pendingAudit }`
