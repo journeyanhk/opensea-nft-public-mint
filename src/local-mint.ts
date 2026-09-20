@@ -19,7 +19,7 @@ import { explorerTx } from "./chains";
 import { toUtc8Time } from "./time-format";
 import { buildLocalMintPlan, fetchMintStats, LocalMintPlan, MintStats } from "./seadrop-public";
 import { countMintedTokens, verdict } from "./receipts";
-import { classifySimulation, codeHashOf, validateMintPublicCalldata, validateSignedTx } from "./gates";
+import { classifySimulation, codeHashOf, revertDataOf, validateMintPublicCalldata, validateSignedTx } from "./gates";
 
 export interface LocalSnipeOpts {
   nftContract: string;
@@ -271,32 +271,40 @@ export async function localPublicSnipe(opts: LocalSnipeOpts): Promise<SnipeResul
   }
 
   // ── Gate 3: a pending simulation per wallet (gate 2 runs on the signature) ─
+  // Before the stage opens SeaDrop can only answer NotActive, so simulating
+  // would learn nothing while eating the T-0 budget; those seconds are what the
+  // arrival time depends on. Once open, every wallet simulates in parallel.
   const stageOpen = targetStart ? Date.now() >= targetStart.getTime() : true;
-  const dropped: number[] = [];
-  for (const { idx, wallet } of active) {
-    try {
-      await provider.send("eth_call", [
-        { from: wallet.address, to: planNow.to, data: planNow.data, value: `0x${planNow.value.toString(16)}` },
-        "pending",
-      ]);
-      console.log(chalk.gray(`  ✓ [W${idx}] Gate 3: simulation passed`));
-    } catch (err) {
-      const anyErr = err as { shortMessage?: string; info?: { error?: { message?: string } }; message?: string };
-      const text = anyErr.shortMessage ?? anyErr.info?.error?.message ?? anyErr.message ?? "";
-      const outcome = classifySimulation({ ok: false, errorText: text, stageOpen });
-      if (outcome.pass) {
-        console.log(chalk.gray(`  · [W${idx}] Gate 3: ${outcome.label}`));
-      } else {
-        dropped.push(idx);
-        console.log(chalk.bold.red(`  ✗ [W${idx}] Gate 3: ${outcome.label} — dropping this wallet.`));
-      }
+  if (!stageOpen) {
+    console.log(chalk.gray("  · Gate 3 skipped: the stage is not open yet (a pre-open call only returns NotActive)."));
+  } else {
+    const outcomes = await Promise.all(
+      active.map(async ({ idx, wallet }) => {
+        try {
+          await provider.send("eth_call", [
+            { from: wallet.address, to: planNow.to, data: planNow.data, value: `0x${planNow.value.toString(16)}` },
+            "pending",
+          ]);
+          return { idx, pass: true, label: "simulation passed" };
+        } catch (err) {
+          const anyErr = err as { shortMessage?: string; info?: { error?: { message?: string } }; message?: string };
+          const text = anyErr.shortMessage ?? anyErr.info?.error?.message ?? anyErr.message ?? "";
+          const outcome = classifySimulation({ ok: false, errorText: text, revertData: revertDataOf(err), stageOpen: true });
+          return { idx, pass: outcome.pass, label: outcome.label };
+        }
+      })
+    );
+    for (const outcome of outcomes) {
+      if (outcome.pass) console.log(chalk.gray(`  ✓ [W${outcome.idx}] Gate 3: ${outcome.label}`));
+      else console.log(chalk.bold.red(`  ✗ [W${outcome.idx}] Gate 3: ${outcome.label} — dropping this wallet.`));
     }
-  }
-  if (dropped.length > 0) {
-    active = active.filter(({ idx }) => !dropped.includes(idx));
-    if (active.length === 0) {
-      console.log(chalk.bold.red("  ✗ Every wallet failed the simulation — skipping this target."));
-      return skipped();
+    const dropped = outcomes.filter((outcome) => !outcome.pass).map((outcome) => outcome.idx);
+    if (dropped.length > 0) {
+      active = active.filter(({ idx }) => !dropped.includes(idx));
+      if (active.length === 0) {
+        console.log(chalk.bold.red("  ✗ Every wallet failed the simulation — skipping this target."));
+        return skipped();
+      }
     }
   }
 

@@ -10,6 +10,7 @@
 import http from "http";
 import { maskRpc } from "../rpc-resolver";
 import { renderDashboard } from "../scan/html";
+import { resolveChain } from "../chains";
 import {
   DEFAULT_FAVORITES_PATH,
   FavoriteSnapshot,
@@ -131,6 +132,15 @@ export function createServer(options: ServerOptions): http.Server {
             snapshot?: FavoriteSnapshot | null;
           };
           if (!body?.chain || !body?.contract) return sendJson(res, 400, { error: "chain and contract are required" });
+          // Keep junk out of .favorites.json: it is an analysis dataset, and an
+          // address typo or a stray chain would silently poison it.
+          if (!resolveChain(body.chain)) return sendJson(res, 400, { error: `unsupported chain "${body.chain}"` });
+          if (!/^0x[0-9a-f]{40}$/i.test(body.contract)) return sendJson(res, 400, { error: "contract must be a 0x-prefixed 20-byte address" });
+          if (typeof body.note === "string" && body.note.length > 500) return sendJson(res, 400, { error: "note is longer than 500 characters" });
+          if (typeof body.slug === "string" && body.slug.length > 200) return sendJson(res, 400, { error: "slug is longer than 200 characters" });
+          if (body.snapshot !== undefined && body.snapshot !== null && JSON.stringify(body.snapshot).length > 4096) {
+            return sendJson(res, 400, { error: "snapshot is larger than 4KB" });
+          }
           const store = loadFavorites(favoritesPath);
           const at = new Date().toISOString();
 

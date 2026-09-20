@@ -33,5 +33,13 @@
 
 ## 5. 收尾
 - [ ] 5.1 全量测试 + `--dry-run` 真链演练记录
-- [ ] 5.2 README（新 flag/语义）、wiki（batch/ledger/backfill）、CHANGELOG
+- [√] 5.2 README（新 flag/语义）、wiki（batch/ledger/backfill）、CHANGELOG
 - [ ] 5.3 方案包迁移 + 推送
+
+## review13 修复（B1/B2 部署前，同日）
+
+- [√] Gate 3：开售前跳过、开售后并行；`refreshBeforeMs` 3s→5s
+- [√] SeaDrop 自定义错误按选择器解码（4byte 核对；两种 NotActive 元数）+ 未知选择器兜底；测试用真实选择器
+- [√] `--dry-run` 余额不足仅警告
+- [√] favorites API 输入校验（链白名单/地址正则/长度/体积）
+- [√] 门 1 代理盲区（EIP-1967）记录为后续项，未实现

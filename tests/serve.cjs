@@ -196,7 +196,7 @@ test('favorites api: round-trip, jsonl export and the same guards', async () => 
     const added = await fetch(`${base}/api/favorites`, {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ action: 'add', chain: 'robinhood', contract: '0xabc', name: 'A', snapshot: { q: 76, grade: 'A', penalties: [] } }),
+      body: JSON.stringify({ action: 'add', chain: 'robinhood', contract: '0x65f001aa4109bb8d3bf70af66855aba1e5582625', name: 'A', snapshot: { q: 76, grade: 'A', penalties: [] } }),
     });
     assert.equal(added.status, 200);
     assert.equal((await added.json()).favorite.status, 'watching');
@@ -204,7 +204,7 @@ test('favorites api: round-trip, jsonl export and the same guards', async () => 
     const updated = await fetch(`${base}/api/favorites`, {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ action: 'update', chain: 'robinhood', contract: '0xabc', status: 'ready', note: 'good' }),
+      body: JSON.stringify({ action: 'update', chain: 'robinhood', contract: '0x65f001aa4109bb8d3bf70af66855aba1e5582625', status: 'ready', note: 'good' }),
     });
     const record = (await updated.json()).favorite;
     assert.equal(record.note, 'good');
@@ -212,11 +212,30 @@ test('favorites api: round-trip, jsonl export and the same guards', async () => 
 
     const jsonl = await (await fetch(`${base}/api/favorites?format=jsonl`)).text();
     assert.equal(jsonl.trim().split('\n').length, 1);
-    assert.equal(JSON.parse(jsonl.trim()).key, 'robinhood|0xabc');
+    assert.equal(JSON.parse(jsonl.trim()).key, 'robinhood|0x65f001aa4109bb8d3bf70af66855aba1e5582625');
 
     // The page embeds the store.
     const page = await (await fetch(`${base}/`)).text();
-    assert.ok(page.includes('0xabc'));
+    assert.ok(page.includes('0x65f001aa'));
+
+    const badAddress = await fetch(`${base}/api/favorites`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ action: "add", chain: "robinhood", contract: "0xnothex" }),
+    });
+    assert.equal(badAddress.status, 400);
+    const badChain = await fetch(`${base}/api/favorites`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ action: "add", chain: "solana", contract: "0x65f001aa4109bb8d3bf70af66855aba1e5582625" }),
+    });
+    assert.equal(badChain.status, 400);
+    const longNote = await fetch(`${base}/api/favorites`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ action: "update", chain: "robinhood", contract: "0x65f001aa4109bb8d3bf70af66855aba1e5582625", note: "x".repeat(501) }),
+    });
+    assert.equal(longNote.status, 400);
 
     const badType = await fetch(`${base}/api/favorites`, {
       method: 'POST', headers: { 'content-type': 'text/plain' }, body: 'x',
@@ -232,7 +251,7 @@ test('favorites api: round-trip, jsonl export and the same guards', async () => 
     const removed = await fetch(`${base}/api/favorites`, {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ action: 'remove', chain: 'robinhood', contract: '0xabc' }),
+      body: JSON.stringify({ action: 'remove', chain: 'robinhood', contract: '0x65f001aa4109bb8d3bf70af66855aba1e5582625' }),
     });
     assert.equal((await removed.json()).removed, true);
     const after = await (await fetch(`${base}/api/favorites`)).json();

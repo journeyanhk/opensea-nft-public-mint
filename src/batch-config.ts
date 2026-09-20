@@ -43,7 +43,9 @@ export interface BatchConfig {
 }
 
 const DEFAULT_GAS_LIMIT = 250_000;
-const DEFAULT_REFRESH_MS = 3_000;
+// The refresh must cover a plan re-read, getMintStats per wallet, getCode and
+// (once open) a parallel simulation. 3s was measured tight from Tokyo.
+const DEFAULT_REFRESH_MS = 5_000;
 const DEFAULT_AUDIT_MS = 30 * 60_000;
 const ALL_GRADES: Grade[] = ["A", "B", "C", "D"];
 

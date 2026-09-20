@@ -20,6 +20,51 @@ const PUBLIC_IFACE = new Interface([
   "function mintPublic(address nftContract, address feeRecipient, address minterIfNotPayer, uint256 quantity) payable",
 ]);
 
+// SeaDrop reverts with custom errors, so the RPC answer carries a 4-byte
+// selector and the string "execution reverted" — keyword matching never fires.
+// The signatures below are keccak-verified (4byte.directory agrees on the
+// selectors); both NotActive arities exist in the wild.
+const SEADROP_ERRORS = new Interface([
+  "error NotActive()",
+  "error NotActive(uint256,uint256,uint256)",
+  "error NotStarted()",
+  "error IncorrectPayment()",
+  "error IncorrectPayment(uint256,uint256)",
+  "error MintQuantityExceedsMaxSupply()",
+  "error MintQuantityExceedsMaxSupply(uint256,uint256)",
+  "error MintQuantityExceedsMaxMintedPerWallet()",
+  "error MintQuantityExceedsMaxMintedPerWallet(uint256,uint256)",
+  "error MintQuantityExceedsMaxMintedPerWallet(uint256,uint256,uint256)",
+  "error FeeRecipientNotAllowed()",
+  "error AllowedFeeRecipientNotSet()",
+]);
+
+export function decodeSeaDropError(data: string | null | undefined): string | null {
+  if (!data || !/^0x[0-9a-f]+$/i.test(data) || data.length < 10) return null;
+  try {
+    const parsed = SEADROP_ERRORS.parseError(data);
+    return parsed ? parsed.name : null;
+  } catch {
+    return null;
+  }
+}
+
+// Providers disagree on where the revert payload lives: a plain `data` field,
+// nested under `info.error`, or embedded in the message text.
+export function revertDataOf(err: unknown): string | null {
+  const e = err as { data?: unknown; info?: { error?: { data?: unknown; message?: unknown } }; message?: unknown };
+  const candidates = [e?.data, e?.info?.error?.data, e?.info?.error?.message, e?.message];
+  for (const candidate of candidates) {
+    if (typeof candidate === "string") {
+      const match = candidate.match(/0x[0-9a-f]{8,}/i);
+      if (match) return match[0];
+    }
+  }
+  return null;
+}
+
+const PRE_OPEN_PASS = new Set(["NotActive", "NotStarted"]);
+
 export interface GateExpectation {
   from: string;
   chainId: bigint;
@@ -101,14 +146,31 @@ const FATAL_PATTERNS: { pattern: RegExp; label: string }[] = [
 export function classifySimulation(input: {
   ok: boolean;
   errorText?: string | null;
+  revertData?: string | null;
   stageOpen: boolean;
 }): { pass: boolean; label: string } {
   if (input.ok) return { pass: true, label: "simulation passed" };
+
+  // A decoded SeaDrop error is the most reliable signal available: the node
+  // only gives us the selector, so decode before falling back to text.
+  const name = decodeSeaDropError(input.revertData ?? null);
+  if (name) {
+    if (PRE_OPEN_PASS.has(name)) {
+      return input.stageOpen
+        ? { pass: false, label: `revert: ${name} (the stage is already open)` }
+        : { pass: true, label: `pre-open revert (${name})` };
+    }
+    return { pass: false, label: `revert: ${name}` };
+  }
+
   const text = input.errorText ?? "";
   for (const { pattern, label } of FATAL_PATTERNS) {
     if (pattern.test(text)) return { pass: false, label };
   }
-  if (input.stageOpen) return { pass: false, label: "simulation reverted while the stage is open" };
+  if (input.stageOpen) {
+    const selector = input.revertData ? ` ${input.revertData.slice(0, 10)}` : "";
+    return { pass: false, label: `simulation reverted while the stage is open${selector}` };
+  }
   return { pass: true, label: "pre-open revert (expected)" };
 }
 

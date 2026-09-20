@@ -181,6 +181,14 @@ export async function runBatch(configPath: string, options: BatchRunOptions = {}
     for (const wallet of wallets) {
       const balance = await provider.getBalance(wallet.address).catch(() => null);
       if (balance === null || balance < required) {
+        if (cfg.dryRun) {
+          // Rehearsing is exactly how one checks the pipeline with an empty
+          // wallet; a balance problem is a warning there, not a refusal.
+          console.log(
+            chalk.yellow(`  ⚠ ${target.label}: ${wallet.address} cannot cover ${formatEther(required)} ${chain.nativeSymbol} — dry run continues`)
+          );
+          continue;
+        }
         console.log(
           chalk.yellow(`  ✗ ${target.label} skipped — ${wallet.address} cannot cover ${formatEther(required)} ${chain.nativeSymbol} yet`)
         );
@@ -256,10 +264,12 @@ export async function runBatch(configPath: string, options: BatchRunOptions = {}
     });
 
     if (short.length > 0) {
-      throw new Error(
+      const message =
         `Wallet(s) short of funds for ${actionable.length} actionable target(s):\n  ${short.join("\n  ")}\n` +
-          `  Each wallet needs ≥ ${formatEther(requiredPerWallet)} ${chain.nativeSymbol} (mint value + gasLimit × maxFee per target).`
-      );
+        `  Each wallet needs ≥ ${formatEther(requiredPerWallet)} ${chain.nativeSymbol} (mint value + gasLimit × maxFee per target).`;
+      if (!cfg.dryRun) throw new Error(message);
+      console.log(chalk.yellow(`  ⚠ ${message}`));
+      console.log(chalk.yellow("  dry run continues — no transaction will be broadcast."));
     }
   } else {
     console.log(chalk.gray("  no actionable targets — nothing to fund"));

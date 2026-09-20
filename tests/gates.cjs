@@ -96,3 +96,52 @@ test('codeHashOf hashes bytecode and treats an empty account as dangerous', () =
   assert.equal(codeHashOf('0x'), null, 'no code means the contract is gone');
   assert.equal(codeHashOf(''), null);
 });
+
+test('simulation errors decode by SeaDrop selector, not by error text', () => {
+  const { decodeSeaDropError, revertDataOf } = require('../dist/gates');
+  const { Interface } = require('ethers');
+
+  // Real selectors: 4byte/keccak-verified signatures used by SeaDrop.
+  const errors = new Interface([
+    'error NotActive()',
+    'error NotActive(uint256,uint256,uint256)',
+    'error IncorrectPayment(uint256,uint256)',
+    'error MintQuantityExceedsMaxSupply(uint256,uint256)',
+    'error MintQuantityExceedsMaxMintedPerWallet(uint256,uint256)',
+    'error FeeRecipientNotAllowed()',
+  ]);
+  const dataFor = (sig, args = []) => {
+    const fragment = errors.getError(sig);
+    return errors.encodeErrorResult(fragment, args);
+  };
+  assert.equal(decodeSeaDropError(dataFor('NotActive()')), 'NotActive');
+  assert.equal(decodeSeaDropError(dataFor('NotActive(uint256,uint256,uint256)', [1n, 2n, 3n])), 'NotActive');
+  assert.equal(decodeSeaDropError(dataFor('IncorrectPayment', [1n, 2n])), 'IncorrectPayment');
+  assert.equal(decodeSeaDropError(dataFor('FeeRecipientNotAllowed()')), 'FeeRecipientNotAllowed');
+  assert.equal(decodeSeaDropError('0xdeadbeef'), null);
+  assert.equal(decodeSeaDropError(null), null);
+
+  // Revert data arrives in several shapes depending on the node/provider.
+  assert.equal(revertDataOf({ data: '0x12345678' }), '0x12345678');
+  assert.equal(revertDataOf({ info: { error: { data: '0x56789012' } } }), '0x56789012');
+  assert.equal(revertDataOf({ info: { error: { message: 'execution reverted: 0x9abcdef0' } } }), '0x9abcdef0');
+  assert.equal(revertDataOf({ shortMessage: 'execution reverted' }), null);
+
+  const { classifySimulation } = require('../dist/gates');
+  const active = dataFor('NotActive()');
+  assert.equal(classifySimulation({ ok: false, revertData: active, stageOpen: false }).pass, true);
+  assert.match(classifySimulation({ ok: false, revertData: active, stageOpen: false }).label, /pre-open/i);
+
+  const payment = classifySimulation({ ok: false, revertData: dataFor('IncorrectPayment', [1n, 2n]), stageOpen: false });
+  assert.equal(payment.pass, false, 'a decoded payment error is fatal even before the open');
+  assert.match(payment.label, /IncorrectPayment/);
+
+  const cap = classifySimulation({ ok: false, revertData: dataFor('MintQuantityExceedsMaxMintedPerWallet', [1n, 2n]), stageOpen: false });
+  assert.equal(cap.pass, false);
+  assert.match(cap.label, /MaxMintedPerWallet/);
+
+  // Unknown selector once open still blocks, and says which selector it was.
+  const unknown = classifySimulation({ ok: false, revertData: '0xdeadbeef', stageOpen: true });
+  assert.equal(unknown.pass, false);
+  assert.match(unknown.label, /0xdeadbeef/);
+});
