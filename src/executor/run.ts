@@ -31,10 +31,10 @@ import {
   claimNext,
   clearArmed,
   completeJob,
-  createArmToken,
   failJob,
   isArmed,
   findJob,
+  loadOrCreateArmToken,
   nextEligible,
   publishArmToken,
   reclaimStale,
@@ -176,6 +176,7 @@ export interface ExecutorOptions {
   once?: boolean;
   dryRun?: boolean;
   host?: string;
+  rotateArmToken?: boolean;
   onProgress?: (message: string) => void;
 }
 
@@ -187,11 +188,20 @@ export async function runExecutor(options: ExecutorOptions = {}): Promise<void> 
   const host = options.host ?? os.hostname();
   const say = options.onProgress ?? ((message: string) => console.log(message));
 
-  const token = createArmToken();
-  publishArmToken(queueDir, token);
+  const { token, created } = loadOrCreateArmToken(queueDir, { rotate: options.rotateArmToken === true });
+  const published = publishArmToken(queueDir, token);
   console.log(chalk.bold.cyan(`\nExecutor — queue ${queueDir}`));
-  console.log(chalk.bold.yellow(`  arm token: ${token}`));
-  console.log(chalk.gray("  enter it in the panel's queue tab; it expires 12h after arming. Keep it out of logs you share."));
+  console.log(chalk.bold.yellow(`  arm token: ${token}${created ? " (new)" : " (unchanged)"}`));
+  console.log(
+    chalk.gray(
+      `  stored in queue/arm-token (0600); enter it in the panel once — it survives restarts. ` +
+        `Arming itself expires (${process.env.EXECUTOR_ARM_TTL_H ?? 12}h); --rotate-arm-token replaces the token.`
+    )
+  );
+  if (published.keptArm) {
+    const state = isArmed(queueDir, Date.now());
+    if (state.armed) console.log(chalk.gray(`  still armed until ${new Date(state.expiresAtMs!).toISOString()}`));
+  }
 
   if (options.dryRun) {
     // A rehearsal must not consume a job: peek at what would be claimed.

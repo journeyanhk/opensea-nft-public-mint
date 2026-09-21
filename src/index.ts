@@ -32,7 +32,7 @@ const KNOWN_FLAGS = new Set([
   "--dry-run",
   "--burst-count", "--burst-spacing-ms", "--burst-lead-ms", "--allow-overshoot", "--force-clock",
   "--parallel",
-  "--executor", "--queue-dir", "--interval-ms", "--once",
+  "--executor", "--queue-dir", "--interval-ms", "--once", "--rotate-arm-token",
 ]);
 
 const HELP = `
@@ -185,6 +185,7 @@ async function main(): Promise<void> {
         intervalMs: Number(value("--interval-ms")) || undefined,
         once: args.includes("--once"),
         dryRun: args.includes("--dry-run"),
+        rotateArmToken: args.includes("--rotate-arm-token"),
       });
     } else if (args.includes("--export-favorites")) {
       const { runExportFavoritesCommand } = await import("./scan/favorites-cli");

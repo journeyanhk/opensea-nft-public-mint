@@ -5,7 +5,7 @@ const os = require('os');
 const path = require('path');
 const {
   enqueueJob, claimNext, completeJob, failJob, cancelJob, reclaimStale, listJobs,
-  createArmToken, publishArmToken, setArmed, isArmed, clearArmed, validateJobInput,
+  createArmToken, publishArmToken, setArmed, isArmed, clearArmed, validateJobInput, loadOrCreateArmToken,
 } = require('../dist/executor/queue');
 
 const dir = () => fs.mkdtempSync(path.join(os.tmpdir(), 'queue-'));
@@ -140,4 +140,28 @@ test('the soonest opening is claimed first, whatever the enqueue order', () => {
   const claim = claimNext(q, { by: 'host', nowMs: 3_000, leaseMs: 60_000, claimWindowMs: 2 * 3_600_000 });
   assert.equal(claim.job.id, soon.id, 'a nearer opening must not miss its window');
   assert.notEqual(claim.job.id, late.id);
+});
+
+test('the arm token is stable across restarts and keeps a live arm window', () => {
+  const q = dir();
+  const first = loadOrCreateArmToken(q);
+  assert.equal(first.created, true);
+  assert.equal(fs.statSync(path.join(q, 'arm-token')).mode & 0o777, 0o600, 'readable only by the owner');
+  const again = loadOrCreateArmToken(q);
+  assert.equal(again.created, false);
+  assert.equal(again.token, first.token, 'a restart reuses the token');
+
+  // The executor publishes the hash at startup; the first publish starts disarmed.
+  assert.equal(publishArmToken(q, first.token).keptArm, false);
+  setArmed(q, { token: first.token, nowMs: 1_000, ttlMs: 60_000 });
+  assert.equal(publishArmToken(q, first.token).keptArm, true);
+  assert.equal(isArmed(q, 30_000).armed, true, 'the arm window survives a restart');
+  assert.equal(isArmed(q, 61_000).armed, false, 'but it still expires');
+
+  // Rotating invalidates the old token and disarms.
+  const rotated = loadOrCreateArmToken(q, { rotate: true });
+  assert.notEqual(rotated.token, first.token);
+  assert.equal(publishArmToken(q, rotated.token).keptArm, false);
+  assert.equal(setArmed(q, { token: first.token, nowMs: 62_000, ttlMs: 60_000 }).ok, false, 'the old token no longer arms');
+  assert.equal(setArmed(q, { token: rotated.token, nowMs: 62_000, ttlMs: 60_000 }).ok, true);
 });

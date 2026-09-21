@@ -351,7 +351,8 @@ export function setArmed(dir: string, input: { token: string; nowMs: number; ttl
   if (!expected || presented !== expected) {
     return { ok: false, reason: "arm token does not match the one this executor printed" };
   }
-  const ttlMs = input.ttlMs ?? 12 * 3_600_000;
+  const configuredHours = Number(process.env.EXECUTOR_ARM_TTL_H);
+  const ttlMs = input.ttlMs ?? (Number.isFinite(configuredHours) && configuredHours > 0 ? configuredHours : 12) * 3_600_000;
   writeJson(file, {
     armedAt: new Date(input.nowMs).toISOString(),
     expiresAtMs: input.nowMs + ttlMs,
@@ -360,11 +361,47 @@ export function setArmed(dir: string, input: { token: string; nowMs: number; ttl
   return { ok: true };
 }
 
-// The executor publishes the hash of the token it printed; the token itself is
-// never written to disk.
-export function publishArmToken(dir: string, token: string): void {
+const ARM_TOKEN_FILE = "arm-token";
+
+// The token is generated once and kept in a 0600 file next to .env.executor, so
+// a restart does not invalidate it (and does not lose an arm window that has not
+// expired). Anyone able to read this file can read the private keys anyway, so
+// storing it here adds no exposure; it still stops a panel-password-only
+// attacker from arming. --rotate-arm-token replaces it on demand.
+export function loadOrCreateArmToken(dir: string, opts: { rotate?: boolean } = {}): { token: string; created: boolean } {
+  const file = path.join(dir, ARM_TOKEN_FILE);
+  if (!opts.rotate) {
+    try {
+      const token = fs.readFileSync(file, "utf8").trim();
+      if (token.length >= 16) return { token, created: false };
+    } catch {
+      // fall through and create one
+    }
+  }
+  const token = createArmToken();
+  fs.mkdirSync(dir, { recursive: true });
+  fs.writeFileSync(file, token + "\n", { mode: 0o600 });
+  return { token, created: true };
+}
+
+// Publishing keeps an existing arm window for the same token: that is what makes
+// a restart transparent. A different token (a rotation) starts disarmed.
+export function publishArmToken(dir: string, token: string): { keptArm: boolean } {
   const hash = createHash("sha256").update(token).digest("hex");
-  writeJson(path.join(dir, ARM_FILE), { tokenHash: hash, expiresAtMs: 0 });
+  const file = path.join(dir, ARM_FILE);
+  let current: { tokenHash?: string; expiresAtMs?: number } | null = null;
+  try {
+    current = JSON.parse(fs.readFileSync(file, "utf8")) as { tokenHash?: string; expiresAtMs?: number };
+  } catch {
+    current = null;
+  }
+  if (current?.tokenHash === hash) {
+    // Keep expiresAtMs untouched (an expired window stays expired).
+    writeJson(file, { tokenHash: hash, expiresAtMs: current.expiresAtMs ?? 0 });
+    return { keptArm: (current.expiresAtMs ?? 0) > 0 };
+  }
+  writeJson(file, { tokenHash: hash, expiresAtMs: 0 });
+  return { keptArm: false };
 }
 
 export function isArmed(dir: string, nowMs: number): { armed: boolean; expiresAtMs?: number } {
