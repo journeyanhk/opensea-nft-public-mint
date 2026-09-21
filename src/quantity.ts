@@ -20,6 +20,32 @@ export interface QuantityPolicyInput {
 // limit with it — otherwise the transaction is guaranteed to run out of gas.
 // Over-estimating is nearly free (unused gas is refunded); under-estimating is
 // a failed mint.
+// SeaDrop validates the requested quantity against the remaining supply in one
+// check: asking for 10 when 5 remain reverts the entire transaction and takes
+// nothing. When the remainder is thin, one token is the only quantity that can
+// succeed — a small ticket beats no ticket.
+export function downgradeForTightSupply(input: {
+  quantity: number;
+  remaining: bigint | null;
+  multiple?: number;
+}): { quantity: number; reason: string | null } {
+  const count = Math.max(1, Math.floor(input.quantity));
+  if (count === 1 || input.remaining === null) return { quantity: count, reason: null };
+  const multiple = BigInt(Math.max(1, Math.floor(input.multiple ?? 20)));
+  if (input.remaining >= multiple * BigInt(count)) return { quantity: count, reason: null };
+  return {
+    quantity: 1,
+    reason: `supply is thin (${input.remaining} left for ${count} requested) — taking one instead`,
+  };
+}
+
+export const RISKY_QUANTITY_FLAGS = ["batch-mint", "instant-sellout"];
+
+export function riskAdjustedQuantity(quantity: number, riskFlags: string[] | undefined): number {
+  if (!riskFlags || riskFlags.length === 0) return quantity;
+  return riskFlags.some((flag) => RISKY_QUANTITY_FLAGS.includes(flag)) ? 1 : quantity;
+}
+
 export function gasLimitForQuantity(
   baseGasLimit: number,
   quantity: number,

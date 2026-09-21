@@ -312,8 +312,14 @@ export async function refreshTargets(opts: RefreshOptions): Promise<RefreshSumma
         if (plan) {
           entry.publicStart = plan.drop.startTime;
           entry.endTime = plan.drop.endTime;
+          entry.mintPriceWei = plan.drop.mintPrice.toString();
+          entry.capPerWallet = plan.drop.maxTotalMintableByWallet > 0 ? plan.drop.maxTotalMintableByWallet : null;
+          entry.feeRecipient = plan.feeRecipient;
           patch.publicStart = plan.drop.startTime;
           patch.endTime = plan.drop.endTime;
+          patch.mintPriceWei = entry.mintPriceWei;
+          patch.capPerWallet = entry.capPerWallet;
+          patch.feeRecipient = entry.feeRecipient;
         }
         if (stats) {
           entry.maxSupply = stats.maxSupply > 0n ? stats.maxSupply.toString() : null;

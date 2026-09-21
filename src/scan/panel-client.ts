@@ -327,6 +327,7 @@ export const FAVORITES_CLIENT = `
         slug: enqueue.dataset.slug || null, name: enqueue.dataset.name || null,
         quantity: 1, maxPriceEth: "current",
         startAtMs: enqueue.dataset.start ? Number(enqueue.dataset.start) * 1000 : null,
+        riskFlags: (enqueue.dataset.risks || "").split(",").filter(Boolean),
         source: { kind: "row" },
       };
       fetch("/api/queue", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) })

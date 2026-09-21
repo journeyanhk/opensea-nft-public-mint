@@ -20,7 +20,7 @@ import { toUtc8Time } from "./time-format";
 import { buildLocalMintPlan, fetchMintStats, LocalMintPlan, MintStats } from "./seadrop-public";
 import { countMintedTokens, verdict } from "./receipts";
 import { aggregateBurst, gapFillerTx, planBurst } from "./burst";
-import { freeQuantityFor, gasLimitForQuantity } from "./quantity";
+import { downgradeForTightSupply, freeQuantityFor, gasLimitForQuantity, riskAdjustedQuantity } from "./quantity";
 import { classifySimulation, codeHashOf, revertDataOf, validateMintPublicCalldata, validateSignedTx } from "./gates";
 
 export interface LocalSnipeOpts {
@@ -41,6 +41,7 @@ export interface LocalSnipeOpts {
   // whether a burst is allowed runs in the caller, which knows the config).
   burst?: { count: number; spacingMs: number; leadMs: number };
   freeMaxQuantity?: number; // 0 disables the free-drop quantity policy
+  riskFlags?: string[]; // e.g. ["instant-sellout", "batch-mint"] — those take one ticket
   // B4: acquire the wallet lane here — after signing and the gates, before the
   // send. Preparing does not hold the lane, sending does; the returned function
   // releases it.
@@ -145,6 +146,7 @@ export async function localPublicSnipe(opts: LocalSnipeOpts): Promise<SnipeResul
   // supply before it opens, leaving the public stage as a shell. Read supply and
   // per-wallet counts while the decision is still free. Returns false when there
   // is nothing left to mint.
+  let supplyRemaining: bigint | null = null;
   async function checkSupply(cap: number): Promise<boolean> {
     const stats = await Promise.all(
       wallets.map((w) => fetchMintStats(provider, nftContract, w.address))
@@ -168,6 +170,7 @@ export async function localPublicSnipe(opts: LocalSnipeOpts): Promise<SnipeResul
     }
 
     const requested = BigInt(quantity * active.length);
+    supplyRemaining = headline.maxSupply > 0n ? headline.maxSupply - headline.totalMinted : null;
     const verdict = supplyVerdict(headline.totalMinted, headline.maxSupply, requested);
     if (verdict === "sold-out") {
       console.log(
@@ -189,22 +192,32 @@ export async function localPublicSnipe(opts: LocalSnipeOpts): Promise<SnipeResul
 
   // The quantity can change here, so the calldata (which encodes it) is rebuilt
   // from the same fresh plan: one extra read at T-refresh, no stale calldata.
-  const applyQuantityPolicy = async (plan: LocalMintPlan): Promise<LocalMintPlan> => {
-    if (freeMaxQuantity === 0) return plan;
-    const policy = freeQuantityFor({
-      mintPriceWei: plan.drop.mintPrice,
-      capPerWallet: plan.drop.maxTotalMintableByWallet,
-      freeMaxQuantity,
-    });
-    if (policy.quantity === quantity) return plan;
-    console.log(chalk.bold.gray(`  quantity policy: ${policy.reason} (was ${quantity})`));
-    quantity = policy.quantity;
+  // Rebuild the calldata whenever the quantity changes: it encodes the count.
+  const resize = async (next: number, why: string, plan: LocalMintPlan): Promise<LocalMintPlan> => {
+    console.log(chalk.bold.gray(`  quantity policy: ${why} (was ${quantity})`));
+    quantity = next;
     const grown = gasLimitForQuantity(effectiveGasLimit, quantity);
     if (grown > effectiveGasLimit) {
       console.log(chalk.gray(`  gas limit raised ${effectiveGasLimit} → ${grown} for ${quantity} mint(s)`));
       effectiveGasLimit = grown;
     }
     return (await buildLocalMintPlan(rpcUrls[0], nftContract, quantity)) ?? plan;
+  };
+
+  const applyQuantityPolicy = async (plan: LocalMintPlan): Promise<LocalMintPlan> => {
+    if (freeMaxQuantity === 0) return plan;
+    // A batch-contract or instant-sellout target is one ticket, whatever the cap.
+    const riskAdjusted = riskAdjustedQuantity(quantity, opts.riskFlags);
+    if (riskAdjusted < quantity) {
+      return resize(riskAdjusted, `${opts.riskFlags?.join("/")} target → 1`, plan);
+    }
+    const policy = freeQuantityFor({
+      mintPriceWei: plan.drop.mintPrice,
+      capPerWallet: plan.drop.maxTotalMintableByWallet,
+      freeMaxQuantity,
+    });
+    if (policy.quantity === quantity) return plan;
+    return resize(policy.quantity, policy.reason, plan);
   };
 
   console.log(chalk.bold.magenta("\n── LOCAL PUBLIC MINT (no OpenSea) ──"));
@@ -276,6 +289,8 @@ export async function localPublicSnipe(opts: LocalSnipeOpts): Promise<SnipeResul
       // A public stage can already be empty: a whitelist phase often mints the
       // whole supply before it opens, leaving the public stage as a shell.
       if (!(await checkSupply(fresh.drop.maxTotalMintableByWallet))) return skipped();
+      const tightNow = downgradeForTightSupply({ quantity, remaining: supplyRemaining });
+      if (tightNow.quantity < quantity) fresh = await resize(tightNow.quantity, tightNow.reason!, fresh);
 
       if (fresh.data !== planNow.data || fresh.value !== planNow.value) {
         console.log(
@@ -302,6 +317,8 @@ export async function localPublicSnipe(opts: LocalSnipeOpts): Promise<SnipeResul
     // No refresh window (wizard path): the plan is read once up front, but a
     // sold-out stage is still worth refusing before anything is signed.
     if (!(await checkSupply(planNow.drop.maxTotalMintableByWallet))) return skipped();
+    const tightNow = downgradeForTightSupply({ quantity, remaining: supplyRemaining });
+    if (tightNow.quantity < quantity) planNow = await resize(tightNow.quantity, tightNow.reason!, planNow);
   }
 
   // ── Gate 1: the contract must still be the one the audit saw ─────────────

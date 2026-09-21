@@ -49,6 +49,11 @@ export interface ContractEntry {
   sources: string[]; // e.g. ["onchain", "opensea-calendar"]
   calendar: CalendarFacts | null;
   codeHash: string | null; // bytecode hash from the last audit (B2 gate 1)
+  // Read from the SeaDrop plan during discovery/filtering (no extra RPC) so the
+  // board has a price and a cap long before an audit happens.
+  mintPriceWei: string | null;
+  capPerWallet: number | null;
+  feeRecipient: string | null;
 }
 
 export interface ScanState {
@@ -107,6 +112,9 @@ export function emptyContractEntry(): ContractEntry {
     sources: [],
     calendar: null,
     codeHash: null,
+    mintPriceWei: null,
+    capPerWallet: null,
+    feeRecipient: null,
   };
 }
 

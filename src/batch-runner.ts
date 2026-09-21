@@ -587,6 +587,7 @@ export async function runBatch(configPath: string, options: BatchRunOptions = {}
           dryRun: cfg.dryRun,
           burst: burstForTarget,
         freeMaxQuantity: cfg.freeMaxQuantity,
+        riskFlags: target.riskFlags,
           // B4: preparation overlaps, the send does not. The lane is taken after
           // the gates and before the wait, so a second job sharing this wallet
           // waits here instead of signing the same nonce.

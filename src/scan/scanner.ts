@@ -378,6 +378,11 @@ export async function runScan(
       }
       entry.publicStart = plan.drop.startTime;
       entry.endTime = plan.drop.endTime;
+      // The plan was fetched to filter this candidate; keeping its facts costs
+      // nothing and removes the "price unknown" backlog on the board.
+      entry.mintPriceWei = plan.drop.mintPrice.toString();
+      entry.capPerWallet = plan.drop.maxTotalMintableByWallet > 0 ? plan.drop.maxTotalMintableByWallet : null;
+      entry.feeRecipient = plan.feeRecipient;
       const nowSec = Math.floor(nowMs / 1000);
       if (!isCandidateDrop(plan.drop, nowSec, opts.horizonHours)) {
         if (plan.drop.endTime <= nowSec) report.skipped.ended++;

@@ -7,6 +7,8 @@
 ## [Unreleased]
 
 ### 新增
+- P0 面板收口：①状态栏轮询发现 `lastScanAt` 变化即自动 reload（后台标签的 meta refresh 会被浏览器暂停）；②**发现阶段落盘价格/上限/feeRecipient**（复用候选过滤已调用的 `buildLocalMintPlan`，零额外 RPC），`--refresh-targets` 同步补齐，「价格未知」积压消失；③无链上计划（价格与上限均缺）时不再显示等级，按未评级参与筛选
+- P0 数量策略：`FREE_MAX_QUANTITY` 默认 10；T-refresh 判定顺序为 风险标记（`batch-mint`/`instant-sellout` → 1）→ 免费 `min(cap, 10)` → 收费 1 → **供应紧张降 1**（剩余 < 20×期望，SeaDrop 整笔校验会全回滚）；风险标记由面板随任务入队传递（`riskFlags`，队列任务与配置目标都支持）
 - 数量策略：`FREE_MAX_QUANTITY`（默认 5，0 关闭）——**免费 drop 取 `min(per-wallet cap, 该值)`，收费 drop 固定 1 个**；判定在 T-refresh 读到最新 plan 之后（`src/quantity.ts` 纯函数），数量变化即用新计划重建 calldata，日志打印 `quantity policy: …`；`BatchConfig.freeMaxQuantity` 支持配置/环境变量覆盖，schedule 行显示 `free max N`
 - 日志修正：`lane busy` 只在真的等待通道（`waitedMs > 30`）时提示，单纯因认领晚而晚发改为 `firing +Xms after the open (claimed late)`；RPC 失败告警使用 `maskRpc` 脱敏（原会把 Alchemy key 打进 journald）- M9/B5（第四阶段）面板队列接线：`执行队列` tab（服务端嵌入 `window.__QUEUE__` 快照：jobs/armed/heartbeat）与武装输入框（填执行器 token）、行内「加入执行队列」与「收藏加入执行队列」批量按钮、任务取消与刷新；执行器在快照缺失或超过 30 分钟时**先复审并锁定 codeHash**（`needsAudit`），锁定不到就拒绝执行——自动化路径不再可能静默跳过门 1；`updateJob` 支持认领后补写快照
 - M9/B5（第三阶段）执行器：`src/executor/run.ts`（私钥反向断言、启动打印并只落哈希 arm token、reclaim→arm→claim→复用 runBatch(assumeYes+队列 TargetSource)→结果从账本派生写回、心跳文件、`--once/--interval-ms/--queue-dir/--dry-run`）；`assumeYes` 选项；`.env.executor.example` 与 `deploy/nft-executor.service`（不监听端口）

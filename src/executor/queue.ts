@@ -26,6 +26,7 @@ export interface QueueJob {
   name: string | null;
   quantity: number;
   maxPriceEth: string;
+  riskFlags: string[]; // instant-sellout / batch-mint as seen in the panel
   startAtMs: number | null;
   // Audit snapshot taken when the job was created: the executor re-checks the
   // code hash before signing and re-audits if the snapshot is stale, so gate 1
@@ -60,6 +61,7 @@ export interface JobInput {
   name?: string | null;
   quantity?: number;
   maxPriceEth?: string;
+  riskFlags?: string[];
   startAtMs?: number | null;
   auditedAt?: string | null;
   grade?: string | null;
@@ -147,6 +149,7 @@ export function enqueueJob(dir: string, input: JobInput, nowMs: number): { ok: t
     name: input.name ?? null,
     quantity: input.quantity ?? 1,
     maxPriceEth: input.maxPriceEth ?? "current",
+    riskFlags: Array.isArray(input.riskFlags) ? input.riskFlags.map(String).slice(0, 8) : [],
     startAtMs: input.startAtMs ?? null,
     auditedAt: input.auditedAt ?? null,
     grade: input.grade ?? null,

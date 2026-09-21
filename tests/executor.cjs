@@ -58,7 +58,7 @@ test('"current" is resolved to the audited price and never reaches the loader', 
 });
 
 test('queue jobs can opt into burst from the executor environment', () => {
-  const job = { chain: "robinhood", contract: W, quantity: 1, maxPriceEth: "0", startAtMs: null, codeHash: null, slug: null };
+  const job = { chain: "robinhood", contract: W, quantity: 1, maxPriceEth: "0", startAtMs: null, codeHash: null, slug: null, riskFlags: [] };
   assert.equal(jobToRawConfig(job, {}).burst, undefined, "burst stays off by default");
   const withBurst = jobToRawConfig(job, { BURST_COUNT: "2", BURST_ALLOW_OVERSHOOT: "1" });
   assert.deepEqual(withBurst.burst, { count: 2, allowOvershoot: true });

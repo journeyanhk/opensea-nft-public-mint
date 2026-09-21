@@ -22,6 +22,7 @@ export interface BatchTarget {
   quantity: number;
   maxValueWei: bigint; // ceiling for mintPrice × quantity, per wallet
   codeHash: string | null; // code hash the audit saw, re-checked before signing
+  riskFlags: string[]; // instant-sellout / batch-mint: those take one ticket
   startAt: Date;
   plan: LocalMintPlan;
   supply: { totalMinted: bigint; maxSupply: bigint } | null; // null when the contract cannot answer
@@ -178,7 +179,7 @@ export async function loadBatchConfig(
       chainKey: chain.key,
       dryRun,
       burst: parseBurst(raw?.burst),
-      freeMaxQuantity: nonNegativeInt(raw?.freeMaxQuantity ?? process.env.FREE_MAX_QUANTITY, 5),
+      freeMaxQuantity: nonNegativeInt(raw?.freeMaxQuantity ?? process.env.FREE_MAX_QUANTITY, 10),
       parallel: raw?.parallel === true,
       parallelLimit: Number.isFinite(Number(raw?.parallelLimit)) ? Math.max(1, Math.floor(Number(raw.parallelLimit))) : null,
       walletSource: raw?.walletSource === "prompt" ? "prompt" : "env",
@@ -292,6 +293,7 @@ export async function loadBatchConfig(
       // Pinned by --audit / --export; absent for hand-written configs, in which
       // case gate 1 simply has nothing to compare against.
       codeHash: targetCodeHash(entry),
+      riskFlags: Array.isArray(entry?.riskFlags) ? entry.riskFlags.map(String) : [],
       startAt,
       plan,
       supply: stats ? { totalMinted: stats.totalMinted, maxSupply: stats.maxSupply } : null,
@@ -302,7 +304,7 @@ export async function loadBatchConfig(
     chainKey: chain.key,
     dryRun,
       burst: parseBurst(raw?.burst),
-    freeMaxQuantity: nonNegativeInt(raw?.freeMaxQuantity ?? process.env.FREE_MAX_QUANTITY, 5),
+    freeMaxQuantity: nonNegativeInt(raw?.freeMaxQuantity ?? process.env.FREE_MAX_QUANTITY, 10),
     parallel: raw?.parallel === true,
     parallelLimit: Number.isFinite(Number(raw?.parallelLimit)) ? Math.max(1, Math.floor(Number(raw.parallelLimit))) : null,
     walletSource: raw.walletSource === "prompt" ? "prompt" : "env",

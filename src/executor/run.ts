@@ -66,6 +66,7 @@ export function jobToRawConfig(job: QueueJob, env: NodeJS.ProcessEnv = process.e
         contract: job.contract,
         quantity: job.quantity,
         maxPriceEth: job.maxPriceEth,
+        ...(job.riskFlags.length > 0 ? { riskFlags: job.riskFlags } : {}),
         startAt: job.startAtMs ? new Date(job.startAtMs).toISOString() : "auto",
         ...(job.codeHash ? { codeHash: job.codeHash } : {}),
       },

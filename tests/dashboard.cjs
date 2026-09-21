@@ -25,7 +25,7 @@ const state = {
 
 const history = [
   { at: '2026-09-17T07:00:00.000Z', chain: 'arc', contract: '0xAbC', grade: 'C', remaining: '0', projected: '0', start, risks: ['partial scan (1% of mints)'] },
-  { at: '2026-09-17T08:00:00.000Z', chain: 'arc', contract: '0xabc', grade: 'B', remaining: '50', projected: '20', start, risks: ['top minter holds 80%', 'price changed 8m before open'] },
+  { at: '2026-09-17T08:00:00.000Z', chain: 'arc', contract: '0xabc', grade: 'B', remaining: '50', projected: '20', start, risks: ['top minter holds 80%', 'price changed 8m before open'], mintPriceWei: '0', capPerWallet: 2 },
 ];
 
 const ledger = {

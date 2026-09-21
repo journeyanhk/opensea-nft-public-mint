@@ -269,6 +269,9 @@ export function loadDashboardRows(
       // The last stage is the public sale; the first is usually a presale wave,
       // so the fallback and the reschedule check both use the public guess.
       const calendarPublicStart = calendar?.publicStartTime ?? calendar?.startTime ?? null;
+      const mintPriceWei = entry.mintPriceWei ?? latest?.mintPriceWei ?? null;
+      const capPerWallet = entry.capPerWallet ?? latest?.capPerWallet ?? null;
+      const hasChainPlan = mintPriceWei !== null || capPerWallet !== null;
       const start = chainStart ?? calendarPublicStart;
       const endTime = entry.endTime ?? latest?.endTime ?? calendar?.endTime ?? null;
       // A start the project moved without updating the calendar (or vice versa).
@@ -335,7 +338,9 @@ export function loadDashboardRows(
         chain,
         contract,
         start,
-        grade: entry.lastGrade ?? latest?.grade ?? null,
+        // A grade from history next to a row without a plan reads as a
+        // judgement we cannot stand behind; only show it when there is a plan.
+        grade: hasChainPlan ? entry.lastGrade ?? latest?.grade ?? null : null,
         gradeHistory: points,
         remaining: latest?.remaining ?? null,
         projected: latest?.projected ?? null,
@@ -364,8 +369,8 @@ export function loadDashboardRows(
         slug,
         name,
         owner,
-        mintPriceWei: latest?.mintPriceWei ?? null,
-        capPerWallet: latest?.capPerWallet ?? null,
+        mintPriceWei,
+        capPerWallet,
         endTime,
         maxSupply: maxSupply === null ? null : maxSupply.toString(),
         minted: minted === null ? null : minted.toString(),
@@ -739,6 +744,7 @@ export function renderDashboard(
         `data-minters="${row.uniqueMinters ?? ""}"`,
         `data-velocity="${escapeHtml(row.velocity24h ?? "")}"`,
         `data-notes="${escapeHtml(row.notes.join("；"))}"`,
+        `data-risks="${escapeHtml(quality.penalties.join(","))}"`,
         `data-net24usd="${escapeHtml(row.nets["24"] ?? "")}"`,
         `data-net72usd="${escapeHtml(row.nets["72"] ?? "")}"`,
         `data-target="${escapeHtml(`${row.name ?? ""} ${row.contract} ${row.chain}`)}"`,
@@ -878,8 +884,13 @@ export function renderDashboard(
   var state = document.getElementById("stState");
   var log = document.getElementById("stLog");
   var button = document.getElementById("scanNow");
+  var builtForScan = null;
   function refresh() {
     fetch("/api/status", { cache: "no-store" }).then(function (r) { return r.json(); }).then(function (s) {
+      // Browsers pause <meta refresh> in background tabs, so the page itself
+      // must notice that a newer scan finished while it was hidden.
+      if (builtForScan === null) builtForScan = s.lastScanAt || "none";
+      else if ((s.lastScanAt || "none") !== builtForScan) { location.reload(); return; }
       var parts = [s.running ? "扫描中…" : "空闲"];
       if (s.lastScanAt) parts.push("上次 " + s.lastScanAt.slice(11, 16) + "Z");
       if (s.nextScanAt) parts.push("下次 " + s.nextScanAt.slice(11, 16) + "Z");
