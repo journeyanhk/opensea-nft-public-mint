@@ -20,6 +20,7 @@ import { toUtc8Time } from "./time-format";
 import { buildLocalMintPlan, fetchMintStats, LocalMintPlan, MintStats } from "./seadrop-public";
 import { countMintedTokens, verdict } from "./receipts";
 import { aggregateBurst, gapFillerTx, planBurst } from "./burst";
+import { freeQuantityFor } from "./quantity";
 import { classifySimulation, codeHashOf, revertDataOf, validateMintPublicCalldata, validateSignedTx } from "./gates";
 
 export interface LocalSnipeOpts {
@@ -39,6 +40,7 @@ export interface LocalSnipeOpts {
   // B3: consecutive nonces fired just before the open (the gate that decides
   // whether a burst is allowed runs in the caller, which knows the config).
   burst?: { count: number; spacingMs: number; leadMs: number };
+  freeMaxQuantity?: number; // 0 disables the free-drop quantity policy
   // B4: acquire the wallet lane here — after signing and the gates, before the
   // send. Preparing does not hold the lane, sending does; the returned function
   // releases it.
@@ -110,12 +112,16 @@ export function exceedsWalletCap(minted: bigint, quantity: number, cap: number):
 }
 
 export async function localPublicSnipe(opts: LocalSnipeOpts): Promise<SnipeResult[]> {
+  let quantity = opts.quantity;
   const {
-    nftContract, quantity, walletKeys, rpcUrls,
+    nftContract, walletKeys, rpcUrls,
     maxFeePerGas, maxPriorityFee, gasLimit, plan, maxValueWei,
   } = opts;
 
   const refreshMs = opts.refreshBeforeMs ?? 0;
+  // Free drops take the per-wallet cap (bounded by freeMaxQuantity); paid drops
+  // take one. Decided from the fresh plan at T-refresh, see quantity.ts.
+  const freeMaxQuantity = Math.max(0, Math.floor(opts.freeMaxQuantity ?? 0));
   const burst = opts.burst && opts.burst.count > 1 ? opts.burst : null;
   let targetStart = opts.targetStart;
   let planNow = plan;
@@ -177,6 +183,21 @@ export async function localPublicSnipe(opts: LocalSnipeOpts): Promise<SnipeResul
     return true;
   }
 
+  // The quantity can change here, so the calldata (which encodes it) is rebuilt
+  // from the same fresh plan: one extra read at T-refresh, no stale calldata.
+  const applyQuantityPolicy = async (plan: LocalMintPlan): Promise<LocalMintPlan> => {
+    if (freeMaxQuantity === 0) return plan;
+    const policy = freeQuantityFor({
+      mintPriceWei: plan.drop.mintPrice,
+      capPerWallet: plan.drop.maxTotalMintableByWallet,
+      freeMaxQuantity,
+    });
+    if (policy.quantity === quantity) return plan;
+    console.log(chalk.bold.gray(`  quantity policy: ${policy.reason} (was ${quantity})`));
+    quantity = policy.quantity;
+    return (await buildLocalMintPlan(rpcUrls[0], nftContract, quantity)) ?? plan;
+  };
+
   console.log(chalk.bold.magenta("\n── LOCAL PUBLIC MINT (no OpenSea) ──"));
   console.log(chalk.gray(`  SeaDrop:       ${planNow.to}`));
   console.log(chalk.gray(`  NFT:           ${nftContract}`));
@@ -201,7 +222,7 @@ export async function localPublicSnipe(opts: LocalSnipeOpts): Promise<SnipeResul
         await waitForMintTime(targetStart, refreshMs);
       }
 
-      const fresh = await buildLocalMintPlan(rpcUrls[0], nftContract, quantity);
+      let fresh = await buildLocalMintPlan(rpcUrls[0], nftContract, quantity);
       if (!fresh) {
         console.log(chalk.bold.red("  ✗ The public drop is no longer readable on-chain — skipping this target."));
         return skipped();
@@ -232,6 +253,8 @@ export async function localPublicSnipe(opts: LocalSnipeOpts): Promise<SnipeResul
         targetStart = new Date(decision.startMs);
       }
 
+      fresh = await applyQuantityPolicy(fresh);
+
       if (maxValueWei !== undefined && fresh.value > maxValueWei) {
         console.log(
           chalk.bold.red(
@@ -257,6 +280,8 @@ export async function localPublicSnipe(opts: LocalSnipeOpts): Promise<SnipeResul
       break;
     }
   } else {
+    planNow = await applyQuantityPolicy(planNow);
+
     if (maxValueWei !== undefined && planNow.value > maxValueWei) {
       console.log(
         chalk.bold.red(

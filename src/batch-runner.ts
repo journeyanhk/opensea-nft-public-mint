@@ -16,7 +16,7 @@ import chalk from "chalk";
 import { JsonRpcProvider, Wallet, formatEther, formatUnits } from "ethers";
 import { resolveChain } from "./chains";
 import { BatchTarget, loadBatchConfig } from "./batch-config";
-import { planRpcs, resolveRpcsForChain } from "./rpc-resolver";
+import { maskRpc, planRpcs, resolveRpcsForChain } from "./rpc-resolver";
 import { localPublicSnipe, SnipeResult } from "./local-mint";
 import { burstGate, calibrateLead } from "./burst";
 import { acquireWalletLock, WalletLock } from "./wallet-lock";
@@ -128,7 +128,7 @@ export async function runBatch(configPath: string, options: BatchRunOptions = {}
     console.log(chalk.red(`    ✗ dropped ${bad.url} — reports chain ${bad.chainId}${wrong ? ` (${wrong.name})` : ""}`));
   }
   for (const failure of rpcPlan.failures) {
-    console.log(chalk.yellow(`    ⚠ ${failure.url} — ${failure.message.slice(0, 90)}`));
+    console.log(chalk.yellow(`    ⚠ ${maskRpc(failure.url)} — ${failure.message.slice(0, 90)}`));
   }
   console.log(chalk.green(`  ✓ ${rpcPlan.urls.length} endpoint(s), chain ID ${chain.chainId} confirmed`));
   const rpcUrls = rpcPlan.urls;
@@ -402,7 +402,7 @@ export async function runBatch(configPath: string, options: BatchRunOptions = {}
   }
   console.log(
     chalk.gray(
-      `  wallets ${wallets.length} | refresh T-${cfg.refreshBeforeMs}ms | audit T-${Math.round(cfg.auditBeforeMs / 1000)}s | ` +
+      `  wallets ${wallets.length} | refresh T-${cfg.refreshBeforeMs}ms | audit T-${Math.round(cfg.auditBeforeMs / 1000)}s | free max ${cfg.freeMaxQuantity} | ` +
         `on failure ${cfg.onFailure} | budget ${formatEther(requiredPerWallet)} ${chain.nativeSymbol}/wallet`
     )
   );
@@ -586,6 +586,7 @@ export async function runBatch(configPath: string, options: BatchRunOptions = {}
           expectedCodeHash: target.codeHash,
           dryRun: cfg.dryRun,
           burst: burstForTarget,
+        freeMaxQuantity: cfg.freeMaxQuantity,
           // B4: preparation overlaps, the send does not. The lane is taken after
           // the gates and before the wait, so a second job sharing this wallet
           // waits here instead of signing the same nonce.

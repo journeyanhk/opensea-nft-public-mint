@@ -61,6 +61,7 @@ export interface BatchConfig {
   chainKey: string;
   dryRun: boolean; // sign + simulate only; no broadcast, no ledger writes
   burst: BurstConfig;
+  freeMaxQuantity: number; // free drops mint min(per-wallet cap, this); 0 disables
   parallel: boolean; // run targets concurrently, one lane per wallet
   parallelLimit: number | null; // max jobs in flight (null = one per wallet)
   walletSource: "env" | "prompt";
@@ -177,6 +178,7 @@ export async function loadBatchConfig(
       chainKey: chain.key,
       dryRun,
       burst: parseBurst(raw?.burst),
+      freeMaxQuantity: nonNegativeInt(raw?.freeMaxQuantity ?? process.env.FREE_MAX_QUANTITY, 5),
       parallel: raw?.parallel === true,
       parallelLimit: Number.isFinite(Number(raw?.parallelLimit)) ? Math.max(1, Math.floor(Number(raw.parallelLimit))) : null,
       walletSource: raw?.walletSource === "prompt" ? "prompt" : "env",
@@ -300,6 +302,7 @@ export async function loadBatchConfig(
     chainKey: chain.key,
     dryRun,
       burst: parseBurst(raw?.burst),
+    freeMaxQuantity: nonNegativeInt(raw?.freeMaxQuantity ?? process.env.FREE_MAX_QUANTITY, 5),
     parallel: raw?.parallel === true,
     parallelLimit: Number.isFinite(Number(raw?.parallelLimit)) ? Math.max(1, Math.floor(Number(raw.parallelLimit))) : null,
     walletSource: raw.walletSource === "prompt" ? "prompt" : "env",

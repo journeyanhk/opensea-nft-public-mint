@@ -321,6 +321,7 @@ sudo cp deploy/Caddyfile.example /etc/caddy/Caddyfile && sudo systemctl reload c
 
 **执行器不监听端口**：它是队列的消费者，和面板之间只共享 `queue/` 目录——面板写任务、执行器原子认领、结果与心跳写回。浏览器永远只请求 serve 一个地址（`/api/queue`、`/api/queue/arm`、`/api/queue/cancel`），无需知道执行器存在；系统里也不该出现第二个 HTTP 服务。
 
+- **数量策略（免费拿满 / 收费 1 个）**：`FREE_MAX_QUANTITY`（`.env.executor`，默认 5，0 关闭）。在 **T-refresh 读到最新价格之后**判定：免费 drop 取 `min(链上 per-wallet 上限, FREE_MAX_QUANTITY)`，收费 drop 固定 1 个；数量变化时会用同一份新计划**重建 calldata**，并在日志打印 `quantity policy: …`。这样临近开售改价/改上限都会按最新规则处理，而不是沿用入队时的数量
 - **执行器的 RPC 必须配付费端点**：快照回退到「链上只读」（`getCode` + SeaDrop 读）时仍需要 RPC；公共端点被 Cloudflare 限流会返回 HTML，症状是 `Unexpected token` + `<!DOCTYPE` 且任务被标 `no codeHash could be pinned`。请在 `.env.executor` 设 `RPC_URL_ROBINHOOD`（Alchemy）与 `SCAN_RPC_URL_ROBINHOOD`；失败原因现在会写进任务 `error`（含底层报文），日志里的 RPC 已脱敏
 - 执行器与队列的运维要点：① 执行器启动日志里有 **arm token**（12 小时过期），`journalctl -u nft-executor` 的输出请勿外发；② 队列的认领顺序是**开售时间**（不是入队时间），只认领 45 分钟窗口内的任务，执行期间每 30 秒刷新心跳与租约；③ 面板入队的 `"current"` 价格会在认领时按审计快照解析成具体上限并写回任务（开售前改价会被 T-refresh 护栏拒绝）；④ 同一合约若账本已有终态条目，任务会直接标 `skipped: already handled per ledger`；⑤ 入队限流 10/h（面板密码泄露时的第二道闸）。
 
