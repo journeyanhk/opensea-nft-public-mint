@@ -20,6 +20,11 @@ import { DEFAULT_LEDGER_PATH, LedgerEntry, entryOf, loadLedger } from "../batch-
 import { runBatch, BatchRunOptions } from "../batch-runner";
 import { RawConfig } from "../batch-watch";
 import { auditTarget } from "../audit/audit";
+import { Contract, JsonRpcProvider, getAddress } from "ethers";
+import { resolveChain } from "../chains";
+import { maskRpc, planRpcs, resolveScanRpcs } from "../rpc-resolver";
+import { buildLocalMintPlan } from "../seadrop-public";
+import { codeHashOf } from "../gates";
 import { TargetSource } from "../target-source";
 import {
   QueueJob,
@@ -108,6 +113,50 @@ export function resolveMaxPriceEth(
   if (priceWei === null || priceWei === undefined) return { maxPriceEth: "current", resolved: false };
   const text = formatEther(priceWei);
   return { maxPriceEth: text === "0.0" ? "0" : text, resolved: true };
+}
+
+export interface ChainSnapshot {
+  codeHash: string | null;
+  mintPriceWei: string | null;
+  capPerWallet: number | null;
+  feeRecipient: string | null;
+  name: string | null;
+  rpcUrl: string;
+}
+
+// The audit is richer (grade, concentration, socials) but it also reaches
+// further: an OpenSea hiccup or one HTML error page from a public RPC must not
+// make gate 1 unpinnable, because the code hash only needs getCode. This is the
+// minimum an automated execution needs to be safe.
+export async function chainOnlySnapshot(chainKey: string, contract: string, quantity: number): Promise<ChainSnapshot> {
+  const chain = resolveChain(chainKey);
+  if (!chain) throw new Error(`unsupported chain "${chainKey}"`);
+  const { urls } = resolveScanRpcs(chainKey);
+  const plan = await planRpcs(urls, chain.chainId);
+  const rpcUrl = plan.urls[0];
+  if (!rpcUrl) throw new Error("no usable RPC endpoint confirmed for this chain");
+
+  const provider = new JsonRpcProvider(rpcUrl);
+  const codeHash = codeHashOf(await provider.getCode(contract));
+  const mintPlan = await buildLocalMintPlan(rpcUrl, contract, quantity);
+  if (!mintPlan) throw new Error("no SeaDrop public drop found on-chain");
+
+  let name: string | null = null;
+  try {
+    const token = new Contract(getAddress(contract.toLowerCase()), ["function name() view returns (string)"], provider);
+    name = ((await token.name().catch(() => null)) as string | null) ?? null;
+  } catch {
+    // a name is a nicety, not a requirement
+  }
+
+  return {
+    codeHash,
+    mintPriceWei: mintPlan.drop.mintPrice.toString(),
+    capPerWallet: mintPlan.drop.maxTotalMintableByWallet || null,
+    feeRecipient: mintPlan.feeRecipient,
+    name,
+    rpcUrl,
+  };
 }
 
 export function jobSource(job: QueueJob): TargetSource {
@@ -227,10 +276,29 @@ export async function runExecutor(options: ExecutorOptions = {}): Promise<void> 
         updateJob(queueDir, job.id, snapshot);
         say(chalk.gray(`  snapshot: grade ${snapshot.grade} · codeHash ${snapshot.codeHash?.slice(0, 12) ?? "unavailable"}`));
       } catch (err) {
-        say(chalk.red(`  pre-execution audit failed: ${(err as Error).message}`));
+        say(chalk.yellow(`  audit unavailable (${(err as Error).message}) — falling back to chain-only reads`));
+        try {
+          const chainSnapshot = await chainOnlySnapshot(job.chain, job.contract, job.quantity);
+          const snapshot = {
+            codeHash: chainSnapshot.codeHash,
+            auditedAt: new Date().toISOString(),
+            mintPriceWei: chainSnapshot.mintPriceWei,
+            capPerWallet: chainSnapshot.capPerWallet,
+          };
+          Object.assign(job, snapshot);
+          updateJob(queueDir, job.id, snapshot);
+          say(
+            chalk.gray(
+              `  chain snapshot via ${maskRpc(chainSnapshot.rpcUrl)}: codeHash ${chainSnapshot.codeHash?.slice(0, 12) ?? "unavailable"} · fee recipient ${chainSnapshot.feeRecipient ?? "?"}`
+            )
+          );
+        } catch (fallbackErr) {
+          say(chalk.red(`  chain-only reads also failed: ${(fallbackErr as Error).message}`));
+          job.error = `audit failed: ${(err as Error).message}; chain reads failed: ${(fallbackErr as Error).message}`;
+        }
       }
       if (!job.codeHash) {
-        const failed = failJob(queueDir, job, "no codeHash could be pinned — refusing to run gate 1 blind");
+        const failed = failJob(queueDir, job, job.error ?? "no codeHash could be pinned — refusing to run gate 1 blind");
         say(chalk.red(`  ${failed.status}: ${failed.error}`));
         if (options.once) return;
         continue;
