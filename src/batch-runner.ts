@@ -125,7 +125,7 @@ export async function runBatch(configPath: string, options: BatchRunOptions = {}
   }
   for (const bad of rpcPlan.dropped) {
     const wrong = resolveChain(bad.chainId);
-    console.log(chalk.red(`    ✗ dropped ${bad.url} — reports chain ${bad.chainId}${wrong ? ` (${wrong.name})` : ""}`));
+    console.log(chalk.red(`    ✗ dropped ${maskRpc(bad.url)} — reports chain ${bad.chainId}${wrong ? ` (${wrong.name})` : ""}`));
   }
   for (const failure of rpcPlan.failures) {
     console.log(chalk.yellow(`    ⚠ ${maskRpc(failure.url)} — ${failure.message.slice(0, 90)}`));
