@@ -7,6 +7,7 @@
 ## [Unreleased]
 
 ### 新增
+- P0 最小通知：`src/notify.ts`（`buildNotifyRequest` 纯函数 + `heartbeatStale`；Telegram sendMessage 或任意 JSON webhook，`NOTIFY_WEBHOOK`/`NOTIFY_TELEGRAM_CHAT_ID`，默认关闭、5s 超时、失败静默）。事件：任务结束（状态/minted/tx 链接）、执行器心跳停更 >5 分钟（serve 侧每 tick 检测、同一停顿只提醒一次）、日历金丝雀告警
 - P0 面板收口：①状态栏轮询发现 `lastScanAt` 变化即自动 reload（后台标签的 meta refresh 会被浏览器暂停）；②**发现阶段落盘价格/上限/feeRecipient**（复用候选过滤已调用的 `buildLocalMintPlan`，零额外 RPC），`--refresh-targets` 同步补齐，「价格未知」积压消失；③无链上计划（价格与上限均缺）时不再显示等级，按未评级参与筛选
 - P0 数量策略：`FREE_MAX_QUANTITY` 默认 10；T-refresh 判定顺序为 风险标记（`batch-mint`/`instant-sellout` → 1）→ 免费 `min(cap, 10)` → 收费 1 → **供应紧张降 1**（剩余 < 20×期望，SeaDrop 整笔校验会全回滚）；风险标记由面板随任务入队传递（`riskFlags`，队列任务与配置目标都支持）
 - 数量策略：`FREE_MAX_QUANTITY`（默认 5，0 关闭）——**免费 drop 取 `min(per-wallet cap, 该值)`，收费 drop 固定 1 个**；判定在 T-refresh 读到最新 plan 之后（`src/quantity.ts` 纯函数），数量变化即用新计划重建 calldata，日志打印 `quantity policy: …`；`BatchConfig.freeMaxQuantity` 支持配置/环境变量覆盖，schedule 行显示 `free max N`

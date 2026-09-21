@@ -5,6 +5,8 @@
 // every cycle, so a restart shows data immediately and a manual `POST
 // /api/scan` behaves exactly like a timer tick.
 
+import fs from "fs";
+import path from "path";
 import { loadLedger } from "../batch-ledger";
 import { runScan, ChainScanReport } from "../scan/scanner";
 import { runBackfill, loadBackfill, BackfillSummary } from "../scan/backfill";
@@ -12,6 +14,7 @@ import { refreshTargets, RefreshSummary } from "../scan/refresh";
 import { DashboardRow, loadDashboardRows, loadHistory } from "../scan/html";
 import { loadState } from "../scan/state";
 import { ServeConfig } from "./config";
+import { createNotifier, heartbeatStale } from "../notify";
 
 export interface SchedulerStatus {
   running: boolean;
@@ -51,6 +54,45 @@ export class Scheduler {
       calendar: null,
       rowCount: 0,
     };
+  }
+
+  private lastStaleNoticeAt: string | null = null;
+  private lastCalendarWarnings: string[] = [];
+  private readonly notifier = createNotifier();
+
+  // Checked once per tick: the executor writes a heartbeat file, so the panel
+  // side can notice a dead executor even though it never talks to it.
+  private checkExecutor(): void {
+    try {
+      const file = path.resolve(process.cwd(), "queue", "_heartbeat.json");
+      const heartbeat = JSON.parse(fs.readFileSync(file, "utf8")) as { at?: string; host?: string };
+      if (!heartbeatStale(heartbeat, Date.now())) return;
+      if (this.lastStaleNoticeAt === heartbeat.at) return; // one notice per stall
+      this.lastStaleNoticeAt = heartbeat.at ?? null;
+      this.notifier.send({
+        kind: "executor-stale",
+        title: "executor heartbeat is stale",
+        detail: `last seen ${heartbeat.at ?? "never"} on ${heartbeat.host ?? "?"}`,
+      });
+      this.log("executor heartbeat is stale — notified");
+    } catch {
+      // no heartbeat file yet: nothing to judge
+    }
+  }
+
+  private checkCalendar(): void {
+    try {
+      const { state } = loadState(this.config.statePath);
+      const warnings = state.calendar?.warnings ?? [];
+      const fresh = warnings.filter((warning) => !this.lastCalendarWarnings.includes(warning));
+      if (fresh.length > 0) {
+        this.notifier.send({ kind: "calendar-canary", title: "calendar canary", detail: fresh.join(", ") });
+        this.log(`calendar canary — ${fresh.join(", ")}`);
+      }
+      this.lastCalendarWarnings = warnings;
+    } catch {
+      // a missing state file is not a canary
+    }
   }
 
   log(message: string): void {
@@ -135,6 +177,8 @@ export class Scheduler {
       }
 
       this.rebuildRows();
+      this.checkExecutor();
+      this.checkCalendar();
       this.status.lastScanAt = new Date().toISOString();
       this.status.lastError = null;
     } catch (err) {

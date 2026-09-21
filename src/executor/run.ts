@@ -23,6 +23,7 @@ import { auditTarget } from "../audit/audit";
 import { Contract, JsonRpcProvider, getAddress } from "ethers";
 import { resolveChain } from "../chains";
 import { maskRpc, planRpcs, resolveScanRpcs } from "../rpc-resolver";
+import { createNotifier } from "../notify";
 import { buildLocalMintPlan } from "../seadrop-public";
 import { codeHashOf } from "../gates";
 import { TargetSource } from "../target-source";
@@ -188,6 +189,7 @@ export async function runExecutor(options: ExecutorOptions = {}): Promise<void> 
   const intervalMs = Math.max(500, options.intervalMs ?? 5_000);
   const host = options.host ?? os.hostname();
   const say = options.onProgress ?? ((message: string) => console.log(message));
+  const notifier = createNotifier();
 
   const { token, created } = loadOrCreateArmToken(queueDir, { rotate: options.rotateArmToken === true });
   const published = publishArmToken(queueDir, token);
@@ -357,12 +359,28 @@ export async function runExecutor(options: ExecutorOptions = {}): Promise<void> 
           ? chalk.green(`  ${finished.status}: ledger says ${result.ledgerStatus}${result.mintedCount !== null ? ` (minted ${result.mintedCount})` : ""}`)
           : chalk.yellow(`  ${finished.status}: the ledger has no entry (was anything broadcast?)`)
       );
+      notifier.send({
+        kind: "job-finished",
+        title: `${result?.ledgerStatus ?? finished.status} — ${job.name ?? job.slug ?? job.contract}`,
+        detail: [
+          `minted ${result?.mintedCount ?? 0}/${job.quantity}`,
+          result?.txHash ? `https://robinhoodchain.blockscout.com/tx/${result.txHash}` : null,
+          `chain ${job.chain}`,
+        ]
+          .filter(Boolean)
+          .join(" · "),
+      });
     } catch (err) {
       const cancelled = findJob(queueDir, job.id)?.cancelRequested === true;
       const finished = cancelled
         ? completeJob(queueDir, job, { status: "SKIPPED", txHash: null, mintedCount: null, ledgerStatus: "CANCELLED", at: new Date().toISOString() }, Date.now())
         : failJob(queueDir, job, (err as Error).message);
       say(chalk.red(`  ${finished.status}: ${cancelled ? "cancelled before signing" : finished.error}`));
+      notifier.send({
+        kind: "job-finished",
+        title: `${finished.status} — ${job.name ?? job.slug ?? job.contract}`,
+        detail: cancelled ? "cancelled before signing" : String(finished.error ?? "").slice(0, 300),
+      });
     } finally {
       clearInterval(keepAlive);
     }
