@@ -233,3 +233,10 @@ test('a creator whose other drops traded gets a bounded bonus', () => {
   const traded = qualityScore({ ...strongSignals, creator: { ...base, withSales: 2 } });
   assert.ok(traded.dimensions.creator > without.dimensions.creator);
 });
+
+test('a price flip is a penalty', () => {
+  const flipped = { ...strongSignals, priceFlip: true };
+  assert.ok(qualityScore(flipped).penalties.includes('price-flip'));
+  assert.ok(!qualityScore({ ...flipped, priceFlip: false }).penalties.includes('price-flip'));
+  assert.ok(!qualityScore({ ...flipped, priceFlip: null }).penalties.includes('price-flip'));
+});

@@ -14,6 +14,21 @@ import { planRpcs, resolveScanRpcs } from "../rpc-resolver";
 import { buildLocalMintPlan, fetchMintStats } from "../seadrop-public";
 import { resolveSlug } from "../slug-resolver";
 import { ContractEntry, ScanState, loadState, saveStateMerged, StatePatch, DEFAULT_STATE_PATH } from "./state";
+import { applyPlanFacts } from "./price-watch";
+
+// An open target with no new events never re-entered any refresh path, so its
+// price could sit at the discovery snapshot forever (projects flip free -> paid
+// seconds after the open). Public terms are cheap to re-read: two calls, no log
+// scan.
+const PRICE_REFRESH_HOURS = 6;
+
+function priceStale(entry: ContractEntry, nowMs: number): boolean {
+  if (entry.publicStart === null || entry.publicStart * 1000 > nowMs) return false; // not open yet: audits handle it
+  if (entry.endTime !== null && entry.endTime * 1000 <= nowMs) return false; // closed
+  if (entry.soldOutAtBlock !== null) return false; // nothing left to watch
+  const at = entry.factsAt ? Date.parse(entry.factsAt) : NaN;
+  return !Number.isFinite(at) || nowMs - at > PRICE_REFRESH_HOURS * 3_600_000;
+}
 
 const ZERO_ADDRESS = "0x0000000000000000000000000000000000000000";
 const CONCURRENCY = 3;
@@ -103,7 +118,10 @@ export function needsRefresh(entry: ContractEntry): boolean {
     entry.owner == null ||
     // A known slug whose collection has not been read yet still needs one pass;
     // `socialCheckedAt` is set even when the collection has no socials at all.
-    (entry.slug != null && entry.socialCheckedAt == null)
+    (entry.slug != null && entry.socialCheckedAt == null) ||
+    // Open, unsold, and the public terms have not been read for a while: this is
+    // how a free -> paid flip after the open eventually reaches the board.
+    priceStale(entry, Date.now())
   );
 }
 
@@ -159,6 +177,7 @@ async function fetchXFollowers(handle: string, deps: OpenSeaCallDeps = {}): Prom
 export interface RefreshOptions {
   chain?: string;
   limit: number;
+  forcePlan?: boolean; // re-read public terms for open targets even if fresh
   statePath?: string;
   onProgress?: (message: string) => void;
   resolveSlugFn?: (chain: string, contract: string) => Promise<string | null>;
@@ -255,7 +274,14 @@ export async function refreshTargets(opts: RefreshOptions): Promise<RefreshSumma
   for (const chain of chains) {
     if (!resolveChain(chain)) throw new Error(`Unsupported chain "${chain}"`);
     for (const [contract, entry] of Object.entries(state.contracts[chain] ?? {})) {
-      if (needsRefresh(entry) || xMetricsDue(entry, nowSec, xEnabled)) work.push({ chain, contract, entry });
+      const openNow =
+        entry.publicStart !== null &&
+        entry.publicStart <= nowSec &&
+        (entry.endTime === null || entry.endTime > nowSec) &&
+        entry.soldOutAtBlock === null;
+      if (needsRefresh(entry) || xMetricsDue(entry, nowSec, xEnabled) || (opts.forcePlan === true && openNow)) {
+        work.push({ chain, contract, entry });
+      }
     }
   }
   work.sort((a, b) => String(a.entry.lastSeenBlock).localeCompare(String(b.entry.lastSeenBlock)));
@@ -310,16 +336,19 @@ export async function refreshTargets(opts: RefreshOptions): Promise<RefreshSumma
         const plan = await buildLocalMintPlan(rpc, contract, 1);
         const stats = await fetchMintStats(rpc, contract, ZERO_ADDRESS);
         if (plan) {
-          entry.publicStart = plan.drop.startTime;
-          entry.endTime = plan.drop.endTime;
-          entry.mintPriceWei = plan.drop.mintPrice.toString();
-          entry.capPerWallet = plan.drop.maxTotalMintableByWallet > 0 ? plan.drop.maxTotalMintableByWallet : null;
-          entry.feeRecipient = plan.feeRecipient;
-          patch.publicStart = plan.drop.startTime;
-          patch.endTime = plan.drop.endTime;
+          const at = new Date().toISOString();
+          const { priceChanged } = applyPlanFacts(entry, plan.drop, plan.feeRecipient, at);
+          if (priceChanged) {
+            progress(`${chain}/${contract}: public price changed to ${entry.mintPriceWei} wei (cap ${entry.capPerWallet ?? "unlimited"})`);
+          }
+          patch.publicStart = entry.publicStart;
+          patch.endTime = entry.endTime;
           patch.mintPriceWei = entry.mintPriceWei;
           patch.capPerWallet = entry.capPerWallet;
           patch.feeRecipient = entry.feeRecipient;
+          patch.factsAt = entry.factsAt;
+          patch.mintPriceChangedAt = entry.mintPriceChangedAt;
+          patch.priceHistory = entry.priceHistory;
         }
         if (stats) {
           entry.maxSupply = stats.maxSupply > 0n ? stats.maxSupply.toString() : null;
@@ -413,6 +442,7 @@ export function parseRefreshArgs(args: string[]): RefreshOptions {
     if (arg === "--limit") parsed.limit = Math.max(1, parseInt(rest[++i] ?? "200", 10) || 200);
     else if (arg === "--chain") parsed.chain = rest[++i];
     else if (arg === "--state") parsed.statePath = rest[++i];
+    else if (arg === "--force-plan") parsed.forcePlan = true;
     else if (arg.startsWith("--")) throw new Error(`Unknown option "${arg}"`);
   }
   return parsed;

@@ -25,7 +25,7 @@ const KNOWN_FLAGS = new Set([
   "--scan", "--since-days", "--horizon-hours", "--limit", "--no-audit", "--include-mints",
   "--report", "--state", "--history", "--ledger", "--backfill-file",
   "--backfill", "--backfill-after",
-  "--refresh-targets",
+  "--refresh-targets", "--force-plan",
   "--serve",
   "--export-favorites",
   "--favorites",
@@ -64,7 +64,9 @@ Usage
                                   sign and simulate every transaction, broadcast nothing (no ledger writes)
   npm start -- --export-favorites [<file.jsonl>] [--favorites <file>]
                                   dump every favorite with the signals seen when it was starred (analysis input)
-  npm start -- --refresh-targets [--limit N] [--chain <key>] [--state <file>]
+  npm start -- --refresh-targets [--limit N] [--chain <key>] [--state <file>] [--force-plan]
+                                  --force-plan re-reads the public terms (getPublicDrop) of every open
+                                  target once, which is how stale free/paid labels get corrected
                                   resolve slugs/names/owner and read collections (socials, image) for the state file
                                   (run until "all entries"); set ENABLE_X_METRICS=1 to also cache X follower counts
   npm start -- --serve            run the scanner/backfill scheduler and the dashboard over http (read-only)

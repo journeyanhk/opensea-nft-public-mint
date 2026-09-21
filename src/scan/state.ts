@@ -54,6 +54,9 @@ export interface ContractEntry {
   mintPriceWei: string | null;
   capPerWallet: number | null;
   feeRecipient: string | null;
+  factsAt: string | null; // when the plan facts above were last read
+  mintPriceChangedAt: string | null; // last time the public price/cap changed
+  priceHistory: { at: string; priceWei: string; cap: number | null }[]; // newest first, max 5
 }
 
 export interface ScanState {
@@ -115,6 +118,9 @@ export function emptyContractEntry(): ContractEntry {
     mintPriceWei: null,
     capPerWallet: null,
     feeRecipient: null,
+    factsAt: null,
+    mintPriceChangedAt: null,
+    priceHistory: [],
   };
 }
 

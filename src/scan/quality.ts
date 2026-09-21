@@ -140,12 +140,13 @@ export interface QualitySignals {
   presaleShare: number | null; // absorbed by the presale stages, 0-1
   capPerWallet: number | null;
   batchMint: boolean | null; // a single tx minted a suspicious lot (likely a clone contract)
+  priceFlip: boolean | null; // public terms changed free -> paid, or right around the open
   smartMinters: number | null; // tracked winners that touched this target
   creator: CreatorStats | null;
   social: SocialFact | null;
 }
 
-export type Penalty = "stale" | "concentrated" | "no-socials" | "instant-sellout" | "batch-mint";
+export type Penalty = "stale" | "concentrated" | "no-socials" | "instant-sellout" | "batch-mint" | "price-flip";
 export type QualityDimension = "demand" | "participation" | "creator" | "social" | "structure";
 
 export interface QualityResult {
@@ -270,6 +271,7 @@ export function qualityScore(input: QualitySignals): QualityResult {
   }
   if (instantSellout(input)) penalties.push("instant-sellout");
   if (input.batchMint === true) penalties.push("batch-mint");
+  if (input.priceFlip === true) penalties.push("price-flip");
 
   let confidence = weightSum / 100;
   if (input.creator?.ownData) confidence = Math.min(1, confidence + 0.1);

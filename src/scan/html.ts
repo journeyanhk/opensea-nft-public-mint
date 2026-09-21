@@ -13,6 +13,7 @@ import { BackfillRecord, formatNetUsd } from "./backfill";
 import { liquidityVerdict, LiquidityLevel } from "./valuation";
 import { ContractEntry, ScanState } from "./state";
 import { creatorStatsFor, qualityScore, safeImageUrl, safeLinkUrl } from "./quality";
+import { freshest, isPriceFlip } from "./price-watch";
 import type { CreatorFact, CreatorStats, Phase, Penalty, QualityDimension, QualityResult, QualitySignals, SocialFact } from "./quality";
 import type { CalendarFacts } from "./calendar";
 import { emptyFavorites, favoriteKey, FavoritesStore } from "./favorites";
@@ -112,6 +113,8 @@ export interface DashboardRow {
   phase: Phase;
   presaleShare: number | null;
   batchMint: boolean;
+  priceFlip: boolean;
+  priceHistory: { at: string; priceWei: string; cap: number | null }[];
   liquidity: { level: LiquidityLevel; label: string } | null;
   maxTxTokens: string | null;
   payerDiffers: number | null;
@@ -269,8 +272,17 @@ export function loadDashboardRows(
       // The last stage is the public sale; the first is usually a presale wave,
       // so the fallback and the reschedule check both use the public guess.
       const calendarPublicStart = calendar?.publicStartTime ?? calendar?.startTime ?? null;
-      const mintPriceWei = entry.mintPriceWei ?? latest?.mintPriceWei ?? null;
-      const capPerWallet = entry.capPerWallet ?? latest?.capPerWallet ?? null;
+      // Discovery snapshots can be hours older than a later audit; taking the
+      // entry unconditionally is what kept a pre-flip price on screen.
+      const mintPriceWei = freshest<string>([
+        { value: entry.mintPriceWei, at: entry.factsAt },
+        { value: latest?.mintPriceWei ?? null, at: latest?.at ?? null },
+      ]);
+      const capPerWallet = freshest<number>([
+        { value: entry.capPerWallet, at: entry.factsAt },
+        { value: latest?.capPerWallet ?? null, at: latest?.at ?? null },
+      ]);
+      const priceFlip = isPriceFlip(entry, { nowMs: nowSec * 1000 });
       const hasChainPlan = mintPriceWei !== null || capPerWallet !== null;
       const start = chainStart ?? calendarPublicStart;
       const endTime = entry.endTime ?? latest?.endTime ?? calendar?.endTime ?? null;
@@ -385,6 +397,8 @@ export function loadDashboardRows(
         phase,
         presaleShare,
         batchMint,
+        priceFlip,
+        priceHistory: entry.priceHistory ?? [],
         liquidity: liquidity.level === "unknown" ? null : liquidity,
         maxTxTokens,
         payerDiffers: latest?.payerDiffers ?? null,
@@ -421,6 +435,7 @@ export function loadDashboardRows(
           presaleShare,
           capPerWallet: row.capPerWallet,
           batchMint,
+          priceFlip,
           smartMinters,
           social,
         },
@@ -589,6 +604,7 @@ const PENALTY_ZH: Record<Penalty, string> = {
   "no-socials": "无社交",
   "instant-sellout": "预计秒空",
   "batch-mint": "批量痕迹",
+  "price-flip": "改价",
 };
 
 function netClass(net: string | null | undefined): string {
@@ -652,7 +668,11 @@ export function renderDashboard(
       const startText = row.start === null ? "" : toUtc8Time(new Date(row.start * 1000));
       const window = describeWindow(row.start, row.endTime);
       const price = row.mintPriceWei === null ? null : BigInt(row.mintPriceWei);
-      const priceText = price === null ? "—" : price === 0n ? `<span class="pill free">免费</span>` : `${formatEther(price)}`;
+      const flipPill = row.priceFlip
+        ? ` <span class="pill instant" title="公开阶段价格在上线后被改过（免费→收费或开售前后改价），当前值来自最新一次链上读取">改价</span>`
+        : "";
+      const priceText =
+        price === null ? "—" : `${price === 0n ? `<span class="pill free">免费</span>` : formatEther(price)}${flipPill}`;
       const capText = row.capPerWallet === null ? "—" : row.capPerWallet === 0 ? "不限" : String(row.capPerWallet);
       const mintedPct =
         row.minted !== null && row.maxSupply !== null && BigInt(row.maxSupply) > 0n
@@ -736,7 +756,9 @@ export function renderDashboard(
         `data-pending="${row.pendingAudit ? "1" : "0"}"`,
         `data-executed="${row.execution ? "1" : "0"}"`,
         `data-stale="${row.stale ? "1" : "0"}"`,
-        `data-free="${price === null ? "" : price === 0n ? "1" : "0"}"`,
+        // "only free" must not offer a target whose free price was bait.
+        `data-free="${price === null ? "" : price === 0n && !row.priceFlip ? "1" : "0"}"`,
+        `data-flip="${row.priceFlip ? "1" : "0"}"`,
         `data-mintprice="${escapeHtml(row.mintPriceWei ?? "")}"`,
         `data-mintedpct="${mintedPct === null ? "" : mintedPct}"`,
         `data-remaining="${escapeHtml(row.remaining ?? "")}"`,
@@ -770,6 +792,15 @@ export function renderDashboard(
           }${row.smartMinters != null ? ` · 聪明铸造者触达 ${row.smartMinters}` : ""}</span>`
         : row.smartMinters != null
           ? `<span>聪明铸造者触达 ${row.smartMinters}</span>`
+          : "";
+      // Rows injected by tests or an older scheduler may omit the field.
+      const priceHistory = row.priceHistory ?? [];
+      const priceHistoryLine =
+        priceHistory.length > 0
+          ? `<span>公开阶段价格变更：${priceHistory
+              .slice(0, 5)
+              .map((point) => `${point.priceWei === "0" ? "免费" : point.priceWei}（cap ${point.cap ?? "不限"}）@${point.at.slice(5, 16)}`)
+              .join(" → ")}</span>`
           : "";
       const calendarLine = row.calendar
         ? `<span>日历：收录 ${escapeHtml(row.calendar.listedAt.slice(0, 16).replace("T", " "))}Z${
@@ -825,6 +856,7 @@ export function renderDashboard(
         row.presaleStages !== null && row.presaleStages > 0 ? `<span>预售阶段：${row.presaleStages}</span>` : "",
         calendarLine,
         mismatchLine,
+        priceHistoryLine,
         batchLine,
         liquidityLine,
         `<span class="fav-editor"></span>`,

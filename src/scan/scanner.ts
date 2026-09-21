@@ -27,6 +27,7 @@ import {
   smartSet,
 } from "./smart-minters";
 import { projectedHeadroom, remainingSupply } from "../audit/score";
+import { applyPlanFacts } from "./price-watch";
 import {
   ContractEntry,
   DEFAULT_HISTORY_PATH,
@@ -45,6 +46,9 @@ const REAUDIT_MS = 30 * 60_000;
 // Opened targets that produced nothing twice in a row no longer need 30-minute
 // attention; their series is flat and the slots are better spent elsewhere.
 const QUIET_REAUDIT_MS = 2 * 60 * 60_000;
+// How many open, unsold targets get re-audited per tick so their velocity series
+// survives the open (0 disables). They are ordered by the oldest facts first.
+const REAUDIT_LIVE_PER_TICK = 10;
 // Opened targets keep being re-audited for this long so the dashboard gets a
 // minted-over-time series (24h velocity, sell-out ETA).
 export const REAUDIT_OPENED_HOURS = 72;
@@ -151,6 +155,7 @@ export interface ScanOptions {
   now?: () => Date;
   smartPath?: string;
   smartSet?: Set<string>;
+  reauditLivePerTick?: number;
   cacheDir?: string;
 }
 
@@ -358,6 +363,28 @@ export async function runScan(
         freshSeeds.push(contract);
       }
     }
+    // Open, unsold targets that nobody has looked at for a while: without this
+    // they never re-enter the pool (their change events are long out of the
+    // window), so the board keeps the discovery snapshot and the velocity
+    // series stays empty.
+    const liveLimit = Math.max(0, Math.floor(opts.reauditLivePerTick ?? REAUDIT_LIVE_PER_TICK));
+    const nowSecFloor = Math.floor(nowMs / 1000);
+    if (liveLimit > 0) {
+      const live = Object.entries(state.contracts[chainKey] ?? {})
+        .filter(([contract, entry]) => {
+          if (queued.has(contract)) return false;
+          if (entry.publicStart === null || entry.publicStart > nowSecFloor) return false;
+          if (entry.endTime !== null && entry.endTime <= nowSecFloor) return false;
+          if (entry.soldOutAtBlock !== null) return false;
+          return true;
+        })
+        .sort((a, b) => String(a[1].factsAt ?? "").localeCompare(String(b[1].factsAt ?? "")))
+        .slice(0, liveLimit);
+      for (const [contract] of live) {
+        queued.add(contract);
+        freshSeeds.push(contract);
+      }
+    }
     const pendingSet = new Set(pendingSeeds);
 
     const pendingCandidates: string[] = [];
@@ -376,13 +403,9 @@ export async function runScan(
         delete state.contracts[chainKey][contract];
         return;
       }
-      entry.publicStart = plan.drop.startTime;
-      entry.endTime = plan.drop.endTime;
       // The plan was fetched to filter this candidate; keeping its facts costs
       // nothing and removes the "price unknown" backlog on the board.
-      entry.mintPriceWei = plan.drop.mintPrice.toString();
-      entry.capPerWallet = plan.drop.maxTotalMintableByWallet > 0 ? plan.drop.maxTotalMintableByWallet : null;
-      entry.feeRecipient = plan.feeRecipient;
+      applyPlanFacts(entry, plan.drop, plan.feeRecipient, new Date().toISOString());
       const nowSec = Math.floor(nowMs / 1000);
       if (!isCandidateDrop(plan.drop, nowSec, opts.horizonHours)) {
         if (plan.drop.endTime <= nowSec) report.skipped.ended++;
