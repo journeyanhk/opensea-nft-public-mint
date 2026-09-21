@@ -20,7 +20,7 @@ import { toUtc8Time } from "./time-format";
 import { buildLocalMintPlan, fetchMintStats, LocalMintPlan, MintStats } from "./seadrop-public";
 import { countMintedTokens, verdict } from "./receipts";
 import { aggregateBurst, gapFillerTx, planBurst } from "./burst";
-import { freeQuantityFor } from "./quantity";
+import { freeQuantityFor, gasLimitForQuantity } from "./quantity";
 import { classifySimulation, codeHashOf, revertDataOf, validateMintPublicCalldata, validateSignedTx } from "./gates";
 
 export interface LocalSnipeOpts {
@@ -115,8 +115,12 @@ export async function localPublicSnipe(opts: LocalSnipeOpts): Promise<SnipeResul
   let quantity = opts.quantity;
   const {
     nftContract, walletKeys, rpcUrls,
-    maxFeePerGas, maxPriorityFee, gasLimit, plan, maxValueWei,
+    maxFeePerGas, maxPriorityFee, plan, maxValueWei,
   } = opts;
+  // Starts at the configured limit and grows with the quantity policy (see
+  // gasLimitForQuantity) — the limit is what the balance reserve was sized for,
+  // so it may only ever grow, never shrink.
+  let effectiveGasLimit = opts.gasLimit || 250_000;
 
   const refreshMs = opts.refreshBeforeMs ?? 0;
   // Free drops take the per-wallet cap (bounded by freeMaxQuantity); paid drops
@@ -195,6 +199,11 @@ export async function localPublicSnipe(opts: LocalSnipeOpts): Promise<SnipeResul
     if (policy.quantity === quantity) return plan;
     console.log(chalk.bold.gray(`  quantity policy: ${policy.reason} (was ${quantity})`));
     quantity = policy.quantity;
+    const grown = gasLimitForQuantity(effectiveGasLimit, quantity);
+    if (grown > effectiveGasLimit) {
+      console.log(chalk.gray(`  gas limit raised ${effectiveGasLimit} → ${grown} for ${quantity} mint(s)`));
+      effectiveGasLimit = grown;
+    }
     return (await buildLocalMintPlan(rpcUrls[0], nftContract, quantity)) ?? plan;
   };
 
@@ -395,7 +404,7 @@ export async function localPublicSnipe(opts: LocalSnipeOpts): Promise<SnipeResul
         nonce: shotNonce,
         maxFeePerGas,
         maxPriorityFeePerGas: maxPriorityFee,
-        gasLimit: gasLimit || 250_000,
+        gasLimit: effectiveGasLimit,
         type: 2,
         chainId,
       });
@@ -408,7 +417,7 @@ export async function localPublicSnipe(opts: LocalSnipeOpts): Promise<SnipeResul
         nonce: shotNonce,
         data: planNow.data,
         value: planNow.value,
-        gasLimit: BigInt(gasLimit || 250_000),
+        gasLimit: BigInt(effectiveGasLimit),
         maxFeePerGas,
         maxPriorityFeePerGas: maxPriorityFee,
       });
@@ -590,7 +599,7 @@ export async function localPublicSnipe(opts: LocalSnipeOpts): Promise<SnipeResul
               gapFillerTx({
                 wallet: wave.address,
                 nonce: missingNonce,
-                gasLimit: gasLimit || 250_000,
+                gasLimit: effectiveGasLimit,
                 maxFeePerGas,
                 maxPriorityFeePerGas: maxPriorityFee,
                 chainId,

@@ -18,3 +18,14 @@ test('free drops take the per-wallet cap, paid drops take one', () => {
   assert.equal(freeQuantityFor({ mintPriceWei: 0n, capPerWallet: 10, freeMaxQuantity: 0 }).quantity, 1);
   assert.equal(freeQuantityFor({ mintPriceWei: 0n, capPerWallet: 0, freeMaxQuantity: -3 }).quantity, 1);
 });
+
+test('the gas limit grows with the quantity, never shrinks', () => {
+  const { gasLimitForQuantity } = require('../dist/quantity');
+  // A one-token mint keeps the configured limit (this is what the balance reserve assumed).
+  assert.equal(gasLimitForQuantity(250_000, 1), 250_000);
+  // More tokens need more gas: 5 x 150k + 60k overhead.
+  assert.equal(gasLimitForQuantity(250_000, 5), 810_000);
+  // A generous configured limit is respected, not reduced.
+  assert.equal(gasLimitForQuantity(2_000_000, 5), 2_000_000);
+  assert.equal(gasLimitForQuantity(250_000, 0), 250_000, 'a degenerate quantity does not shrink the limit');
+});
