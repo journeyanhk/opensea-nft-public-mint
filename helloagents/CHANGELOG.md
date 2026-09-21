@@ -7,6 +7,7 @@
 ## [Unreleased]
 
 ### 新增
+- M9/B5（第四阶段）面板队列接线：`执行队列` tab（服务端嵌入 `window.__QUEUE__` 快照：jobs/armed/heartbeat）与武装输入框（填执行器 token）、行内「加入执行队列」与「收藏加入执行队列」批量按钮、任务取消与刷新；执行器在快照缺失或超过 30 分钟时**先复审并锁定 codeHash**（`needsAudit`），锁定不到就拒绝执行——自动化路径不再可能静默跳过门 1；`updateJob` 支持认领后补写快照
 - M9/B5（第三阶段）执行器：`src/executor/run.ts`（私钥反向断言、启动打印并只落哈希 arm token、reclaim→arm→claim→复用 runBatch(assumeYes+队列 TargetSource)→结果从账本派生写回、心跳文件、`--once/--interval-ms/--queue-dir/--dry-run`）；`assumeYes` 选项；`.env.executor.example` 与 `deploy/nft-executor.service`（不监听端口）
 - M9/B5（第二阶段）serve 队列 API：`POST/GET /api/queue`（入队校验 + jobs+armed 列表）、`/api/queue/cancel`、`/api/queue/arm|disarm`（arm 必须回填执行器打印的 token，否则 403）；沿用既有 JSON+同源守卫
 - M9/B5（第一阶段）执行队列数据层：`src/executor/queue.ts`（磁盘队列 + rename 原子认领 + 租约/attempts 回收 + queued/claimed 两种取消语义 + 列表视图）、**arm token 第二因素**（执行器只落哈希并打印 token，武装必须回填、默认 12 小时过期）、任务携带审计快照字段（codeHash/auditedAt/grade/quality/mintPriceWei/capPerWallet）；6 个用例

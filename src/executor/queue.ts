@@ -206,6 +206,19 @@ function moveToDone(dir: string, job: QueueJob, update: Partial<QueueJob>): void
   }
 }
 
+// The executor fills the audit snapshot after claiming; the job file is the
+// single place both processes read it from.
+export function updateJob(dir: string, id: string, fields: Partial<QueueJob>): QueueJob | null {
+  for (const candidate of [path.join(dir, "claimed", `${id}.json`), path.join(dir, `${id}.json`)]) {
+    const job = readJson(candidate);
+    if (!job) continue;
+    const next = { ...job, ...fields };
+    writeJson(candidate, next);
+    return next;
+  }
+  return null;
+}
+
 export function completeJob(dir: string, job: QueueJob, result: QueueJob["result"], nowMs: number): QueueJob {
   const next: QueueJob = {
     ...job,

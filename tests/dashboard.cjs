@@ -647,3 +647,38 @@ test('the execution column shows what the receipt proved, not just the status', 
   const html = renderDashboard(rows, { generatedAt: 'now', sources: [] });
   assert.ok(html.includes('执行：PARTIAL ×1'));
 });
+
+test('the queue surface: tab, arm box, enqueue buttons and the embedded snapshot', () => {
+  const now = Math.floor(Date.now() / 1000);
+  const queueState = {
+    version: 1,
+    chains: {},
+    contracts: {
+      arc: {
+        '0xaaa': {
+          firstSeenBlock: 1, lastSeenBlock: 10, lastAuditedBlock: 10, lastAuditedAt: '2026-09-19T08:00:00.000Z',
+          lastGrade: 'A', soldOutAtBlock: null, publicStart: now + 3600, pendingAudit: false, slug: 'mine',
+          name: 'Mine', endTime: now + 86_400, maxSupply: '1000', totalMinted: '0', owner: '0xOwner', socialCheckedAt: 't',
+        },
+      },
+    },
+  };
+  const rows = loadDashboardRows(queueState, [], { version: 1, entries: {} }, () => null);
+  const queue = {
+    jobs: [
+      { id: 'job-1', status: 'queued', chain: 'arc', contract: '0xaaa', slug: 'mine', name: 'Mine', quantity: 1, view: 'queued', result: null, grade: 'A', codeHash: null, startAtMs: null },
+    ],
+    armed: { armed: true, expiresAtMs: Date.now() + 3_600_000 },
+    heartbeat: { at: '2026-09-19T09:00:00.000Z', host: 'nft-1' },
+  };
+  const html = renderDashboard(rows, { generatedAt: 'now', sources: [] }, { serve: true, queue });
+
+  assert.ok(html.includes('id="tabQueue"') && html.includes('执行队列 (1)'));
+  assert.ok(html.includes('id="queuePanel"') && html.includes('id="armToken"'));
+  assert.ok(html.includes('id="queueArm"') && html.includes('id="queueDisarm"') && html.includes('id="queueRefresh"'));
+  assert.ok(html.includes('class="enqueue"'), 'each row can enqueue itself');
+  assert.ok(html.includes('id="enqueueFavorites"'), 'favorites can be enqueued in bulk');
+  assert.ok(html.includes('window.__QUEUE__'), 'the snapshot travels with the page');
+  assert.ok(html.includes('job-1') && html.includes('已武装'), 'the snapshot has the job and the arm state');
+  assert.ok(!html.includes('http://127.0.0.1:8787'), 'the page never points at the executor');
+});

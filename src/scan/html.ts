@@ -16,6 +16,7 @@ import { creatorStatsFor, qualityScore, safeImageUrl, safeLinkUrl } from "./qual
 import type { CreatorFact, CreatorStats, Phase, Penalty, QualityDimension, QualityResult, QualitySignals, SocialFact } from "./quality";
 import type { CalendarFacts } from "./calendar";
 import { emptyFavorites, favoriteKey, FavoritesStore } from "./favorites";
+import type { QueueJob } from "../executor/queue";
 import { FAVORITES_CLIENT } from "./panel-client";
 import { toUtc8Time } from "../time-format";
 
@@ -601,7 +602,15 @@ function mintedBar(pct: number | null): string {
 export function renderDashboard(
   rows: DashboardRow[],
   meta: DashboardMeta,
-  opts: { serve?: boolean; favorites?: FavoritesStore } = {}
+  opts: {
+    serve?: boolean;
+    favorites?: FavoritesStore;
+    queue?: {
+      jobs: QueueJob[];
+      armed: { armed: boolean; expiresAtMs?: number };
+      heartbeat: { at?: string; host?: string } | null;
+    };
+  } = {}
 ): string {
   const favorites = opts.favorites ?? emptyFavorites();
   const favoriteRows = new Set(rows.map((row) => favoriteKey(row.chain, row.contract)));
@@ -813,6 +822,7 @@ export function renderDashboard(
         batchLine,
         liquidityLine,
         `<span class="fav-editor"></span>`,
+        `<span class="enqueue-row"><button type="button" class="enqueue" data-chain="${escapeHtml(row.chain)}" data-contract="${escapeHtml(row.contract)}" data-slug="${escapeHtml(row.slug ?? "")}" data-name="${escapeHtml(row.name ?? "")}" data-start="${row.start ?? ""}">加入执行队列</button></span>`,
         socialBits.length > 0 ? `<span>社交：${socialBits.join(" · ")}</span>` : "",
         row.creator ? `<span>${creatorText}</span>` : "",
         qBreakdown ? `<span>${qBreakdown}</span>` : "",
@@ -1013,6 +1023,13 @@ export function renderDashboard(
   .missing { margin: 0 0 12px; padding: 10px 12px; border: 1px solid var(--outline-soft); border-radius: var(--radius); background: var(--bg-soft); }
   .missing-item { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; padding: 3px 0; }
   .fav-editor { display: inline-flex; gap: 6px; align-items: center; flex-wrap: wrap; }
+  .queue-panel { margin: 0 0 12px; padding: 10px 12px; border: 1px solid var(--outline-soft); border-radius: var(--radius); background: var(--bg-soft); }
+  .queue-head { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; margin-bottom: 8px; }
+  .queue-job { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; padding: 4px 0; border-top: 1px solid var(--outline-soft); }
+  .queue-status { min-width: 72px; font-weight: 600; }
+  .queue-job.status-done .queue-status { color: var(--ok); }
+  .queue-job.status-failed .queue-status { color: var(--danger); }
+  .queue-job.status-cancelled .queue-status, .queue-job.status-skipped .queue-status { color: var(--fg-muted); }
   .g-A { background: var(--ok-soft); color: var(--ok); }
   .g-B { background: var(--warn-soft); color: var(--warn); }
   .g-C { background: var(--danger-soft); color: var(--danger); }
@@ -1051,7 +1068,23 @@ ${serveBar}
 <div class="tabs">
   <button type="button" data-tab="all" id="tabAll" class="on">全部</button>
   <button type="button" data-tab="favs" id="tabFavs">收藏 (${Object.keys(favorites.favorites).length})</button>
+  <button type="button" data-tab="queue" id="tabQueue">执行队列 (${(opts.queue?.jobs ?? []).length})</button>
   <span id="favHint" class="muted"></span>
+</div>
+
+<div id="queuePanel" class="queue-panel" hidden>
+  <div class="queue-head">
+    <strong>执行队列</strong>
+    <span id="queueArmed" class="muted"></span>
+    <span id="queueHeartbeat" class="muted"></span>
+    <button type="button" id="queueRefresh">刷新</button>
+    <span class="muted">武装（填执行器打印的 token）</span>
+    <input id="armToken" type="password" placeholder="arm token">
+    <button type="button" id="queueArm">武装</button>
+    <button type="button" id="queueDisarm">解除</button>
+    <span id="queueNote" class="muted"></span>
+  </div>
+  <div id="queueList"></div>
 </div>
 
 <div id="missingFavs" class="missing" hidden>
@@ -1135,6 +1168,7 @@ ${rowHtml}
     <button id="copy">复制</button>
     <button id="exportTargets">导出 targets.json（收藏）</button>
     <button id="exportFavorites">导出 favorites.jsonl（分析）</button>
+    <button id="enqueueFavorites">收藏加入执行队列</button>
     <button id="copyFilterLink">复制筛选链接</button>
     <span id="copyNote" class="muted"></span>
     <span id="favNote" class="muted"></span>
@@ -1145,6 +1179,7 @@ ${rowHtml}
 <script>
 window.__SERVE__ = ${opts.serve ? "true" : "false"};
 window.__FAVORITES__ = ${JSON.stringify({ version: 1, favorites: favorites.favorites }).replace(/</g, "\\u003c")};
+window.__QUEUE__ = ${JSON.stringify(opts.queue ?? { jobs: [], armed: { armed: false }, heartbeat: null }).replace(/</g, "\\u003c")};
 </script>
 <script>
 (function () {

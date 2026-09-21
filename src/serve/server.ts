@@ -12,6 +12,7 @@ import path from "path";
 import { maskRpc } from "../rpc-resolver";
 import { renderDashboard } from "../scan/html";
 import { resolveChain } from "../chains";
+import fs from "fs";
 import { cancelJob, clearArmed, enqueueJob, isArmed, listJobs, setArmed } from "../executor/queue";
 import {
   DEFAULT_FAVORITES_PATH,
@@ -214,10 +215,27 @@ export function createServer(options: ServerOptions): http.Server {
       }
 
       if (req.method === "GET" && url.pathname === "/") {
+        const heartbeat = (() => {
+          try {
+            return JSON.parse(fs.readFileSync(path.join(queueDir, "executor-heartbeat.json"), "utf8")) as {
+              at?: string;
+              host?: string;
+              pid?: number;
+            };
+          } catch {
+            return null;
+          }
+        })();
         const html = renderDashboard(
           scheduler.rows,
           { generatedAt: new Date().toISOString(), sources: ["local state files"] },
-          { serve: true, favorites: loadFavorites(favoritesPath) }
+          {
+            serve: true,
+            favorites: loadFavorites(favoritesPath),
+            // The queue is the page's view of the executor: files the two
+            // processes share, read here so the browser needs no second origin.
+            queue: { jobs: listJobs(queueDir, Date.now()).slice(0, 100), armed: isArmed(queueDir, Date.now()), heartbeat },
+          }
         );
         res.writeHead(200, {
           "content-type": "text/html; charset=utf-8",

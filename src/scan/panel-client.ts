@@ -84,6 +84,16 @@ export const FAVORITES_CLIENT = `
 
   function applyTabVisibility() {
     var onlyFavs = tab === "favs";
+    var onlyQueue = tab === "queue";
+    var queuePanel = el("queuePanel");
+    if (queuePanel) queuePanel.hidden = !onlyQueue;
+    if (onlyQueue) {
+      panel.rows.forEach(function (row) {
+        row.classList.add("tab-hidden");
+        var detail = row.nextElementSibling;
+        if (detail && detail.classList.contains("detail")) detail.hidden = true;
+      });
+    }
     panel.rows.forEach(function (row) {
       var hide = onlyFavs && row.dataset.favorite !== "1";
       row.classList.toggle("tab-hidden", hide);
@@ -200,7 +210,7 @@ export const FAVORITES_CLIENT = `
     }
     var tabButton = event.target.closest("[data-tab]");
     if (tabButton) {
-      tab = tabButton.dataset.tab === "favs" ? "favs" : "all";
+      tab = tabButton.dataset.tab === "queue" ? "queue" : tabButton.dataset.tab === "favs" ? "favs" : "all";
       persist();
       refresh();
     }
@@ -266,8 +276,100 @@ export const FAVORITES_CLIENT = `
     if (hint) hint.textContent = "静态页面：收藏与筛选保存在本浏览器（部署 --serve 后可服务端保存与导出）";
   }
 
+  // ── execution queue ──────────────────────────────────────────────────────
+  function queueData() {
+    return window.__QUEUE__ || { jobs: [], armed: { armed: false }, heartbeat: null };
+  }
+
+  function renderQueue() {
+    var list = el("queueList");
+    if (!list) return;
+    var data = queueData();
+    var armed = el("queueArmed");
+    if (armed) {
+      armed.textContent = data.armed && data.armed.armed
+        ? "已武装，至 " + new Date(data.armed.expiresAtMs).toISOString().slice(11, 16) + "Z"
+        : "未武装（队列不会被执行）";
+      armed.className = data.armed && data.armed.armed ? "hot" : "muted";
+    }
+    var beat = el("queueHeartbeat");
+    if (beat) {
+      beat.textContent = data.heartbeat && data.heartbeat.at
+        ? "执行器心跳 " + data.heartbeat.at.slice(11, 19) + "Z " + (data.heartbeat.host || "")
+        : "未检测到执行器心跳";
+    }
+    list.innerHTML = data.jobs.length === 0 ? '<div class="muted">队列为空</div>' : data.jobs.map(function (job) {
+      var result = job.result ? (job.result.status + (job.result.mintedCount !== null && job.result.mintedCount !== undefined ? " ×" + job.result.mintedCount : "")) : "";
+      var tx = job.result && job.result.txHash ? ' <a href="https://robinhoodchain.blockscout.com/tx/' + job.result.txHash + '" target="_blank" rel="noreferrer">tx</a>' : "";
+      var cancel = job.view === "queued" ? ' <button type="button" class="queue-cancel" data-id="' + job.id + '">取消</button>' : "";
+      return '<div class="queue-job status-' + job.status + '">' +
+        '<span class="queue-status">' + job.status + '</span>' +
+        '<span>' + (job.name || job.slug || "") + ' <span class="mono muted">' + job.contract.slice(0, 10) + "…</span></span>" +
+        '<span class="muted">×' + job.quantity + (job.startAtMs ? " · " + new Date(job.startAtMs).toISOString().slice(11, 16) + "Z" : "") + "</span>" +
+        '<span class="muted">' + (job.grade ? "grade " + job.grade + " " : "") + (job.codeHash ? "codeHash ✓" : "codeHash 待执行器锁定") + "</span>" +
+        '<span>' + result + "</span>" + tx + cancel +
+        "</div>";
+    }).join("");
+  }
+
+  function queueRefresh() {
+    fetch("/api/queue", { cache: "no-store" }).then(function (r) { return r.json(); }).then(function (data) {
+      window.__QUEUE__ = data;
+      renderQueue();
+    }).catch(function () { if (el("queueNote")) el("queueNote").textContent = "队列不可用"; });
+  }
+
+  document.addEventListener("click", function (event) {
+    var enqueue = event.target.closest(".enqueue");
+    if (enqueue) {
+      var body = {
+        chain: enqueue.dataset.chain, contract: enqueue.dataset.contract,
+        slug: enqueue.dataset.slug || null, name: enqueue.dataset.name || null,
+        quantity: 1, maxPriceEth: "current",
+        startAtMs: enqueue.dataset.start ? Number(enqueue.dataset.start) * 1000 : null,
+        source: { kind: "row" },
+      };
+      fetch("/api/queue", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) })
+        .then(function (r) { return r.json().then(function (j) { if (!r.ok || j.ok === false) throw new Error(j.error || j.reason || String(r.status)); return j; }); })
+        .then(function () { if (el("queueNote")) el("queueNote").textContent = "已加入队列"; queueRefresh(); })
+        .catch(function (e) { if (el("queueNote")) el("queueNote").textContent = "入队失败：" + e.message; });
+      return;
+    }
+    if (event.target.closest("#enqueueFavorites")) {
+      var jobs = Object.keys(favs).map(function (key) {
+        var rec = favs[key];
+        return fetch("/api/queue", { method: "POST", headers: { "content-type": "application/json" },
+          body: JSON.stringify({ chain: rec.chain, contract: rec.contract, slug: rec.slug, name: rec.name, quantity: 1, maxPriceEth: "current", source: { kind: "favorite" } }) });
+      });
+      Promise.all(jobs).then(function () { if (el("queueNote")) el("queueNote").textContent = "收藏已加入队列"; queueRefresh(); });
+      return;
+    }
+    if (event.target.closest("#queueArm")) {
+      var token = el("armToken") ? el("armToken").value : "";
+      fetch("/api/queue/arm", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ token: token }) })
+        .then(function (r) { return r.json().then(function (j) { if (!r.ok) throw new Error(j.error || String(r.status)); return j; }); })
+        .then(function () { el("queueNote").textContent = "已武装"; queueRefresh(); })
+        .catch(function (e) { el("queueNote").textContent = "武装失败：" + e.message; });
+      return;
+    }
+    if (event.target.closest("#queueDisarm")) {
+      fetch("/api/queue/disarm", { method: "POST", headers: { "content-type": "application/json" }, body: "{}" })
+        .then(function () { el("queueNote").textContent = "已解除武装"; queueRefresh(); });
+      return;
+    }
+    if (event.target.closest("#queueRefresh")) { queueRefresh(); return; }
+    var cancel = event.target.closest(".queue-cancel");
+    if (cancel) {
+      fetch("/api/queue/cancel", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ id: cancel.dataset.id }) })
+        .then(function () { queueRefresh(); });
+    }
+  });
+
+  window.__PANEL_QUEUE_REFRESH__ = queueRefresh;
+
   restore();
   refresh();
+  renderQueue();
   persist();
 })();
 `;

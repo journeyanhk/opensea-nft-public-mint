@@ -18,6 +18,7 @@ import path from "path";
 import { DEFAULT_LEDGER_PATH, LedgerEntry, entryOf, loadLedger } from "../batch-ledger";
 import { runBatch, BatchRunOptions } from "../batch-runner";
 import { RawConfig } from "../batch-watch";
+import { auditTarget } from "../audit/audit";
 import { TargetSource } from "../target-source";
 import {
   QueueJob,
@@ -30,6 +31,7 @@ import {
   nextEligible,
   publishArmToken,
   reclaimStale,
+  updateJob,
 } from "./queue";
 
 export function assertExecutorKeys(env: NodeJS.ProcessEnv = process.env): void {
@@ -76,6 +78,15 @@ export function resultFromLedgerEntry(
     ledgerStatus: entry.status,
     at,
   };
+}
+
+// An automated path must never run gate 1 blind: without a pinned code hash the
+// executor audits first and refuses the job if the audit cannot pin one. A
+// snapshot older than the same window the CLI re-audits in is refreshed too.
+export function needsAudit(job: QueueJob, nowMs: number, maxAgeMs = 30 * 60_000): boolean {
+  if (!job.codeHash || !job.auditedAt) return true;
+  const at = Date.parse(job.auditedAt);
+  return !Number.isFinite(at) || nowMs - at > maxAgeMs;
 }
 
 export function jobSource(job: QueueJob): TargetSource {
@@ -160,6 +171,32 @@ export async function runExecutor(options: ExecutorOptions = {}): Promise<void> 
 
     const job = claim.job;
     say(chalk.bold.magenta(`\n  claimed ${job.id} — ${job.chain}/${job.contract} ×${job.quantity}`));
+
+    if (needsAudit(job, Date.now())) {
+      say("  snapshot missing or stale — auditing before signing");
+      try {
+        const audit = await auditTarget({ chainKey: job.chain, target: job.contract }, { requestedQuantity: job.quantity });
+        const snapshot = {
+          codeHash: audit.codeHash,
+          auditedAt: new Date().toISOString(),
+          grade: audit.grade.grade,
+          mintPriceWei: audit.publicDrop?.mintPrice?.toString() ?? null,
+          capPerWallet: audit.publicDrop?.maxTotalMintableByWallet ?? null,
+        };
+        Object.assign(job, snapshot);
+        updateJob(queueDir, job.id, snapshot);
+        say(chalk.gray(`  snapshot: grade ${snapshot.grade} · codeHash ${snapshot.codeHash?.slice(0, 12) ?? "unavailable"}`));
+      } catch (err) {
+        say(chalk.red(`  pre-execution audit failed: ${(err as Error).message}`));
+      }
+      if (!job.codeHash) {
+        const failed = failJob(queueDir, job, "no codeHash could be pinned — refusing to run gate 1 blind");
+        say(chalk.red(`  ${failed.status}: ${failed.error}`));
+        if (options.once) return;
+        continue;
+      }
+    }
+
     try {
       const batchOptions: BatchRunOptions = {
         targetSource: jobSource(job),

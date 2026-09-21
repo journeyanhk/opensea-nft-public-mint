@@ -10,14 +10,14 @@
 
 ## 2. serve（无密钥）
 - [√] 2.1 API：POST/GET /api/queue、/api/queue/cancel、/api/queue/arm|disarm（沿用 JSON+同源守卫；GET 返回 jobs+armed）
-- [ ] 2.2 面板：行/收藏「加入队列」、队列 tab、武装状态条与醒目提示
+- [√] 2.2 面板：`执行队列` tab + 武装输入框 + 行内/收藏批量入队按钮 + 取消/刷新（服务端嵌入 `window.__QUEUE__`，前端只请求 serve）
 - [√] 2.3 `tests/serve.cjs` 队列端点用例（入队/非法链 400/列表不武装/错误 token 403/正确 token 200/取消）
 
 ## 3. 执行器
 - [√] 3.1 CLI `--executor`（`.env.executor`/`EXECUTOR_ENV_FILE`、必须有私钥的反向断言）+ `.env.executor.example` + `deploy/nft-executor.service`
 - [√] 3.2 循环：reclaim → arm 检查 → claim → `jobToRawConfig` + `TargetSource` → 复用 runBatch（含三道门/burst/账本）→ 结果**从账本派生**写回；`--once`/`--interval-ms`/心跳文件；`--dry-run` 只读预演不消费任务
-- [ ] 3.3 与 CLI 的互斥锁；`deploy/nft-executor.service`
-- [ ] 3.4 `tests/executor.cjs`
+- [√] 3.3 进程级钱包锁（复用既有实现）；`deploy/nft-executor.service` + `.env.executor.example`（不监听端口）
+- [√] 3.4 `tests/executor.cjs`（密钥断言、jobToRawConfig、needsAudit、结果从账本派生）+ 面板队列面断言（共 180 用例）
 
 ## 4. 安全与收尾
 - [ ] 4.1 预算/频率上限、武装默认未武装（可选持久）
