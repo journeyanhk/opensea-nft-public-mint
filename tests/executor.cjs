@@ -77,3 +77,31 @@ test('a not-applicable audit is reported as such, not as a gate-1 failure', () =
     'no SeaDrop 1.0 public drop found'
   );
 });
+
+test('a chain becomes one parallel batch, and a cancel only stops its own job', () => {
+  const { mergeJobConfigs, abortFor } = require('../dist/executor/run');
+  const fsx = require('fs');
+  const osx = require('os');
+  const pathx = require('path');
+  const { enqueueJob, claimMany, cancelJob, findJob } = require('../dist/executor/queue');
+
+  const dir = fsx.mkdtempSync(pathx.join(osx.tmpdir(), 'exec-batch-'));
+  const a = enqueueJob(dir, { chain: 'robinhood', contract: W, slug: 'a', quantity: 2, riskFlags: ['instant-sellout'], codeHash: '0x' + 'ab'.repeat(32), startAtMs: 60_000 }, 1_000).job;
+  const b = enqueueJob(dir, { chain: 'robinhood', contract: '0x' + 'cd'.repeat(20), slug: 'b', quantity: 1, startAtMs: 120_000 }, 2_000).job;
+  const claimed = claimMany(dir, { by: 'host', nowMs: 3_000, leaseMs: 600_000, claimWindowMs: 45 * 60_000, limit: 8 });
+  assert.equal(claimed.length, 2);
+
+  const raw = mergeJobConfigs(claimed);
+  assert.equal(raw.chain, 'robinhood');
+  assert.equal(raw.parallel, true, 'the batch runs in parallel');
+  assert.equal(raw.targets.length, 2);
+  const targetA = raw.targets.find((target) => target.quantity === 2);
+  assert.equal(targetA.codeHash, '0x' + 'ab'.repeat(32), 'gate 1 keeps its pinned hash');
+  assert.deepEqual(targetA.riskFlags, ['instant-sellout'], 'per-job risk flags survive the merge');
+
+  // Cancelling one job must not abort the other.
+  cancelJob(dir, a.id, 4_000);
+  assert.equal(abortFor(dir, claimed, { chain: 'robinhood', contract: W }), true);
+  assert.equal(abortFor(dir, claimed, { chain: 'robinhood', contract: '0x' + 'cd'.repeat(20) }), false);
+  assert.ok(findJob(dir, a.id).cancelRequested);
+});

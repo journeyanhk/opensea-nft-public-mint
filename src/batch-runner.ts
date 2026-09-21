@@ -55,7 +55,7 @@ export interface BatchRunOptions {
   parallelLimit?: number;
   targetSource?: TargetSource; // tests and B5 inject one; default = config + watch files
   assumeYes?: boolean; // the executor is armed by hand, so it does not ask again
-  shouldAbort?: () => boolean; // the queue may have been cancelled while we waited
+  shouldAbort?: (target: BatchTarget) => boolean; // the queue may have been cancelled while we waited
 }
 
 function readConfig(file: string): RawConfig {
@@ -605,7 +605,7 @@ export async function runBatch(configPath: string, options: BatchRunOptions = {}
           // B4: preparation overlaps, the send does not. The lane is taken after
           // the gates and before the wait, so a second job sharing this wallet
           // waits here instead of signing the same nonce.
-          shouldAbort: options.shouldAbort,
+          shouldAbort: () => options.shouldAbort?.(target) === true,
         beforeSend: async () => {
             const lease = await acquireLanes({
               coordinator,

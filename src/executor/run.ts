@@ -29,7 +29,7 @@ import { codeHashOf } from "../gates";
 import { TargetSource } from "../target-source";
 import {
   QueueJob,
-  claimNext,
+  claimMany,
   clearArmed,
   completeJob,
   failJob,
@@ -185,6 +185,48 @@ export function jobSource(job: QueueJob): TargetSource {
 
 const sleep = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms));
 
+
+// One runBatch per chain, with every claimed job of that chain as a target:
+// preparation overlaps and the wallet lanes serialise the sends, which is what
+// the coordinator was built for. Same-wallet jobs no longer wait for each other
+// to finish, only to send.
+export function mergeJobConfigs(jobs: QueueJob[]): RawConfig {
+  const chain = jobs[0].chain;
+  const targets = jobs.flatMap((job) => jobToRawConfig(job).targets ?? []);
+  return { chain, parallel: true, targets } as RawConfig;
+}
+
+// A cancel must only stop its own job: the runner asks per target, so map the
+// target back to the job that produced it.
+export function abortFor(
+  queueDir: string,
+  jobs: QueueJob[],
+  target: { chain: string; contract: string }
+): boolean {
+  const job = jobs.find(
+    (candidate) => candidate.chain === target.chain && candidate.contract.toLowerCase() === target.contract.toLowerCase()
+  );
+  return job ? findJob(queueDir, job.id)?.cancelRequested === true : false;
+}
+
+export function startKeepAlive(
+  queueDir: string,
+  jobs: QueueJob[],
+  host: string,
+  heartbeat: () => void,
+  intervalMs = 30_000
+): () => void {
+  const timer = setInterval(() => {
+    heartbeat();
+    for (const job of jobs) {
+      if (!findJob(queueDir, job.id)) continue;
+      updateJob(queueDir, job.id, { lease: { by: host, expiresAtMs: Date.now() + 30 * 60_000 } });
+    }
+  }, intervalMs);
+  (timer as NodeJS.Timeout).unref?.();
+  return () => clearInterval(timer);
+}
+
 export interface ExecutorOptions {
   queueDir?: string;
   ledgerPath?: string;
@@ -193,6 +235,7 @@ export interface ExecutorOptions {
   dryRun?: boolean;
   host?: string;
   rotateArmToken?: boolean;
+  claimBatch?: number; // jobs claimed per cycle (default CLAIM_BATCH or 8)
   onProgress?: (message: string) => void;
 }
 
@@ -259,152 +302,171 @@ export async function runExecutor(options: ExecutorOptions = {}): Promise<void> 
       continue;
     }
 
-    // 45 minutes is the longest the executor should sit on a job before the
-    // send window: it matches the runner's own pre-open audit window.
-    const claim = claimNext(queueDir, { by: host, nowMs: Date.now(), leaseMs: 30 * 60_000, claimWindowMs: 45 * 60_000 });
-    if (!claim.ok) {
+    // Claim a whole window at once: jobs inside the same 45 minutes prepare
+    // together and their sends are serialised per wallet by the lanes, instead
+    // of the second job waiting for the first one to finish entirely.
+    const configuredBatch = Number(process.env.CLAIM_BATCH);
+    const batchLimit = Math.max(1, Math.floor(options.claimBatch ?? (Number.isFinite(configuredBatch) && configuredBatch > 0 ? configuredBatch : 8)));
+    const claimed = claimMany(queueDir, {
+      by: host,
+      nowMs: Date.now(),
+      leaseMs: 30 * 60_000,
+      claimWindowMs: 45 * 60_000,
+      limit: batchLimit,
+    });
+    if (claimed.length === 0) {
       if (options.once) return;
       await sleep(intervalMs);
       continue;
     }
 
-    const job = claim.job;
-    say(chalk.bold.magenta(`\n  claimed ${job.id} — ${job.chain}/${job.contract} ×${job.quantity}`));
+    const ready: QueueJob[] = [];
+    for (const job of claimed) {
+      say(chalk.bold.magenta(`\n  claimed ${job.id} — ${job.chain}/${job.contract} ×${job.quantity}`));
 
-    // The ledger is the single source of truth: a contract this process already
-    // touched must not be executed again just because a new job was enqueued.
-    const prior = entryOf(loadLedger(ledgerPath), job.chain, job.contract);
-    const terminal = ["SUCCESS", "TIMEOUT", "PARTIAL", "NO_MINT"];
-    if (prior && terminal.includes(prior.status)) {
-      const skipped = completeJob(
-        queueDir,
-        job,
-        { status: "SKIPPED", txHash: prior.txHash, mintedCount: prior.mintedCount ?? null, ledgerStatus: prior.status, at: new Date().toISOString() },
-        Date.now()
-      );
-      say(chalk.yellow(`  ${skipped.status}: already handled per ledger (${prior.status})`));
+      // The ledger is the single source of truth: a contract this process
+      // already touched must not be executed again for a new job.
+      const prior = entryOf(loadLedger(ledgerPath), job.chain, job.contract);
+      const terminal = ["SUCCESS", "TIMEOUT", "PARTIAL", "NO_MINT"];
+      if (prior && terminal.includes(prior.status)) {
+        const skipped = completeJob(
+          queueDir,
+          job,
+          { status: "SKIPPED", txHash: prior.txHash, mintedCount: prior.mintedCount ?? null, ledgerStatus: prior.status, at: new Date().toISOString() },
+          Date.now()
+        );
+        say(chalk.yellow(`  ${skipped.status}: already handled per ledger (${prior.status})`));
+        continue;
+      }
+
+      const wantsPrice = job.maxPriceEth === "current";
+      if (needsAudit(job, Date.now()) || (wantsPrice && !job.mintPriceWei)) {
+        say("  snapshot missing or stale — auditing before signing");
+        try {
+          const audit = await auditTarget({ chainKey: job.chain, target: job.contract }, { requestedQuantity: job.quantity });
+          const notApplicable = applicabilityError(audit);
+          if (notApplicable) {
+            const failed = failJob(queueDir, job, notApplicable);
+            say(chalk.red(`  ${failed.status}: ${failed.error} — nothing to mint here (chain ${job.chain})`));
+            notifier.send({ kind: "job-finished", title: `${failed.status} — ${job.name ?? job.slug ?? job.contract}`, detail: notApplicable });
+            continue;
+          }
+          const snapshot = {
+            codeHash: audit.codeHash,
+            auditedAt: new Date().toISOString(),
+            grade: audit.grade.grade,
+            mintPriceWei: audit.publicDrop?.mintPrice?.toString() ?? null,
+            capPerWallet: audit.publicDrop?.maxTotalMintableByWallet ?? null,
+          };
+          Object.assign(job, snapshot);
+          updateJob(queueDir, job.id, snapshot);
+          say(chalk.gray(`  snapshot: grade ${snapshot.grade} · codeHash ${snapshot.codeHash?.slice(0, 12) ?? "unavailable"}`));
+        } catch (err) {
+          say(chalk.yellow(`  audit unavailable (${(err as Error).message}) — falling back to chain-only reads`));
+          try {
+            const chainSnapshot = await chainOnlySnapshot(job.chain, job.contract, job.quantity);
+            const snapshot = {
+              codeHash: chainSnapshot.codeHash,
+              auditedAt: new Date().toISOString(),
+              mintPriceWei: chainSnapshot.mintPriceWei,
+              capPerWallet: chainSnapshot.capPerWallet,
+            };
+            Object.assign(job, snapshot);
+            updateJob(queueDir, job.id, snapshot);
+            say(
+              chalk.gray(
+                `  chain snapshot via ${maskRpc(chainSnapshot.rpcUrl)}: codeHash ${chainSnapshot.codeHash?.slice(0, 12) ?? "unavailable"} · fee recipient ${chainSnapshot.feeRecipient ?? "?"}`
+              )
+            );
+          } catch (fallbackErr) {
+            say(chalk.red(`  chain-only reads also failed: ${(fallbackErr as Error).message}`));
+            job.error = `audit failed: ${(err as Error).message}; chain reads failed: ${(fallbackErr as Error).message}`;
+          }
+        }
+        if (!job.codeHash) {
+          const failed = failJob(queueDir, job, job.error ?? "no codeHash could be pinned — refusing to run gate 1 blind");
+          say(chalk.red(`  ${failed.status}: ${failed.error}`));
+          continue;
+        }
+      }
+
+      if (wantsPrice) {
+        const resolved = resolveMaxPriceEth(job, job.mintPriceWei ? BigInt(job.mintPriceWei) : null);
+        if (!resolved.resolved) {
+          const failed = failJob(queueDir, job, "cannot resolve the current price to a ceiling — refusing to mint without one");
+          say(chalk.red(`  ${failed.status}: ${failed.error}`));
+          continue;
+        }
+        job.maxPriceEth = resolved.maxPriceEth;
+        updateJob(queueDir, job.id, { maxPriceEth: resolved.maxPriceEth });
+        say(chalk.gray(`  price ceiling resolved: ${resolved.maxPriceEth}`));
+      }
+
+      ready.push(job);
+    }
+
+    if (ready.length === 0) {
       if (options.once) return;
       continue;
     }
 
-    const wantsPrice = job.maxPriceEth === "current";
-    if (needsAudit(job, Date.now()) || (wantsPrice && !job.mintPriceWei)) {
-      say("  snapshot missing or stale — auditing before signing");
+    // One batch per chain (the loader takes a single chain per config); chains
+    // run one after another, jobs within a chain in parallel.
+    const byChain = new Map<string, QueueJob[]>();
+    for (const job of ready) {
+      const group = byChain.get(job.chain) ?? [];
+      group.push(job);
+      byChain.set(job.chain, group);
+    }
+
+    for (const [chain, jobs] of byChain) {
+      say(chalk.bold.cyan(`\n  running ${jobs.length} job(s) on ${chain} — parallel, lanes serialise per wallet`));
+      const stopKeepAlive = startKeepAlive(queueDir, jobs, host, heartbeat);
       try {
-        const audit = await auditTarget({ chainKey: job.chain, target: job.contract }, { requestedQuantity: job.quantity });
-        const notApplicable = applicabilityError(audit);
-        if (notApplicable) {
-          const failed = failJob(queueDir, job, notApplicable);
-          say(chalk.red(`  ${failed.status}: ${failed.error} — nothing to mint here (chain ${job.chain})`));
-          notifier.send({ kind: "job-finished", title: `${failed.status} — ${job.name ?? job.slug ?? job.contract}`, detail: notApplicable });
-          if (options.once) return;
-          continue;
-        }
-        const snapshot = {
-          codeHash: audit.codeHash,
-          auditedAt: new Date().toISOString(),
-          grade: audit.grade.grade,
-          mintPriceWei: audit.publicDrop?.mintPrice?.toString() ?? null,
-          capPerWallet: audit.publicDrop?.maxTotalMintableByWallet ?? null,
-        };
-        Object.assign(job, snapshot);
-        updateJob(queueDir, job.id, snapshot);
-        say(chalk.gray(`  snapshot: grade ${snapshot.grade} · codeHash ${snapshot.codeHash?.slice(0, 12) ?? "unavailable"}`));
-      } catch (err) {
-        say(chalk.yellow(`  audit unavailable (${(err as Error).message}) — falling back to chain-only reads`));
-        try {
-          const chainSnapshot = await chainOnlySnapshot(job.chain, job.contract, job.quantity);
-          const snapshot = {
-            codeHash: chainSnapshot.codeHash,
-            auditedAt: new Date().toISOString(),
-            mintPriceWei: chainSnapshot.mintPriceWei,
-            capPerWallet: chainSnapshot.capPerWallet,
-          };
-          Object.assign(job, snapshot);
-          updateJob(queueDir, job.id, snapshot);
+        await runBatch(path.join(queueDir, `${jobs[0].id}.json`), {
+          targetSource: { name: `queue/${chain}`, watchPaths: () => [], read: () => mergeJobConfigs(jobs) },
+          watch: false,
+          maxPolls: 0,
+          assumeYes: true,
+          shouldAbort: (target) => abortFor(queueDir, jobs, { chain, contract: target.contract }),
+        });
+        for (const job of jobs) {
+          const entry = entryOf(loadLedger(ledgerPath), job.chain, job.contract);
+          const result = resultFromLedgerEntry(entry, new Date().toISOString());
+          const finished = completeJob(queueDir, job, result, Date.now());
           say(
-            chalk.gray(
-              `  chain snapshot via ${maskRpc(chainSnapshot.rpcUrl)}: codeHash ${chainSnapshot.codeHash?.slice(0, 12) ?? "unavailable"} · fee recipient ${chainSnapshot.feeRecipient ?? "?"}`
-            )
+            result
+              ? chalk.green(`  ${finished.status}: ledger says ${result.ledgerStatus}${result.mintedCount !== null ? ` (minted ${result.mintedCount})` : ""}`)
+              : chalk.yellow(`  ${finished.status}: the ledger has no entry (was anything broadcast?)`)
           );
-        } catch (fallbackErr) {
-          say(chalk.red(`  chain-only reads also failed: ${(fallbackErr as Error).message}`));
-          job.error = `audit failed: ${(err as Error).message}; chain reads failed: ${(fallbackErr as Error).message}`;
+          notifier.send({
+            kind: "job-finished",
+            title: `${result?.ledgerStatus ?? finished.status} — ${job.name ?? job.slug ?? job.contract}`,
+            detail: [
+              `minted ${result?.mintedCount ?? 0}/${job.quantity}`,
+              result?.txHash ? `https://robinhoodchain.blockscout.com/tx/${result.txHash}` : null,
+              `chain ${job.chain}`,
+            ]
+              .filter(Boolean)
+              .join(" · "),
+          });
         }
+      } catch (err) {
+        for (const job of jobs) {
+          const cancelled = findJob(queueDir, job.id)?.cancelRequested === true;
+          const finished = cancelled
+            ? completeJob(queueDir, job, { status: "SKIPPED", txHash: null, mintedCount: null, ledgerStatus: "CANCELLED", at: new Date().toISOString() }, Date.now())
+            : failJob(queueDir, job, (err as Error).message);
+          say(chalk.red(`  ${finished.status}: ${cancelled ? "cancelled before signing" : finished.error}`));
+          notifier.send({
+            kind: "job-finished",
+            title: `${finished.status} — ${job.name ?? job.slug ?? job.contract}`,
+            detail: cancelled ? "cancelled before signing" : String(finished.error ?? "").slice(0, 300),
+          });
+        }
+      } finally {
+        stopKeepAlive();
       }
-      if (!job.codeHash) {
-        const failed = failJob(queueDir, job, job.error ?? "no codeHash could be pinned — refusing to run gate 1 blind");
-        say(chalk.red(`  ${failed.status}: ${failed.error}`));
-        if (options.once) return;
-        continue;
-      }
-    }
-
-    if (job.maxPriceEth === "current") {
-      const resolved = resolveMaxPriceEth(job, job.mintPriceWei ? BigInt(job.mintPriceWei) : null);
-      if (!resolved.resolved) {
-        const failed = failJob(queueDir, job, "cannot resolve the current price to a ceiling — refusing to mint without one");
-        say(chalk.red(`  ${failed.status}: ${failed.error}`));
-        if (options.once) return;
-        continue;
-      }
-      job.maxPriceEth = resolved.maxPriceEth;
-      updateJob(queueDir, job.id, { maxPriceEth: resolved.maxPriceEth });
-      say(chalk.gray(`  price ceiling resolved: ${resolved.maxPriceEth} ${job.chain === "robinhood" ? "native" : "ETH"} per NFT`));
-    }
-
-    // A batch can run for an hour: keep the heartbeat and the lease alive while
-    // it does, so the panel does not report the executor dead and a reclaim
-    // cannot hand the job to somebody else mid-flight.
-    const keepAlive = setInterval(() => {
-      heartbeat();
-      const current = findJob(queueDir, job.id);
-      if (current) updateJob(queueDir, job.id, { lease: { by: host, expiresAtMs: Date.now() + 30 * 60_000 } });
-    }, 30_000);
-    (keepAlive as NodeJS.Timeout).unref?.();
-
-    try {
-      const batchOptions: BatchRunOptions = {
-        targetSource: jobSource(job),
-        watch: false,
-        maxPolls: 0,
-        assumeYes: true,
-        // Checked in local-mint after the fresh plan is read and before signing.
-        shouldAbort: () => findJob(queueDir, job.id)?.cancelRequested === true,
-      };
-      await runBatch(path.join(queueDir, `${job.id}.json`), batchOptions);
-      const entry = entryOf(loadLedger(ledgerPath), job.chain, job.contract);
-      const result = resultFromLedgerEntry(entry, new Date().toISOString());
-      const finished = completeJob(queueDir, job, result, Date.now());
-      say(
-        result
-          ? chalk.green(`  ${finished.status}: ledger says ${result.ledgerStatus}${result.mintedCount !== null ? ` (minted ${result.mintedCount})` : ""}`)
-          : chalk.yellow(`  ${finished.status}: the ledger has no entry (was anything broadcast?)`)
-      );
-      notifier.send({
-        kind: "job-finished",
-        title: `${result?.ledgerStatus ?? finished.status} — ${job.name ?? job.slug ?? job.contract}`,
-        detail: [
-          `minted ${result?.mintedCount ?? 0}/${job.quantity}`,
-          result?.txHash ? `https://robinhoodchain.blockscout.com/tx/${result.txHash}` : null,
-          `chain ${job.chain}`,
-        ]
-          .filter(Boolean)
-          .join(" · "),
-      });
-    } catch (err) {
-      const cancelled = findJob(queueDir, job.id)?.cancelRequested === true;
-      const finished = cancelled
-        ? completeJob(queueDir, job, { status: "SKIPPED", txHash: null, mintedCount: null, ledgerStatus: "CANCELLED", at: new Date().toISOString() }, Date.now())
-        : failJob(queueDir, job, (err as Error).message);
-      say(chalk.red(`  ${finished.status}: ${cancelled ? "cancelled before signing" : finished.error}`));
-      notifier.send({
-        kind: "job-finished",
-        title: `${finished.status} — ${job.name ?? job.slug ?? job.contract}`,
-        detail: cancelled ? "cancelled before signing" : String(finished.error ?? "").slice(0, 300),
-      });
-    } finally {
-      clearInterval(keepAlive);
     }
 
     if (options.once) return;

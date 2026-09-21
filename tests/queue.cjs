@@ -5,7 +5,7 @@ const os = require('os');
 const path = require('path');
 const {
   enqueueJob, claimNext, completeJob, failJob, cancelJob, reclaimStale, listJobs,
-  createArmToken, publishArmToken, setArmed, isArmed, clearArmed, validateJobInput, loadOrCreateArmToken,
+  createArmToken, publishArmToken, setArmed, isArmed, clearArmed, validateJobInput, loadOrCreateArmToken, claimMany,
 } = require('../dist/executor/queue');
 
 const dir = () => fs.mkdtempSync(path.join(os.tmpdir(), 'queue-'));
@@ -164,4 +164,19 @@ test('the arm token is stable across restarts and keeps a live arm window', () =
   assert.equal(publishArmToken(q, rotated.token).keptArm, false);
   assert.equal(setArmed(q, { token: first.token, nowMs: 62_000, ttlMs: 60_000 }).ok, false, 'the old token no longer arms');
   assert.equal(setArmed(q, { token: rotated.token, nowMs: 62_000, ttlMs: 60_000 }).ok, true);
+});
+
+test('claimMany takes a whole window and stops when nothing is eligible', () => {
+  const q = dir();
+  const soon = [1, 2, 3].map((minutes) => enqueueJob(q, input({ contract: W, slug: `s${minutes}`, startAtMs: minutes * 60_000 }), minutes * 1_000).job);
+  const far = enqueueJob(q, input({ contract: W, slug: 'far', startAtMs: 10 * 3_600_000 }), 9_000).job;
+
+  const claimed = claimMany(q, { by: 'host', nowMs: 4_000, leaseMs: 60_000, claimWindowMs: 45 * 60_000, limit: 8 });
+  assert.equal(claimed.length, 3, 'all three in-window jobs are claimed in one pass');
+  assert.deepEqual(claimed.map((job) => job.id), soon.map((job) => job.id), 'soonest opening first');
+  assert.ok(fs.existsSync(path.join(q, `${far.id}.json`)), 'the far job stays queued');
+
+  const again = claimMany(q, { by: 'host', nowMs: 5_000, leaseMs: 60_000, claimWindowMs: 45 * 60_000, limit: 8 });
+  assert.deepEqual(again, [], 'nothing else is eligible');
+  assert.equal(listJobs(q, 6_000).filter((job) => job.view === 'claimed').length, 3);
 });

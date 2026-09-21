@@ -286,6 +286,24 @@ export function cancelJob(dir: string, id: string, nowMs: number): { ok: boolean
   return { ok: false, reason: "job not found in the queue" };
 }
 
+// Claim as many eligible jobs as asked: each claim is still one atomic
+// rename, so two executors can race safely and simply split the batch.
+export function claimMany(
+  dir: string,
+  opts: { by: string; nowMs: number; leaseMs?: number; claimWindowMs?: number; limit?: number }
+): QueueJob[] {
+  const limit = Math.max(1, Math.floor(opts.limit ?? 1));
+  const claimed: QueueJob[] = [];
+  for (let i = 0; i < limit; i++) {
+    // Keep the caller's clock: overriding it with Date.now() silently breaks
+    // the claim window (and any test that drives the queue with a fake clock).
+    const next = claimNext(dir, { ...opts, nowMs: opts.nowMs ?? Date.now() });
+    if (!next.ok) break;
+    claimed.push(next.job);
+  }
+  return claimed;
+}
+
 // A crash (or a killed executor) must not strand a job: an expired lease puts
 // it back in the queue until its attempts are used up.
 export function reclaimStale(dir: string, opts: { nowMs: number; maxAttempts?: number }): string[] {
