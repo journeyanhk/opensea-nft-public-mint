@@ -115,3 +115,20 @@ test('arming needs the executor token and expires', () => {
   assert.equal(clearArmed(q).ok, true);
   assert.equal(isArmed(q, 62_000).armed, false);
 });
+
+test('infrastructure files in the queue directory are never treated as jobs', () => {
+  const q = dir();
+  const job = enqueueJob(q, input({ startAtMs: 1_000 }), 1_000).job;
+  const token = createArmToken();
+  publishArmToken(q, token);
+  fs.writeFileSync(path.join(q, '_heartbeat.json'), JSON.stringify({ at: 't', host: 'h', pid: 1 }));
+  fs.writeFileSync(path.join(q, 'ARMED.json'), JSON.stringify({ expiresAtMs: 0 }));
+  fs.writeFileSync(path.join(q, 'garbage.json'), JSON.stringify({ hello: 'world' }));
+  fs.writeFileSync(path.join(q, 'broken.json'), 'not json');
+
+  const view = listJobs(q, 2_000);
+  assert.equal(view.length, 1, 'only the real job is listed');
+  assert.equal(view[0].id, job.id);
+  const claim = claimNext(q, { by: 'host', nowMs: 2_000, leaseMs: 1_000, claimWindowMs: 60_000 });
+  assert.equal(claim.ok, true, 'claiming still works with neighbours present');
+});

@@ -217,7 +217,7 @@ export function createServer(options: ServerOptions): http.Server {
       if (req.method === "GET" && url.pathname === "/") {
         const heartbeat = (() => {
           try {
-            return JSON.parse(fs.readFileSync(path.join(queueDir, "executor-heartbeat.json"), "utf8")) as {
+            return JSON.parse(fs.readFileSync(path.join(queueDir, "_heartbeat.json"), "utf8")) as {
               at?: string;
               host?: string;
               pid?: number;

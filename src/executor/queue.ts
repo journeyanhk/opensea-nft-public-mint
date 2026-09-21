@@ -102,6 +102,25 @@ function readJson(file: string): QueueJob | null {
   }
 }
 
+// The queue directory also holds infrastructure files (the arm state and the
+// executor heartbeat). They are valid JSON, so shape matters: only something
+// that looks like a job may ever be treated as one.
+function isJob(value: unknown): value is QueueJob {
+  const job = value as Partial<QueueJob> | null;
+  return (
+    !!job &&
+    typeof job.id === "string" &&
+    typeof job.createdAt === "string" &&
+    typeof job.status === "string" &&
+    typeof job.contract === "string"
+  );
+}
+
+function readJob(file: string): QueueJob | null {
+  const value = readJson(file);
+  return isJob(value) ? value : null;
+}
+
 function jobList(dir: string): string[] {
   try {
     return fs
@@ -153,10 +172,10 @@ export function nextEligible(dir: string, opts: { nowMs: number; claimWindowMs?:
   const window = opts.claimWindowMs ?? 2 * 3_600_000;
   return (
     jobList(dir)
-      .map(readJson)
+      .map(readJob)
       .filter((job): job is QueueJob => job !== null && job.status === "queued" && !job.cancelRequested)
       .filter((job) => job.startAtMs === null || job.startAtMs - opts.nowMs <= window)
-      .sort((a, b) => a.createdAt.localeCompare(b.createdAt))[0] ?? null
+      .sort((a, b) => (a.createdAt ?? "").localeCompare(b.createdAt ?? ""))[0] ?? null
   );
 }
 
@@ -168,10 +187,10 @@ export function claimNext(
   const leaseMs = opts.leaseMs ?? 5 * 60_000;
   const window = opts.claimWindowMs ?? 2 * 3_600_000;
   const candidates = jobList(dir)
-    .map(readJson)
+    .map(readJob)
     .filter((job): job is QueueJob => job !== null && job.status === "queued" && !job.cancelRequested)
     .filter((job) => job.startAtMs === null || job.startAtMs - opts.nowMs <= window)
-    .sort((a, b) => a.createdAt.localeCompare(b.createdAt));
+    .sort((a, b) => (a.createdAt ?? "").localeCompare(b.createdAt ?? ""));
 
   for (const job of candidates) {
     const claimed = {
@@ -210,7 +229,7 @@ function moveToDone(dir: string, job: QueueJob, update: Partial<QueueJob>): void
 // single place both processes read it from.
 export function updateJob(dir: string, id: string, fields: Partial<QueueJob>): QueueJob | null {
   for (const candidate of [path.join(dir, "claimed", `${id}.json`), path.join(dir, `${id}.json`)]) {
-    const job = readJson(candidate);
+    const job = readJob(candidate);
     if (!job) continue;
     const next = { ...job, ...fields };
     writeJson(candidate, next);
@@ -244,13 +263,13 @@ export function cancelJob(dir: string, id: string, nowMs: number): { ok: boolean
   const queued = path.join(dir, `${id}.json`);
   const claimed = path.join(dir, "claimed", `${id}.json`);
 
-  const inQueue = readJson(queued);
+  const inQueue = readJob(queued);
   if (inQueue) {
     writeJson(path.join(dir, "done", `${id}.json`), { ...inQueue, status: "cancelled", cancelledAt: new Date(nowMs).toISOString() });
     fs.unlinkSync(queued);
     return { ok: true };
   }
-  const held = readJson(claimed);
+  const held = readJob(claimed);
   if (held) {
     writeJson(claimed, { ...held, cancelRequested: true, cancelledAt: new Date(nowMs).toISOString() });
     return { ok: true, flagged: true };
@@ -266,7 +285,7 @@ export function reclaimStale(dir: string, opts: { nowMs: number; maxAttempts?: n
   const claimedDir = path.join(dir, "claimed");
   for (const file of jobList(claimedDir)) {
     if (file.endsWith(".tmp")) continue;
-    const job = readJson(file);
+    const job = readJob(file);
     if (!job || job.status !== "claimed") continue;
     if (job.cancelRequested) {
       moveToDone(dir, job, { ...job, status: "cancelled", cancelledAt: new Date(opts.nowMs).toISOString() });
@@ -295,17 +314,18 @@ export function listJobs(dir: string, nowMs: number): QueueView[] {
   void nowMs;
   const read = (sub: string, view: QueueView["view"]): QueueView[] =>
     jobList(sub ? path.join(dir, sub) : dir)
-      .map(readJson)
+      .map(readJob)
       .filter((job): job is QueueJob => job !== null)
       .map((job) => ({ ...job, view }));
   return [...read("", "queued"), ...read("claimed", "claimed"), ...read("done", "done")].sort((a, b) =>
-    b.createdAt.localeCompare(a.createdAt)
+    (b.createdAt ?? "").localeCompare(a.createdAt ?? "")
   );
 }
 
 // ── arming: the panel can enqueue freely (it spends nothing), but only an arm
 // token handed out by the executor lets those jobs run ──────────────────────
-const ARM_FILE = "ARMED.json";
+const ARM_FILE = "_armed.json";
+const LEGACY_ARM_FILE = "ARMED.json"; // written by an earlier build
 
 export function createArmToken(): string {
   return randomBytes(16).toString("hex");
@@ -342,20 +362,25 @@ export function publishArmToken(dir: string, token: string): void {
 }
 
 export function isArmed(dir: string, nowMs: number): { armed: boolean; expiresAtMs?: number } {
-  try {
-    const state = JSON.parse(fs.readFileSync(path.join(dir, ARM_FILE), "utf8")) as { expiresAtMs?: number };
-    if (!state?.expiresAtMs || state.expiresAtMs <= nowMs) return { armed: false };
-    return { armed: true, expiresAtMs: state.expiresAtMs };
-  } catch {
-    return { armed: false };
+  for (const name of [ARM_FILE, LEGACY_ARM_FILE]) {
+    try {
+      const state = JSON.parse(fs.readFileSync(path.join(dir, name), "utf8")) as { expiresAtMs?: number };
+      if (!state?.expiresAtMs || state.expiresAtMs <= nowMs) continue;
+      return { armed: true, expiresAtMs: state.expiresAtMs };
+    } catch {
+      // not this one
+    }
   }
+  return { armed: false };
 }
 
 export function clearArmed(dir: string): { ok: boolean } {
-  try {
-    fs.unlinkSync(path.join(dir, ARM_FILE));
-  } catch {
-    // already disarmed
+  for (const name of [ARM_FILE, LEGACY_ARM_FILE]) {
+    try {
+      fs.unlinkSync(path.join(dir, name));
+    } catch {
+      // already disarmed
+    }
   }
   return { ok: true };
 }

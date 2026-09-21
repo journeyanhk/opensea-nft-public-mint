@@ -140,7 +140,7 @@ export async function runExecutor(options: ExecutorOptions = {}): Promise<void> 
   const heartbeat = (): void => {
     try {
       fs.writeFileSync(
-        path.join(queueDir, "executor-heartbeat.json"),
+        path.join(queueDir, "_heartbeat.json"),
         JSON.stringify({ at: new Date().toISOString(), host, pid: process.pid })
       );
     } catch {
