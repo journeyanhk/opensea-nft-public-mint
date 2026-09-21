@@ -44,6 +44,13 @@ function labelFromUrl(url: string, index: number): string {
   }
 }
 
+// The sequencer orders by arrival, so the endpoint closest to it should be the
+// first bytes on the wire. Stable otherwise: endpoints keep their configured
+// order among themselves.
+export function orderEndpoints(endpoints: RpcEndpoint[]): RpcEndpoint[] {
+  return [...endpoints].sort((a, b) => Number(b.label.toLowerCase().includes("sequencer")) - Number(a.label.toLowerCase().includes("sequencer")));
+}
+
 export interface PreparedBlast {
   txHash: string;
   body: string;
@@ -75,9 +82,12 @@ export function blastToAll(
       : rawTxOrPrepared;
 
   const { txHash, body } = prepared;
+  // The sequencer goes first; every result stays attached to its own endpoint
+  // because the responses below are matched to this same array.
+  const targets = orderEndpoints(endpoints);
 
   // Fire ALL requests — these are initiated immediately (non-blocking)
-  const firePromises = endpoints.map((ep) =>
+  const firePromises = targets.map((ep) =>
     fetch(ep.url, {
       method: "POST",
       headers: { "content-type": "application/json" },
@@ -89,7 +99,7 @@ export function blastToAll(
   const responsePromise = Promise.allSettled(firePromises).then(async (settled) => {
     const results: BlastResult[] = [];
     for (let i = 0; i < settled.length; i++) {
-      const ep = endpoints[i];
+      const ep = targets[i];
       const s = settled[i];
       if (s.status === "fulfilled") {
         try {

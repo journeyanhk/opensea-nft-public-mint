@@ -22,6 +22,24 @@ export interface MinterTokenShot {
 
 export const BURST_MAX = 5;
 
+// When the per-wallet cap is one and the drop is free, only one shot can ever
+// land, so sending a few is free of overshoot risk — and it is exactly the case
+// where arrival time decides everything. This turns itself on unless the
+// operator asks otherwise; an explicit --burst-count still wins.
+export function autoBurstForFreeCap1(input: {
+  requested: number;
+  auto: boolean;
+  autoCount?: number;
+  mintPriceWei: bigint | null;
+  capPerWallet: number | null;
+}): { count: number; reason: string | null } {
+  if (input.requested > 1) return { count: input.requested, reason: null };
+  if (!input.auto) return { count: input.requested, reason: null };
+  if (input.mintPriceWei !== 0n) return { count: input.requested, reason: null };
+  if (input.capPerWallet !== 1) return { count: input.requested, reason: null };
+  return { count: Math.min(BURST_MAX, Math.max(2, input.autoCount ?? 3)), reason: "free drop, cap 1 → auto burst" };
+}
+
 export function planBurst(baseNonce: number, count: number): number[] {
   return Array.from({ length: Math.max(0, count) }, (_, index) => baseNonce + index);
 }

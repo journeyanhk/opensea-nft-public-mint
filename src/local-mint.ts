@@ -13,7 +13,7 @@ import chalk from "chalk";
 import { performance } from "perf_hooks";
 import { JsonRpcProvider, Wallet, formatEther } from "ethers";
 import { blastToAll, parseRpcEndpoints, prepareBlast, waitForReceipt, BlastResult, PreparedBlast } from "./rpc-blast";
-import { warmConnections } from "./connection-warmer";
+import { keepWarm, warmConnections } from "./connection-warmer";
 import { waitForMintTime } from "./timer";
 import { explorerTx } from "./chains";
 import { toUtc8Time } from "./time-format";
@@ -527,9 +527,14 @@ export async function localPublicSnipe(opts: LocalSnipeOpts): Promise<SnipeResul
     return skipped();
   }
 
+  // Sockets expire while we wait; refresh them until the fire moment so the
+  // first bytes at T-0 do not pay for a handshake. Fire-and-forget by design.
+  let stopWarming: (() => void) | null = null;
+
   // ── Burst: several nonces, the first shot just before the stage opens ─────
   if (burst && burst.count > 1 && burstShots.size > 0) {
     const stageStartMs = targetStart ? targetStart.getTime() : Date.now();
+    if (targetStart) stopWarming = keepWarm(rpcUrls, { untilMs: stageStartMs, intervalMs: 2_000 });
     if (targetStart) {
       console.log(
         chalk.bold.yellow(
@@ -541,6 +546,7 @@ export async function localPublicSnipe(opts: LocalSnipeOpts): Promise<SnipeResul
       console.log(chalk.bold.yellow(`\n  🚀 BURST ×${burst.count} sending now...`));
     }
 
+    stopWarming?.();
     const waves: { idx: number; address: string; shots: { txHash: string; responsePromise: Promise<BlastResult[]> }[] }[] =
       active.map(({ idx, wallet }) => ({ idx, address: wallet.address, shots: [] }));
 
@@ -659,6 +665,12 @@ export async function localPublicSnipe(opts: LocalSnipeOpts): Promise<SnipeResul
     return burstResults;
   }
 
+  // Sockets expire while we wait; refresh them until the fire moment so the
+  // first bytes at T-0 do not pay for a handshake. Fire-and-forget by design.
+  stopWarming = targetStart
+    ? keepWarm(rpcUrls, { untilMs: targetStart.getTime(), intervalMs: 2_000 })
+    : null;
+
   // ── Wait for the stage, then blast pre-built bytes ──
   if (targetStart) {
     await waitForMintTime(targetStart, 0);
@@ -666,6 +678,7 @@ export async function localPublicSnipe(opts: LocalSnipeOpts): Promise<SnipeResul
     console.log(chalk.bold.yellow("\n  🚀 Sending now..."));
   }
 
+  stopWarming?.();
   const stageStartMs = targetStart ? targetStart.getTime() : Date.now();
   const dispatchStart = performance.now();
 

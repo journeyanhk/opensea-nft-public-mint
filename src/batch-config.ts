@@ -30,6 +30,7 @@ export interface BatchTarget {
 
 export interface BurstConfig {
   count: number; // 1 = off (the default)
+  autoFreeCap1: boolean; // free + cap 1 targets burst automatically (no overshoot possible)
   spacingMs: number;
   leadMs: number | "auto";
   allowOvershoot: boolean;
@@ -38,6 +39,7 @@ export interface BurstConfig {
 
 export const DEFAULT_BURST: BurstConfig = {
   count: 1,
+  autoFreeCap1: true,
   spacingMs: 100,
   leadMs: "auto",
   allowOvershoot: false,
@@ -51,6 +53,7 @@ export function parseBurst(raw: unknown): BurstConfig {
   const lead = value.leadMs === undefined || value.leadMs === "auto" ? "auto" : Math.floor(Number(value.leadMs));
   return {
     count: Number.isFinite(count) ? Math.min(5, Math.max(1, count)) : DEFAULT_BURST.count,
+    autoFreeCap1: value.autoFreeCap1 === undefined ? process.env.BURST_AUTO_FREE_CAP1 !== "0" : value.autoFreeCap1 === true,
     spacingMs: Number.isFinite(spacingMs) ? Math.min(1_000, Math.max(50, spacingMs)) : DEFAULT_BURST.spacingMs,
     leadMs: lead === "auto" || (Number.isFinite(lead) && (lead as number) >= 50) ? (lead as number | "auto") : "auto",
     allowOvershoot: value.allowOvershoot === true,

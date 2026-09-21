@@ -66,3 +66,30 @@ test('saveStateMerged keeps contracts and fields another writer added', () => {
   assert.equal(merged.contracts.arc['0xold'].owner, '0xOwner');
   assert.equal(merged.contracts.arc['0xnew'].lastSeenBlock, 5, 'untouched fields are preserved');
 });
+
+test('the sequencer is sent first and every endpoint keeps its own response', () => {
+  const { orderEndpoints } = require('../dist/rpc-blast');
+  const endpoints = [
+    { url: 'https://alchemy.example', label: 'ALCHEMY' },
+    { url: 'https://sequencer.mainnet.chain.robinhood.com', label: 'robinhood-sequencer' },
+    { url: 'https://rpc.mainnet.chain.robinhood.com', label: 'robinhood-public' },
+  ];
+  const ordered = orderEndpoints(endpoints);
+  assert.deepEqual(ordered.map((e) => e.label), ['robinhood-sequencer', 'ALCHEMY', 'robinhood-public']);
+  assert.equal(endpoints[0].label, 'ALCHEMY', 'the input array is not mutated');
+});
+
+test('keepWarm pings now and on an interval until stopped', async () => {
+  const { keepWarm } = require('../dist/connection-warmer');
+  let calls = 0;
+  const fetchFn = async () => {
+    calls++;
+    return { ok: true };
+  };
+  const stop = keepWarm(['https://rpc.example'], { untilMs: Date.now() - 1, intervalMs: 1_000, fetchFn });
+  await new Promise((resolve) => setTimeout(resolve, 20));
+  assert.equal(calls, 1, 'the immediate ping happened');
+  stop();
+  await new Promise((resolve) => setTimeout(resolve, 20));
+  assert.equal(calls, 1, 'nothing pings after stop');
+});

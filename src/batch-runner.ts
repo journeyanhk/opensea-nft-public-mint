@@ -18,7 +18,7 @@ import { resolveChain } from "./chains";
 import { BatchTarget, loadBatchConfig } from "./batch-config";
 import { maskRpc, planRpcs, resolveRpcsForChain } from "./rpc-resolver";
 import { localPublicSnipe, SnipeResult } from "./local-mint";
-import { burstGate, calibrateLead } from "./burst";
+import { autoBurstForFreeCap1, burstGate, calibrateLead } from "./burst";
 import { acquireWalletLock, WalletLock } from "./wallet-lock";
 import { acquireLanes, LaneCoordinator, orderJobs, planReservation } from "./batch-coordinator";
 import { advance, createJobs, JobEvent } from "./target-job";
@@ -174,7 +174,7 @@ export async function runBatch(configPath: string, options: BatchRunOptions = {}
   const burstShots = cfg.burst.count > 1 ? cfg.burst.count : 1;
 
   let burstLead: Awaited<ReturnType<typeof calibrateLead>> | null = null;
-  if (cfg.burst.count > 1) {
+  if (cfg.burst.count > 1 || cfg.burst.autoFreeCap1) {
     burstLead = await calibrateLead({ rpcUrls: cfg.rpcUrls });
     console.log(
       chalk.gray(
@@ -495,10 +495,17 @@ export async function runBatch(configPath: string, options: BatchRunOptions = {}
       // and the measured clock are all known. A refused burst degrades to a
       // single transaction — never to a refusal to mint.
       let burstForTarget: { count: number; spacingMs: number; leadMs: number } | undefined;
-      if (cfg.burst.count > 1 && burstLead) {
+      const autoBurst = autoBurstForFreeCap1({
+        requested: cfg.burst.count,
+        auto: cfg.burst.autoFreeCap1,
+        mintPriceWei: target.plan.drop.mintPrice,
+        capPerWallet: target.plan.drop.maxTotalMintableByWallet || null,
+      });
+      if (autoBurst.reason) console.log(chalk.gray(`  burst: auto ×${autoBurst.count} (${autoBurst.reason})`));
+      if (burstLead && (cfg.burst.count > 1 || autoBurst.count > 1)) {
         const cap = target.plan.drop.maxTotalMintableByWallet || null;
         const gate = burstGate({
-          count: cfg.burst.count,
+          count: autoBurst.count,
           capPerWallet: cap,
           allowOvershoot: cfg.burst.allowOvershoot,
           clockSkewMs: burstLead.clockSkewMs,
@@ -509,8 +516,8 @@ export async function runBatch(configPath: string, options: BatchRunOptions = {}
           console.log(chalk.bold.yellow(`  ⚠ burst disabled for ${target.label}: ${gate.reason} — sending a single transaction.`));
         } else {
           const leadMs = cfg.burst.leadMs === "auto" ? burstLead.leadMs : cfg.burst.leadMs;
-          burstForTarget = { count: cfg.burst.count, spacingMs: cfg.burst.spacingMs, leadMs };
-          console.log(chalk.gray(`  burst: ×${cfg.burst.count} at T-${leadMs}ms, ${cfg.burst.spacingMs}ms apart (${gate.reason})`));
+          burstForTarget = { count: autoBurst.count, spacingMs: cfg.burst.spacingMs, leadMs };
+          console.log(chalk.gray(`  burst: ×${autoBurst.count} at T-${leadMs}ms, ${cfg.burst.spacingMs}ms apart (${gate.reason})`));
         }
       }
 

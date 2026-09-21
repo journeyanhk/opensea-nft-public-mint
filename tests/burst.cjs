@@ -1,6 +1,6 @@
 const { test } = require('node:test');
 const assert = require('node:assert/strict');
-const { planBurst, burstGate, aggregateBurst, calibrateLead, gapFillerTx } = require('../dist/burst');
+const { planBurst, burstGate, aggregateBurst, calibrateLead, gapFillerTx, autoBurstForFreeCap1 } = require('../dist/burst');
 
 test('planBurst hands out one nonce per shot, in order', () => {
   assert.deepEqual(planBurst(15, 1), [15]);
@@ -134,4 +134,19 @@ test('gapFillerTx builds a zero-value self transfer on the missing nonce', () =>
   assert.equal(filler.nonce, 15);
   assert.equal(filler.gasLimit, 250_000);
   assert.equal(filler.chainId, 4663n);
+});
+
+test('auto burst only fires on a free drop whose cap is one', () => {
+  const base = { requested: 1, auto: true, mintPriceWei: 0n, capPerWallet: 1 };
+  assert.deepEqual(autoBurstForFreeCap1(base), { count: 3, reason: 'free drop, cap 1 → auto burst' });
+  // Explicit requests win.
+  assert.equal(autoBurstForFreeCap1({ ...base, requested: 4 }).count, 4);
+  // Anything paid, or a cap that allows several, stays a single shot.
+  assert.equal(autoBurstForFreeCap1({ ...base, mintPriceWei: 1n }).count, 1);
+  assert.equal(autoBurstForFreeCap1({ ...base, capPerWallet: 5 }).count, 1);
+  assert.equal(autoBurstForFreeCap1({ ...base, capPerWallet: null }).count, 1);
+  // The switch turns it off.
+  assert.equal(autoBurstForFreeCap1({ ...base, auto: false }).count, 1);
+  // The auto count stays inside the burst bound.
+  assert.equal(autoBurstForFreeCap1({ ...base, autoCount: 99 }).count, 5);
 });

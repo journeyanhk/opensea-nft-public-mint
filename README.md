@@ -321,6 +321,7 @@ sudo cp deploy/Caddyfile.example /etc/caddy/Caddyfile && sudo systemctl reload c
 
 **执行器不监听端口**：它是队列的消费者，和面板之间只共享 `queue/` 目录——面板写任务、执行器原子认领、结果与心跳写回。浏览器永远只请求 serve 一个地址（`/api/queue`、`/api/queue/arm`、`/api/queue/cancel`），无需知道执行器存在；系统里也不该出现第二个 HTTP 服务。
 
+- **速度（P4a）**：① **广播顺序**：sequencer 直连排在第一个（`orderEndpoints`，其余端点保持原顺序，结果仍按各自端点索引）；② **连接保活**：Node fetch 的连接池几秒就断，而等到 T-0 的间隔正好更长——改为 `keepWarm` 每 2 秒重连一次直到开售时刻（fire-and-forget，绝不影响发送时刻），不再依赖一次性的 `warmConnections`；③ **免费 + cap=1 自动 burst**：`BURST_AUTO_FREE_CAP1=1`（默认开）对「免费且每钱包上限为 1」的目标自动连发 3 笔（cap=1 只可能中一笔，无过铸风险；显式 `BURST_COUNT` 优先，设 0 关闭）
 - **数量策略（P0 更新）**：默认 `FREE_MAX_QUANTITY=10`。在 T-refresh 依次判定并**重建 calldata**：① `batch-mint`/`instant-sellout` 目标 → 1 票；② 免费 → `min(链上 per-wallet 上限, 10)`；③ 收费 → 1；④ **供应紧张降 1**（剩余量 < 20 × 期望数量时——SeaDrop 对数量是整笔校验，要 10 个而只剩 5 个会整笔回滚，一个都拿不到）。gas 上限随数量放大（每枚 150k + 60k）。风险标记由面板随任务入队传递。
 - **数量策略的边界**：链上 per-wallet 上限为 1 时，`FREE_MAX_QUANTITY=999` 也只铸 **1**（取 `min(上限, 本值)`）；**收费 drop 不受该参数影响，永远 1 个**；只有「链上报告上限为 0（SeaDrop 的不限）」才会用满本值——设成 999 意味着一笔 999 个的铸造（gas 约 1500 万），节点可能直接拒绝，建议 **5–10**。gas 上限会随数量自动放大（`gasLimitForQuantity`，每枚 150k + 60k 余量），并打印 `gas limit raised …`
 - **数量策略（免费拿满 / 收费 1 个）**：`FREE_MAX_QUANTITY`（`.env.executor`，默认 5，0 关闭）。在 **T-refresh 读到最新价格之后**判定：免费 drop 取 `min(链上 per-wallet 上限, FREE_MAX_QUANTITY)`，收费 drop 固定 1 个；数量变化时会用同一份新计划**重建 calldata**，并在日志打印 `quantity policy: …`。这样临近开售改价/改上限都会按最新规则处理，而不是沿用入队时的数量
