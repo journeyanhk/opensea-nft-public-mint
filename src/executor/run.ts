@@ -15,6 +15,7 @@ import fs from "fs";
 import os from "os";
 import chalk from "chalk";
 import path from "path";
+import { formatEther } from "ethers";
 import { DEFAULT_LEDGER_PATH, LedgerEntry, entryOf, loadLedger } from "../batch-ledger";
 import { runBatch, BatchRunOptions } from "../batch-runner";
 import { RawConfig } from "../batch-watch";
@@ -28,6 +29,7 @@ import {
   createArmToken,
   failJob,
   isArmed,
+  findJob,
   nextEligible,
   publishArmToken,
   reclaimStale,
@@ -46,9 +48,13 @@ export function assertExecutorKeys(env: NodeJS.ProcessEnv = process.env): void {
 // One queue job becomes one batch target. The contract is authoritative for the
 // loader (slug may be stale), and the audit snapshot travels with it so gate 1
 // has something to compare and a stale snapshot can be refreshed before use.
-export function jobToRawConfig(job: QueueJob): RawConfig {
+export function jobToRawConfig(job: QueueJob, env: NodeJS.ProcessEnv = process.env): RawConfig {
+  const burstCount = Number(env.BURST_COUNT ?? "1");
   return {
     chain: job.chain,
+    ...(Number.isFinite(burstCount) && burstCount > 1
+      ? { burst: { count: burstCount, allowOvershoot: env.BURST_ALLOW_OVERSHOOT === "1" } }
+      : {}),
     targets: [
       {
         slug: job.contract,
@@ -87,6 +93,21 @@ export function needsAudit(job: QueueJob, nowMs: number, maxAgeMs = 30 * 60_000)
   if (!job.codeHash || !job.auditedAt) return true;
   const at = Date.parse(job.auditedAt);
   return !Number.isFinite(at) || nowMs - at > maxAgeMs;
+}
+
+// "current" is what the panel writes (and what --export means by it), but the
+// loader needs a number: parseEther("current") throws. Resolve it against the
+// audit snapshot and write the answer back, so the queue shows the ceiling that
+// was accepted — and a price change before the open is refused by the T-refresh
+// guard instead of being followed.
+export function resolveMaxPriceEth(
+  job: QueueJob,
+  priceWei: bigint | null | undefined
+): { maxPriceEth: string; resolved: boolean } {
+  if (job.maxPriceEth !== "current") return { maxPriceEth: job.maxPriceEth, resolved: false };
+  if (priceWei === null || priceWei === undefined) return { maxPriceEth: "current", resolved: false };
+  const text = formatEther(priceWei);
+  return { maxPriceEth: text === "0.0" ? "0" : text, resolved: true };
 }
 
 export function jobSource(job: QueueJob): TargetSource {
@@ -132,8 +153,8 @@ export async function runExecutor(options: ExecutorOptions = {}): Promise<void> 
       console.log(chalk.gray(`  dry run: would claim ${peek.id}`));
       console.log(chalk.gray(`  dry run: target ${peek.chain}/${peek.contract} ×${peek.quantity} startAt ${peek.startAtMs ? new Date(peek.startAtMs).toISOString() : "auto"}`));
       console.log(chalk.gray(`  dry run: codeHash ${peek.codeHash ?? "(none pinned — gate 1 would be skipped, pin it)"}`));
+      console.log(chalk.gray(`  dry run: it would run only if the queue is armed (${isArmed(queueDir, Date.now()).armed ? "armed now" : "currently disarmed"})`));
     }
-    clearArmed(queueDir); // a rehearsal never leaves an armed queue behind
     return;
   }
 
@@ -162,7 +183,9 @@ export async function runExecutor(options: ExecutorOptions = {}): Promise<void> 
       continue;
     }
 
-    const claim = claimNext(queueDir, { by: host, nowMs: Date.now(), leaseMs: 15 * 60_000 });
+    // 45 minutes is the longest the executor should sit on a job before the
+    // send window: it matches the runner's own pre-open audit window.
+    const claim = claimNext(queueDir, { by: host, nowMs: Date.now(), leaseMs: 30 * 60_000, claimWindowMs: 45 * 60_000 });
     if (!claim.ok) {
       if (options.once) return;
       await sleep(intervalMs);
@@ -172,7 +195,24 @@ export async function runExecutor(options: ExecutorOptions = {}): Promise<void> 
     const job = claim.job;
     say(chalk.bold.magenta(`\n  claimed ${job.id} — ${job.chain}/${job.contract} ×${job.quantity}`));
 
-    if (needsAudit(job, Date.now())) {
+    // The ledger is the single source of truth: a contract this process already
+    // touched must not be executed again just because a new job was enqueued.
+    const prior = entryOf(loadLedger(ledgerPath), job.chain, job.contract);
+    const terminal = ["SUCCESS", "TIMEOUT", "PARTIAL", "NO_MINT"];
+    if (prior && terminal.includes(prior.status)) {
+      const skipped = completeJob(
+        queueDir,
+        job,
+        { status: "SKIPPED", txHash: prior.txHash, mintedCount: prior.mintedCount ?? null, ledgerStatus: prior.status, at: new Date().toISOString() },
+        Date.now()
+      );
+      say(chalk.yellow(`  ${skipped.status}: already handled per ledger (${prior.status})`));
+      if (options.once) return;
+      continue;
+    }
+
+    const wantsPrice = job.maxPriceEth === "current";
+    if (needsAudit(job, Date.now()) || (wantsPrice && !job.mintPriceWei)) {
       say("  snapshot missing or stale — auditing before signing");
       try {
         const audit = await auditTarget({ chainKey: job.chain, target: job.contract }, { requestedQuantity: job.quantity });
@@ -197,12 +237,37 @@ export async function runExecutor(options: ExecutorOptions = {}): Promise<void> 
       }
     }
 
+    if (job.maxPriceEth === "current") {
+      const resolved = resolveMaxPriceEth(job, job.mintPriceWei ? BigInt(job.mintPriceWei) : null);
+      if (!resolved.resolved) {
+        const failed = failJob(queueDir, job, "cannot resolve the current price to a ceiling — refusing to mint without one");
+        say(chalk.red(`  ${failed.status}: ${failed.error}`));
+        if (options.once) return;
+        continue;
+      }
+      job.maxPriceEth = resolved.maxPriceEth;
+      updateJob(queueDir, job.id, { maxPriceEth: resolved.maxPriceEth });
+      say(chalk.gray(`  price ceiling resolved: ${resolved.maxPriceEth} ${job.chain === "robinhood" ? "native" : "ETH"} per NFT`));
+    }
+
+    // A batch can run for an hour: keep the heartbeat and the lease alive while
+    // it does, so the panel does not report the executor dead and a reclaim
+    // cannot hand the job to somebody else mid-flight.
+    const keepAlive = setInterval(() => {
+      heartbeat();
+      const current = findJob(queueDir, job.id);
+      if (current) updateJob(queueDir, job.id, { lease: { by: host, expiresAtMs: Date.now() + 30 * 60_000 } });
+    }, 30_000);
+    (keepAlive as NodeJS.Timeout).unref?.();
+
     try {
       const batchOptions: BatchRunOptions = {
         targetSource: jobSource(job),
         watch: false,
         maxPolls: 0,
         assumeYes: true,
+        // Checked in local-mint after the fresh plan is read and before signing.
+        shouldAbort: () => findJob(queueDir, job.id)?.cancelRequested === true,
       };
       await runBatch(path.join(queueDir, `${job.id}.json`), batchOptions);
       const entry = entryOf(loadLedger(ledgerPath), job.chain, job.contract);
@@ -214,8 +279,13 @@ export async function runExecutor(options: ExecutorOptions = {}): Promise<void> 
           : chalk.yellow(`  ${finished.status}: the ledger has no entry (was anything broadcast?)`)
       );
     } catch (err) {
-      const failed = failJob(queueDir, job, (err as Error).message);
-      say(chalk.red(`  ${failed.status}: ${failed.error}`));
+      const cancelled = findJob(queueDir, job.id)?.cancelRequested === true;
+      const finished = cancelled
+        ? completeJob(queueDir, job, { status: "SKIPPED", txHash: null, mintedCount: null, ledgerStatus: "CANCELLED", at: new Date().toISOString() }, Date.now())
+        : failJob(queueDir, job, (err as Error).message);
+      say(chalk.red(`  ${finished.status}: ${cancelled ? "cancelled before signing" : finished.error}`));
+    } finally {
+      clearInterval(keepAlive);
     }
 
     if (options.once) return;

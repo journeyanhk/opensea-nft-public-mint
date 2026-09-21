@@ -132,3 +132,12 @@ test('infrastructure files in the queue directory are never treated as jobs', ()
   const claim = claimNext(q, { by: 'host', nowMs: 2_000, leaseMs: 1_000, claimWindowMs: 60_000 });
   assert.equal(claim.ok, true, 'claiming still works with neighbours present');
 });
+
+test('the soonest opening is claimed first, whatever the enqueue order', () => {
+  const q = dir();
+  const late = enqueueJob(q, input({ startAtMs: 90 * 60_000 }), 1_000).job;   // enqueued first, opens later
+  const soon = enqueueJob(q, input({ startAtMs: 10 * 60_000 }), 2_000).job;  // enqueued later, opens sooner
+  const claim = claimNext(q, { by: 'host', nowMs: 3_000, leaseMs: 60_000, claimWindowMs: 2 * 3_600_000 });
+  assert.equal(claim.job.id, soon.id, 'a nearer opening must not miss its window');
+  assert.notEqual(claim.job.id, late.id);
+});

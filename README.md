@@ -321,6 +321,8 @@ sudo cp deploy/Caddyfile.example /etc/caddy/Caddyfile && sudo systemctl reload c
 
 **执行器不监听端口**：它是队列的消费者，和面板之间只共享 `queue/` 目录——面板写任务、执行器原子认领、结果与心跳写回。浏览器永远只请求 serve 一个地址（`/api/queue`、`/api/queue/arm`、`/api/queue/cancel`），无需知道执行器存在；系统里也不该出现第二个 HTTP 服务。
 
+执行器与队列的运维要点：① 执行器启动日志里有 **arm token**（12 小时过期），`journalctl -u nft-executor` 的输出请勿外发；② 队列的认领顺序是**开售时间**（不是入队时间），只认领 45 分钟窗口内的任务，执行期间每 30 秒刷新心跳与租约；③ 面板入队的 `"current"` 价格会在认领时按审计快照解析成具体上限并写回任务（开售前改价会被 T-refresh 护栏拒绝）；④ 同一合约若账本已有终态条目，任务会直接标 `skipped: already handled per ledger`；⑤ 入队限流 10/h（面板密码泄露时的第二道闸）。
+
 执行队列的用法：面板「执行队列」tab → 行内「加入执行队列」或「收藏加入执行队列」→ 把执行器启动日志里的 arm token 填进「武装」（12 小时过期）→ 执行器认领并复用完整管线（三道门/burst/账本），快照缺失或超过 30 分钟会先复审并**锁定 codeHash**，否则拒绝执行；结果从账本派生（单一真相），`--executor --dry-run` 可只读预演。
 
 打开 `https://<你的域名>/`：顶部状态条显示扫描进度与行数，可点 **Scan now** 立即触发；表格与 `--report` 完全一致。状态条与 `/api/status` 也会显示每轮的 refresh 结果（`processed/socials/x/rate-limited/remaining`）。

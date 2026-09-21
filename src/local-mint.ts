@@ -43,6 +43,9 @@ export interface LocalSnipeOpts {
   // send. Preparing does not hold the lane, sending does; the returned function
   // releases it.
   beforeSend?: () => Promise<() => void>;
+  // A queue job can be cancelled while it waits; the last moment to notice is
+  // after the fresh plan is read and before anything is signed.
+  shouldAbort?: () => boolean;
 }
 
 // SUCCESS means the receipt proved the tokens arrived (M8/B1); PARTIAL and
@@ -324,6 +327,11 @@ export async function localPublicSnipe(opts: LocalSnipeOpts): Promise<SnipeResul
         return skipped();
       }
     }
+  }
+
+  if (opts.shouldAbort?.()) {
+    console.log(chalk.bold.yellow("  ⚠ Cancelled while waiting (queue flag) — nothing will be signed."));
+    return skipped();
   }
 
   // Re-warm after the wait: keep-alive sockets are usually torn down by the far

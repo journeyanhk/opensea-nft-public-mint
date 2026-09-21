@@ -33,6 +33,14 @@
 - [ ] 0.3 **账本是单一真相**：队列 `result` 只是 `.batch-state.json` 的视图（从账本条目派生）；面板「重试」仅对账本允许重试的状态开放（`SKIPPED`/`REJECTED`/开售期内 `REVERTED`）
 - [ ] 0.4 补充：认领提前到 `startAt − 2h`（进入等待/复审流程）；`cancel` 允许作用于 `claimed` 且未签名的任务（执行器在 T-refresh 读取消标记）；面板显示执行器心跳（最近一次 `running` 写回时间）；`--executor --dry-run` 作为正式 flag
 
+## review17 修复（B5 上线前）
+
+- [√] `maxPriceEth: "current"` 在执行器侧解析（`resolveMaxPriceEth` + 写回任务）+ 用例证明 `parseEther("current")` 会抛错
+- [√] 认领按开售时间排序、窗口 45 分钟、租约 30 分钟
+- [√] 执行期间 30 秒心跳 + 续租（`setInterval` + `finally` 清理）
+- [√] 取消在签名前生效（`shouldAbort` → local-mint）
+- [√] dry-run 不清武装、账本预检标 skipped、`BURST_*` 注入、入队 10/h 限流
+
 ## B4 接口约束（现在就定，B5 直接受益）
 
 - [ ] 0.5 任务模型：**一个队列任务 = 一个 `TargetJob`**，钱包通道由协调器分配

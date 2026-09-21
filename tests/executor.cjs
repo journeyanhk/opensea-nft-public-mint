@@ -3,7 +3,7 @@ const assert = require('node:assert/strict');
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
-const { jobToRawConfig, needsAudit, resultFromLedgerEntry, assertExecutorKeys } = require('../dist/executor/run');
+const { jobToRawConfig, needsAudit, resultFromLedgerEntry, assertExecutorKeys, resolveMaxPriceEth } = require('../dist/executor/run');
 const { enqueueJob, claimNext } = require('../dist/executor/queue');
 
 const W = '0x65f001aa4109bb8d3bf70af66855aba1e5582625';
@@ -43,4 +43,23 @@ test('the queue result is derived from the ledger, never invented', () => {
   assert.equal(result.mintedCount, 1);
   assert.deepEqual(result.tokenIds, ['7']);
   assert.equal(result.ledgerStatus, 'PARTIAL', 'the ledger wording is preserved for the panel');
+});
+
+test('"current" is resolved to the audited price and never reaches the loader', () => {
+  const base = { maxPriceEth: "current" };
+  assert.deepEqual(resolveMaxPriceEth({ ...base }, 1_500_000_000_000_000n), { maxPriceEth: "0.0015", resolved: true });
+  assert.deepEqual(resolveMaxPriceEth({ ...base }, 0n), { maxPriceEth: "0", resolved: true }, "a free drop caps at 0");
+  assert.deepEqual(resolveMaxPriceEth({ ...base }, null), { maxPriceEth: "current", resolved: false }, "unknown price cannot be resolved");
+  assert.deepEqual(resolveMaxPriceEth({ maxPriceEth: "0.002" }, null), { maxPriceEth: "0.002", resolved: false }, "an explicit cap is left alone");
+
+  const { parseEther } = require('ethers');
+  assert.throws(() => parseEther("current"), /invalid/i, "the reason this matters");
+  assert.doesNotThrow(() => parseEther("0.0015"));
+});
+
+test('queue jobs can opt into burst from the executor environment', () => {
+  const job = { chain: "robinhood", contract: W, quantity: 1, maxPriceEth: "0", startAtMs: null, codeHash: null, slug: null };
+  assert.equal(jobToRawConfig(job, {}).burst, undefined, "burst stays off by default");
+  const withBurst = jobToRawConfig(job, { BURST_COUNT: "2", BURST_ALLOW_OVERSHOOT: "1" });
+  assert.deepEqual(withBurst.burst, { count: 2, allowOvershoot: true });
 });

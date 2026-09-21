@@ -83,6 +83,8 @@ export function sanitizeLog(lines: string[]): string[] {
   );
 }
 
+const MAX_ENQUEUE_PER_HOUR = 10;
+
 export function createServer(options: ServerOptions): http.Server {
   const { scheduler } = options;
   const favoritesPath = options.favoritesPath ?? DEFAULT_FAVORITES_PATH;
@@ -134,6 +136,11 @@ export function createServer(options: ServerOptions): http.Server {
           if (action === "") {
             if (typeof body.chain === "string" && !resolveChain(body.chain)) {
               return sendJson(res, 400, { error: `unsupported chain "${body.chain}"` });
+            }
+            const since = Date.now() - 3_600_000;
+            const recent = listJobs(queueDir, Date.now()).filter((job) => Date.parse(job.createdAt) >= since).length;
+            if (recent >= MAX_ENQUEUE_PER_HOUR) {
+              return sendJson(res, 429, { error: `${MAX_ENQUEUE_PER_HOUR} jobs were enqueued in the last hour — refusing more` });
             }
             const created = enqueueJob(queueDir, body as never, Date.now());
             return sendJson(res, created.ok ? 200 : 400, created);

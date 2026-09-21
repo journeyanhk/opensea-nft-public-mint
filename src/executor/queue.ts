@@ -175,7 +175,7 @@ export function nextEligible(dir: string, opts: { nowMs: number; claimWindowMs?:
       .map(readJob)
       .filter((job): job is QueueJob => job !== null && job.status === "queued" && !job.cancelRequested)
       .filter((job) => job.startAtMs === null || job.startAtMs - opts.nowMs <= window)
-      .sort((a, b) => (a.createdAt ?? "").localeCompare(b.createdAt ?? ""))[0] ?? null
+      .sort((a, b) => (a.startAtMs ?? 0) - (b.startAtMs ?? 0) || (a.createdAt ?? "").localeCompare(b.createdAt ?? ""))[0] ?? null
   );
 }
 
@@ -190,7 +190,9 @@ export function claimNext(
     .map(readJob)
     .filter((job): job is QueueJob => job !== null && job.status === "queued" && !job.cancelRequested)
     .filter((job) => job.startAtMs === null || job.startAtMs - opts.nowMs <= window)
-    .sort((a, b) => (a.createdAt ?? "").localeCompare(b.createdAt ?? ""));
+    // Soonest opening first: a job enqueued earlier for a later drop must not
+    // hold the executor while a nearer one misses its window.
+    .sort((a, b) => (a.startAtMs ?? 0) - (b.startAtMs ?? 0) || (a.createdAt ?? "").localeCompare(b.createdAt ?? ""));
 
   for (const job of candidates) {
     const claimed = {
@@ -236,6 +238,10 @@ export function updateJob(dir: string, id: string, fields: Partial<QueueJob>): Q
     return next;
   }
   return null;
+}
+
+export function findJob(dir: string, id: string): QueueJob | null {
+  return readJob(path.join(dir, "claimed", `${id}.json`)) ?? readJob(path.join(dir, `${id}.json`));
 }
 
 export function completeJob(dir: string, job: QueueJob, result: QueueJob["result"], nowMs: number): QueueJob {
