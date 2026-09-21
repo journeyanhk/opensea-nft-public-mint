@@ -93,6 +93,16 @@ export function resultFromLedgerEntry(
   };
 }
 
+// The audit already answers the question the executor cares about most: is
+// there a SeaDrop public drop here at all? A target that fails that test must be
+// rejected with that reason, not with a gate-1 message about a missing hash.
+export function applicabilityError(audit: {
+  applicable: boolean;
+  notApplicableReason?: string;
+}): string | null {
+  return audit.applicable ? null : audit.notApplicableReason ?? "not applicable (no SeaDrop public drop)";
+}
+
 // An automated path must never run gate 1 blind: without a pinned code hash the
 // executor audits first and refuses the job if the audit cannot pin one. A
 // snapshot older than the same window the CLI re-audits in is refreshed too.
@@ -139,7 +149,11 @@ export async function chainOnlySnapshot(chainKey: string, contract: string, quan
   if (!rpcUrl) throw new Error("no usable RPC endpoint confirmed for this chain");
 
   const provider = new JsonRpcProvider(rpcUrl);
-  const codeHash = codeHashOf(await provider.getCode(contract));
+  const code = await provider.getCode(contract);
+  const codeHash = codeHashOf(code);
+  if (codeHash === null) {
+    throw new Error(`no contract code at ${contract} on ${chainKey} (wrong chain or address?)`);
+  }
   const mintPlan = await buildLocalMintPlan(rpcUrl, contract, quantity);
   if (!mintPlan) throw new Error("no SeaDrop public drop found on-chain");
 
@@ -278,6 +292,14 @@ export async function runExecutor(options: ExecutorOptions = {}): Promise<void> 
       say("  snapshot missing or stale — auditing before signing");
       try {
         const audit = await auditTarget({ chainKey: job.chain, target: job.contract }, { requestedQuantity: job.quantity });
+        const notApplicable = applicabilityError(audit);
+        if (notApplicable) {
+          const failed = failJob(queueDir, job, notApplicable);
+          say(chalk.red(`  ${failed.status}: ${failed.error} — nothing to mint here (chain ${job.chain})`));
+          notifier.send({ kind: "job-finished", title: `${failed.status} — ${job.name ?? job.slug ?? job.contract}`, detail: notApplicable });
+          if (options.once) return;
+          continue;
+        }
         const snapshot = {
           codeHash: audit.codeHash,
           auditedAt: new Date().toISOString(),

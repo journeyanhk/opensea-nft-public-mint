@@ -63,3 +63,17 @@ test('queue jobs can opt into burst from the executor environment', () => {
   const withBurst = jobToRawConfig(job, { BURST_COUNT: "2", BURST_ALLOW_OVERSHOOT: "1" });
   assert.deepEqual(withBurst.burst, { count: 2, allowOvershoot: true });
 });
+
+test('a not-applicable audit is reported as such, not as a gate-1 failure', () => {
+  const { applicabilityError } = require('../dist/executor/run');
+  assert.equal(applicabilityError({ applicable: true }), null);
+  assert.equal(
+    applicabilityError({ applicable: false }),
+    'not applicable (no SeaDrop public drop)',
+    'a reason is always produced'
+  );
+  assert.equal(
+    applicabilityError({ applicable: false, notApplicableReason: 'no SeaDrop 1.0 public drop found' }),
+    'no SeaDrop 1.0 public drop found'
+  );
+});

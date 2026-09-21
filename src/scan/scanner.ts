@@ -455,7 +455,9 @@ export async function runScan(
           const entry = state.contracts[chainKey][contract];
           entry.lastAuditedBlock = toBlock;
           entry.lastAuditedAt = new Date().toISOString();
-          entry.lastGrade = result.grade.grade;
+          // A not-applicable audit (no SeaDrop public drop) has no grade to
+          // keep; recording one would show a letter for a target without a plan.
+          if (result.applicable && result.publicDrop) entry.lastGrade = result.grade.grade;
           entry.publicStart = result.publicDrop?.startTime ?? entry.publicStart;
           entry.endTime = result.publicDrop?.endTime ?? entry.endTime;
           entry.maxSupply = result.maxSupply?.toString() ?? entry.maxSupply;
@@ -463,7 +465,7 @@ export async function runScan(
           entry.slug = result.slug ?? entry.slug;
           entry.name = result.name ?? entry.name;
           entry.owner = result.owner ?? entry.owner;
-          entry.codeHash = result.codeHash ?? entry.codeHash;
+          if (result.applicable) entry.codeHash = result.codeHash ?? entry.codeHash;
           if (result.social) {
             entry.imageUrl = result.social.imageUrl ?? entry.imageUrl;
             entry.twitter = result.social.twitter ?? entry.twitter;
@@ -492,6 +494,10 @@ export async function runScan(
           const mintedNow = result.totalMinted.toString();
           entry.quietStreak = entry.lastMintedTotal === mintedNow ? (entry.quietStreak ?? 0) + 1 : 0;
           entry.lastMintedTotal = mintedNow;
+          if (!result.applicable) {
+            onProgress(`${chainKey}: ${contract} is not a SeaDrop public drop — not recorded`);
+            continue;
+          }
           const remaining = remainingSupply(result.maxSupply, result.totalMinted);
           appendHistory(
             [

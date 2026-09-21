@@ -171,7 +171,7 @@ export async function runScanCommand(args: string[]): Promise<void> {
   const audited = reports.flatMap((r) => r.audited);
   if (audited.length > 0) {
     const counts = audited.reduce<Record<string, number>>((acc, r) => {
-      acc[r.grade.grade] = (acc[r.grade.grade] ?? 0) + 1;
+      if (r.applicable) acc[r.grade.grade] = (acc[r.grade.grade] ?? 0) + 1;
       return acc;
     }, {});
     console.log(

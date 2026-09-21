@@ -537,6 +537,13 @@ export async function runBatch(configPath: string, options: BatchRunOptions = {}
             { chainKey: cfg.chainKey, target: target.contract },
             { wallets: wallets.map((w) => w.address), requestedQuantity: target.quantity }
           );
+          if (!audit.applicable) {
+            console.log(
+              chalk.bold.yellow(`  skipping ${target.label}: ${audit.notApplicableReason ?? "not a SeaDrop public drop"}`)
+            );
+            summary.push({ label: target.label, results: skippedAll() });
+            return;
+          }
           console.log(chalk.gray(`  audit: ${audit.grade.grade} — ${audit.grade.reason}`));
           if (cfg.auditSkipGrades.includes(audit.grade.grade)) {
             console.log(chalk.bold.yellow(`  skipping ${target.label}: audit grade ${audit.grade.grade}`));

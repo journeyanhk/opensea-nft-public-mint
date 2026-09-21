@@ -316,15 +316,18 @@ export async function auditTarget(input: AuditInput, opts: AuditOptions = {}): P
       social: null,
       smartMinters: 0,
       codeHash: null,
+      // Deliberately not a letter grade: "not applicable" is not a judgement
+      // about the drop, and letting it look like one leaked a "grade B" onto
+      // the board and into the executor logs for targets that have no plan.
       grade: {
-        grade: "B",
-        upperGrade: "B",
-        projectedGrade: "B",
+        grade: "?",
+        upperGrade: "?",
+        projectedGrade: "?",
         risks: [],
         reason: "not applicable (no SeaDrop public drop)",
         upperReason: "not applicable",
         projectedReason: "not applicable",
-      },
+      } as unknown as GradeResult,
       errors,
     };
   }
