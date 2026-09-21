@@ -534,7 +534,12 @@ export async function localPublicSnipe(opts: LocalSnipeOpts): Promise<SnipeResul
   // ── Burst: several nonces, the first shot just before the stage opens ─────
   if (burst && burst.count > 1 && burstShots.size > 0) {
     const stageStartMs = targetStart ? targetStart.getTime() : Date.now();
-    if (targetStart) stopWarming = keepWarm(rpcUrls, { untilMs: stageStartMs, intervalMs: 2_000 });
+    if (targetStart) {
+      // Stop a little before the first shot: a ping in flight at the same moment
+      // would make the pool open a second connection, which is exactly the cold
+      // handshake this is meant to avoid.
+      stopWarming = keepWarm(rpcUrls, { untilMs: stageStartMs - Math.max(burst.leadMs, 300), intervalMs: 1_500 });
+    }
     if (targetStart) {
       console.log(
         chalk.bold.yellow(
@@ -668,7 +673,7 @@ export async function localPublicSnipe(opts: LocalSnipeOpts): Promise<SnipeResul
   // Sockets expire while we wait; refresh them until the fire moment so the
   // first bytes at T-0 do not pay for a handshake. Fire-and-forget by design.
   stopWarming = targetStart
-    ? keepWarm(rpcUrls, { untilMs: targetStart.getTime(), intervalMs: 2_000 })
+    ? keepWarm(rpcUrls, { untilMs: targetStart.getTime() - 300, intervalMs: 1_500 })
     : null;
 
   // ── Wait for the stage, then blast pre-built bytes ──
