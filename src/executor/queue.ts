@@ -379,7 +379,8 @@ export function setArmed(dir: string, input: { token: string; nowMs: number; ttl
   const ttlMs = input.ttlMs ?? (hours === 0 ? Number.MAX_SAFE_INTEGER : hours * 3_600_000);
   writeJson(file, {
     armedAt: new Date(input.nowMs).toISOString(),
-    expiresAtMs: input.nowMs + ttlMs,
+    // No-expiry is a sentinel, not now + a huge number (which would overflow).
+    expiresAtMs: ttlMs === Number.MAX_SAFE_INTEGER ? Number.MAX_SAFE_INTEGER : input.nowMs + ttlMs,
     tokenHash: expected,
   });
   return { ok: true };
