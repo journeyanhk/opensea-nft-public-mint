@@ -180,3 +180,23 @@ test('claimMany takes a whole window and stops when nothing is eligible', () => 
   assert.deepEqual(again, [], 'nothing else is eligible');
   assert.equal(listJobs(q, 6_000).filter((job) => job.view === 'claimed').length, 3);
 });
+
+test('arming can be permanent, and the token can be pinned by the operator', () => {
+  const q = dir();
+  const token = createArmToken();
+  publishArmToken(q, token);
+
+  // EXECUTOR_ARM_TTL_H=0 means "until disarmed": the expiry is effectively infinite.
+  const previous = process.env.EXECUTOR_ARM_TTL_H;
+  process.env.EXECUTOR_ARM_TTL_H = '0';
+  try {
+    assert.equal(setArmed(q, { token, nowMs: 1_000 }).ok, true);
+    const state = isArmed(q, 2_000);
+    assert.equal(state.armed, true);
+    assert.equal(state.expiresAtMs, Number.MAX_SAFE_INTEGER);
+    assert.equal(isArmed(q, Date.now() + 365 * 86_400_000).armed, true, 'a year later it is still armed');
+  } finally {
+    if (previous === undefined) delete process.env.EXECUTOR_ARM_TTL_H;
+    else process.env.EXECUTOR_ARM_TTL_H = previous;
+  }
+});

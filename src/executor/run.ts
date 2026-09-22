@@ -39,6 +39,7 @@ import {
   nextEligible,
   publishArmToken,
   reclaimStale,
+  setArmed,
   updateJob,
 } from "./queue";
 
@@ -248,19 +249,51 @@ export async function runExecutor(options: ExecutorOptions = {}): Promise<void> 
   const say = options.onProgress ?? ((message: string) => console.log(message));
   const notifier = createNotifier();
 
-  const { token, created } = loadOrCreateArmToken(queueDir, { rotate: options.rotateArmToken === true });
+  // The token may be pinned in .env.executor (ARM_TOKEN=...) instead of the
+  // generated file; either way only its hash is stored in the queue.
+  const envToken = (process.env.ARM_TOKEN ?? "").trim();
+  const { token, created } = envToken
+    ? { token: envToken, created: false }
+    : loadOrCreateArmToken(queueDir, { rotate: options.rotateArmToken === true });
   const published = publishArmToken(queueDir, token);
+  const armHours = Number(process.env.EXECUTOR_ARM_TTL_H ?? "12");
+  const armForever = Number.isFinite(armHours) && armHours === 0;
+  const autoArm = process.env.AUTO_ARM === "1" || process.env.EXECUTOR_ALWAYS_ARMED === "1";
+
   console.log(chalk.bold.cyan(`\nExecutor — queue ${queueDir}`));
-  console.log(chalk.bold.yellow(`  arm token: ${token}${created ? " (new)" : " (unchanged)"}`));
   console.log(
-    chalk.gray(
-      `  stored in queue/arm-token (0600); enter it in the panel once — it survives restarts. ` +
-        `Arming itself expires (${process.env.EXECUTOR_ARM_TTL_H ?? 12}h); --rotate-arm-token replaces the token.`
+    chalk.bold.yellow(
+      `  arm token: ${envToken ? "from ARM_TOKEN in .env.executor" : `${token}${created ? " (new)" : " (unchanged)"}`}`
     )
   );
-  if (published.keptArm) {
+  console.log(
+    chalk.gray(
+      envToken
+        ? `  pin it in .env.executor (ARM_TOKEN=); change it there and restart to rotate. ` +
+            `Arming ${armForever ? "never expires" : `expires after ${armHours}h`}.`
+        : `  stored in queue/arm-token (0600); enter it in the panel once — it survives restarts. ` +
+            `Arming ${armForever ? "never expires" : `expires after ${armHours}h`}; --rotate-arm-token replaces the token.`
+    )
+  );
+
+  if (autoArm) {
+    const armed = setArmed(queueDir, { token, nowMs: Date.now() });
+    console.log(
+      armed.ok
+        ? chalk.green(`  auto-armed (AUTO_ARM=1)${armForever ? " — stays armed until disarmed" : ""}`)
+        : chalk.red(`  auto-arm failed: ${armed.reason}`)
+    );
+  } else if (published.keptArm) {
     const state = isArmed(queueDir, Date.now());
-    if (state.armed) console.log(chalk.gray(`  still armed until ${new Date(state.expiresAtMs!).toISOString()}`));
+    if (state.armed) {
+      console.log(
+        chalk.gray(
+          state.expiresAtMs === Number.MAX_SAFE_INTEGER
+            ? "  still armed (no expiry)"
+            : `  still armed until ${new Date(state.expiresAtMs!).toISOString()}`
+        )
+      );
+    }
   }
 
   if (options.dryRun) {

@@ -372,8 +372,11 @@ export function setArmed(dir: string, input: { token: string; nowMs: number; ttl
   if (!expected || presented !== expected) {
     return { ok: false, reason: "arm token does not match the one this executor printed" };
   }
-  const configuredHours = Number(process.env.EXECUTOR_ARM_TTL_H);
-  const ttlMs = input.ttlMs ?? (Number.isFinite(configuredHours) && configuredHours > 0 ? configuredHours : 12) * 3_600_000;
+  // 0 means "until I disarm or rotate the token": an operator who keeps keys on
+  // a dedicated host may not want a timer in the way. Unset still means 12h.
+  const configured = Number(process.env.EXECUTOR_ARM_TTL_H ?? "12");
+  const hours = Number.isFinite(configured) && configured >= 0 ? configured : 12;
+  const ttlMs = input.ttlMs ?? (hours === 0 ? Number.MAX_SAFE_INTEGER : hours * 3_600_000);
   writeJson(file, {
     armedAt: new Date(input.nowMs).toISOString(),
     expiresAtMs: input.nowMs + ttlMs,

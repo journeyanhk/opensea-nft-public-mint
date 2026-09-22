@@ -275,6 +275,17 @@ export async function localPublicSnipe(opts: LocalSnipeOpts): Promise<SnipeResul
         targetStart = new Date(decision.startMs);
       }
 
+      if (fresh.data !== planNow.data || fresh.value !== planNow.value) {
+        console.log(
+          chalk.bold.yellow(
+            `  ⚠ Drop changed: ${formatEther(planNow.drop.mintPrice)} → ${formatEther(fresh.drop.mintPrice)} per NFT, fee recipient ${planNow.feeRecipient} → ${fresh.feeRecipient}. Using the fresh values.`
+          )
+        );
+      }
+
+      // The quantity policy may rebuild the calldata; compare the fresh plan
+      // against what we signed up for *before* that, or every quantity change
+      // looks like a price change.
       fresh = await applyQuantityPolicy(fresh);
 
       if (maxValueWei !== undefined && fresh.value > maxValueWei) {
@@ -291,14 +302,6 @@ export async function localPublicSnipe(opts: LocalSnipeOpts): Promise<SnipeResul
       if (!(await checkSupply(fresh.drop.maxTotalMintableByWallet))) return skipped();
       const tightNow = downgradeForTightSupply({ quantity, remaining: supplyRemaining });
       if (tightNow.quantity < quantity) fresh = await resize(tightNow.quantity, tightNow.reason!, fresh);
-
-      if (fresh.data !== planNow.data || fresh.value !== planNow.value) {
-        console.log(
-          chalk.bold.yellow(
-            `  ⚠ Drop changed: ${formatEther(planNow.drop.mintPrice)} → ${formatEther(fresh.drop.mintPrice)} per NFT, fee recipient ${planNow.feeRecipient} → ${fresh.feeRecipient}. Using the fresh values.`
-          )
-        );
-      }
 
       planNow = fresh;
       break;
