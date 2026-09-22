@@ -58,3 +58,21 @@ test('two jobs opening within seconds are a conflict the operator should see', (
   const result = previewJob({ ...base, existing, entry: { mintPriceWei: '0', capPerWallet: 1, codeHash: '0x' + 'ab'.repeat(32), publicStart: 1_700_000_000 } });
   assert.deepEqual(result.conflicts, ['job-1'], 'only the queued job opening within 5s');
 });
+
+test('the queue summary counts what is about to fire and what collides', () => {
+  const { summarizeQueue } = require('../dist/executor/preview');
+  const now = 1_700_000_000_000;
+  const summary = summarizeQueue(
+    [
+      { startAtMs: now + 60_000, status: 'queued' },
+      { startAtMs: now + 63_000, status: 'queued' }, // 3s after the first: a collision
+      { startAtMs: now + 30 * 60_000, status: 'claimed' },
+      { startAtMs: now + 10 * 60_000, status: 'done' }, // finished: ignored
+      { startAtMs: now + 90 * 60_000, status: 'queued' }, // outside the 45-minute window
+    ],
+    now
+  );
+  assert.equal(summary.dueSoon, 3);
+  assert.equal(summary.conflicts, 1);
+  assert.deepEqual(summarizeQueue([], now), { dueSoon: 0, conflicts: 0 });
+});

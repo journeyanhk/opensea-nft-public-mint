@@ -298,6 +298,23 @@ export const FAVORITES_CLIENT = `
         ? "执行器心跳 " + data.heartbeat.at.slice(11, 19) + "Z " + (data.heartbeat.host || "")
         : "未检测到执行器心跳";
     }
+    var wallets = (data.heartbeat && data.heartbeat.wallets) || [];
+    var view = el("walletView");
+    if (view) {
+      if (wallets.length === 0) {
+        view.innerHTML = '<span class="muted">钱包视图：执行器尚未发布（键不在 serve 进程，余额/nonce 由执行器每 30 秒写入心跳）</span>';
+      } else {
+        var summary = data.summary || { dueSoon: 0, conflicts: 0 };
+        var head = '<span class="muted">钱包：' + wallets.length + ' 个 · 未来 45 分钟 ' + summary.dueSoon + ' 个任务' +
+          (summary.conflicts > 0 ? ' · <span class="warn-text">同窗口冲突 ' + summary.conflicts + ' 对</span>' : "") + "</span>";
+        var table = '<div style="display:flex;gap:12px;flex-wrap:wrap">' + wallets.map(function (wallet) {
+          var balance = (Number(BigInt(wallet.balanceWei)) / 1e18).toFixed(6);
+          return '<span class="mono">' + wallet.address.slice(0, 8) + "…" + wallet.address.slice(-4) + "</span>" +
+            '<span class="muted">' + balance + " ETH · nonce " + wallet.nonce + "</span>";
+        }).join("") + "</div>";
+        view.innerHTML = head + table;
+      }
+    }
     list.innerHTML = data.jobs.length === 0 ? '<div class="muted">队列为空</div>' : data.jobs.map(function (job) {
       var result = job.result ? (job.result.status + (job.result.mintedCount !== null && job.result.mintedCount !== undefined ? " ×" + job.result.mintedCount : "")) : "";
       var tx = job.result && job.result.txHash ? ' <a href="https://robinhoodchain.blockscout.com/tx/' + job.result.txHash + '" target="_blank" rel="noreferrer">tx</a>' : "";

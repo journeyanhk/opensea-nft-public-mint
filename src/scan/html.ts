@@ -629,7 +629,8 @@ export function renderDashboard(
     queue?: {
       jobs: QueueJob[];
       armed: { armed: boolean; expiresAtMs?: number };
-      heartbeat: { at?: string; host?: string } | null;
+      heartbeat: { at?: string; host?: string; wallets?: { address: string; balanceWei: string; nonce: number }[] } | null;
+      summary?: { dueSoon: number; conflicts: number };
     };
   } = {}
 ): string {
@@ -1127,6 +1128,7 @@ ${serveBar}
     <button type="button" id="queueDisarm">解除</button>
     <span id="queueNote" class="muted"></span>
   </div>
+  <div id="walletView" class="queue-head"></div>
   <div id="queueList"></div>
 </div>
 

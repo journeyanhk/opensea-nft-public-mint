@@ -7,6 +7,7 @@
 ## [Unreleased]
 
 ### 新增
+- P1.2 钱包视图：执行器每 30 秒随心跳发布 `wallets: [{address, balanceWei, nonce}]`（私钥不出进程）；`summarizeQueue` 纯函数统计未来 45 分钟任务数与同窗口冲突；面板执行队列页顶部一行展示；`/api/queue` 同时返回心跳与摘要
 - P1.1 入队预览：`src/executor/preview.ts`（纯函数：数量策略/最坏花费/风险提示/同窗口冲突，含不适用拒绝）+ `POST /api/queue/preview`（从状态文件读价格与上限）+ 面板点击时先预览再入队
 - arm 可全 env 化：`ARM_TOKEN`（在 `.env.executor` 指定 token，不再依赖生成文件）、`AUTO_ARM=1`（启动即武装，无需面板操作）、`EXECUTOR_ARM_TTL_H=0`（武装永不过期，直到手动解除/轮换）
 ### 修复

@@ -44,6 +44,28 @@ export interface PreviewResult {
   conflicts: string[];
 }
 
+// "What is about to happen" for the whole queue: how many jobs open inside the
+// executor's claim window, and how many of those pair up on the same wallet set
+// within a few seconds (every job shares the wallets, so that is a real wait).
+export function summarizeQueue(
+  jobs: { startAtMs: number | null; status: string }[],
+  nowMs: number,
+  input: { windowMs?: number; conflictWindowMs?: number } = {}
+): { dueSoon: number; conflicts: number } {
+  const live = jobs.filter((job) => job.status === "queued" || job.status === "claimed");
+  const windowMs = input.windowMs ?? 45 * 60_000;
+  const due = live
+    .filter((job) => job.startAtMs !== null && job.startAtMs - nowMs <= windowMs)
+    .map((job) => job.startAtMs!)
+    .sort((a, b) => a - b);
+  const conflictWindowMs = input.conflictWindowMs ?? 5_000;
+  let conflicts = 0;
+  for (let i = 0; i + 1 < due.length; i++) {
+    if (Math.abs(due[i + 1] - due[i]) <= conflictWindowMs) conflicts++;
+  }
+  return { dueSoon: due.length, conflicts };
+}
+
 export function previewJob(input: PreviewInput): PreviewResult {
   const warnings: string[] = [];
   const entry = input.entry ?? null;

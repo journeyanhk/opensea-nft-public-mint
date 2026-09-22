@@ -14,7 +14,7 @@ import { renderDashboard } from "../scan/html";
 import { resolveChain } from "../chains";
 import fs from "fs";
 import { cancelJob, clearArmed, enqueueJob, isArmed, listJobs, setArmed } from "../executor/queue";
-import { previewJob } from "../executor/preview";
+import { previewJob, summarizeQueue } from "../executor/preview";
 import { DEFAULT_STATE_PATH, loadState } from "../scan/state";
 import {
   DEFAULT_FAVORITES_PATH,
@@ -93,6 +93,21 @@ export function createServer(options: ServerOptions): http.Server {
   const favoritesPath = options.favoritesPath ?? DEFAULT_FAVORITES_PATH;
   const queueDir = options.queueDir ?? path.resolve(process.cwd(), "queue");
   const statePath = options.statePath ?? DEFAULT_STATE_PATH;
+
+  // The executor publishes its heartbeat (and its wallet snapshot) into the queue
+  // directory; the page and the queue API both read the same file.
+  const readHeartbeat = (): {
+    at?: string;
+    host?: string;
+    pid?: number;
+    wallets?: { address: string; balanceWei: string; nonce: number }[];
+  } | null => {
+    try {
+      return JSON.parse(fs.readFileSync(path.join(queueDir, "_heartbeat.json"), "utf8"));
+    } catch {
+      return null;
+    }
+  };
   let lastScanRequest = 0;
 
   return http.createServer(async (req, res) => {
@@ -119,7 +134,13 @@ export function createServer(options: ServerOptions): http.Server {
       if (url.pathname === "/api/queue" || url.pathname.startsWith("/api/queue/")) {
         const action = url.pathname.replace("/api/queue", "").replace(/^\//, "");
         if (req.method === "GET" && action === "") {
-          return sendJson(res, 200, { jobs: listJobs(queueDir, Date.now()).slice(0, 200), armed: isArmed(queueDir, Date.now()) });
+          const jobs = listJobs(queueDir, Date.now());
+          return sendJson(res, 200, {
+            jobs: jobs.slice(0, 200),
+            armed: isArmed(queueDir, Date.now()),
+            heartbeat: readHeartbeat(),
+            summary: summarizeQueue(jobs, Date.now()),
+          });
         }
         if (req.method === "POST") {
           const body = (await readJsonBody(req)) as Record<string, unknown>;
@@ -262,17 +283,6 @@ export function createServer(options: ServerOptions): http.Server {
       }
 
       if (req.method === "GET" && url.pathname === "/") {
-        const heartbeat = (() => {
-          try {
-            return JSON.parse(fs.readFileSync(path.join(queueDir, "_heartbeat.json"), "utf8")) as {
-              at?: string;
-              host?: string;
-              pid?: number;
-            };
-          } catch {
-            return null;
-          }
-        })();
         const html = renderDashboard(
           scheduler.rows,
           { generatedAt: new Date().toISOString(), sources: ["local state files"] },
@@ -281,7 +291,12 @@ export function createServer(options: ServerOptions): http.Server {
             favorites: loadFavorites(favoritesPath),
             // The queue is the page's view of the executor: files the two
             // processes share, read here so the browser needs no second origin.
-            queue: { jobs: listJobs(queueDir, Date.now()).slice(0, 100), armed: isArmed(queueDir, Date.now()), heartbeat },
+            queue: {
+              jobs: listJobs(queueDir, Date.now()).slice(0, 100),
+              armed: isArmed(queueDir, Date.now()),
+              heartbeat: readHeartbeat(),
+              summary: summarizeQueue(listJobs(queueDir, Date.now()), Date.now()),
+            },
           }
         );
         res.writeHead(200, {

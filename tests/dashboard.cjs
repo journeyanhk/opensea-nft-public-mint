@@ -682,3 +682,12 @@ test('the queue surface: tab, arm box, enqueue buttons and the embedded snapshot
   assert.ok(html.includes('job-1') && html.includes('已武装'), 'the snapshot has the job and the arm state');
   assert.ok(!html.includes('http://127.0.0.1:8787'), 'the page never points at the executor');
 });
+
+test('the queue tab carries a wallet view container', () => {
+  const html = renderDashboard([], { generatedAt: 'now', sources: [] }, {
+    serve: true,
+    queue: { jobs: [], armed: { armed: false }, heartbeat: { at: 't', host: 'h', wallets: [] }, summary: { dueSoon: 0, conflicts: 0 } },
+  });
+  assert.ok(html.includes('id="walletView"'), 'the wallet table has a home');
+  assert.ok(html.includes('window.__QUEUE__'), 'the snapshot (including wallets) reaches the client');
+});
