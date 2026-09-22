@@ -11,6 +11,9 @@
 - P1.1 入队预览：`src/executor/preview.ts`（纯函数：数量策略/最坏花费/风险提示/同窗口冲突，含不适用拒绝）+ `POST /api/queue/preview`（从状态文件读价格与上限）+ 面板点击时先预览再入队
 - arm 可全 env 化：`ARM_TOKEN`（在 `.env.executor` 指定 token，不再依赖生成文件）、`AUTO_ARM=1`（启动即武装，无需面板操作）、`EXECUTOR_ARM_TTL_H=0`（武装永不过期，直到手动解除/轮换）
 ### 修复
+- review20 三处：①钱包余额改为**按链**读取（`SCAN_CHAINS`，心跳 `wallets[].balances[{chain,wei,symbol}]` + `nonces`），Arc 的 USDC 余额不再隐形；②批次通道的**预留随心跳发布**（runner `onLaneSnapshot` → 执行器 `reservations`），面板显示「余额（预留 X）」；③面板钱包行**转义地址**、nonce 读取失败显示 `—` 而不是 -1
+### 新增
+- review20 筛选：面板「桶」下拉（A 有货可达 / B 预计抢不到 / C 无人要，规则纯前端由现有字段推导）+「价格」下拉（仅免费 / ≤0.001 / ≤0.01）+「排除改价」；两个预设「A 桶：有货可达」「低价 ≤0.001」；入队时写入等级与 Q 快照
 - 数量策略重建 calldata 后与旧计划比较，导致 `⚠ Drop changed: 0.0 → 0.0` 假告警：比较移到策略之前（只有价格/fee recipient 真变才提示）
 - P2 执行器并行认领：`claimMany`（窗口内一次认领，逐个原子 rename，仍可多实例安全竞争）+ `mergeJobConfigs`（同链合成一个 `parallel: true` 批次，保留每个任务的 `codeHash`/`riskFlags`）+ `abortFor`（取消只中止自己的任务）+ `startKeepAlive`（组内任务统一心跳/续租）；`shouldAbort` 改为按目标判定（runner → local-mint 逐目标检查）；`CLAIM_BATCH`（默认 8，可在 `.env.executor` 调）- P4a 速度：①`orderEndpoints` 让 sequencer 直连第一个发出（原顺序里它是最后一个，us-east-2 下这是最贵的一条 RTT）；②`keepWarm` 在等开售期间每 2 秒刷新连接（fetch 连接池默认几秒断开，正好短于 T-5s→T-0 的等待），单发/连发两条路径都接；③`BURST_AUTO_FREE_CAP1`（默认开）让「免费 + cap=1」目标自动连发 3 笔（`autoBurstForFreeCap1` 纯函数，显式 `BURST_COUNT` 优先）- P0 最小通知：`src/notify.ts`（`buildNotifyRequest` 纯函数 + `heartbeatStale`；Telegram sendMessage 或任意 JSON webhook，`NOTIFY_WEBHOOK`/`NOTIFY_TELEGRAM_CHAT_ID`，默认关闭、5s 超时、失败静默）。事件：任务结束（状态/minted/tx 链接）、执行器心跳停更 >5 分钟（serve 侧每 tick 检测、同一停顿只提醒一次）、日历金丝雀告警
 - P0 面板收口：①状态栏轮询发现 `lastScanAt` 变化即自动 reload（后台标签的 meta refresh 会被浏览器暂停）；②**发现阶段落盘价格/上限/feeRecipient**（复用候选过滤已调用的 `buildLocalMintPlan`，零额外 RPC），`--refresh-targets` 同步补齐，「价格未知」积压消失；③无链上计划（价格与上限均缺）时不再显示等级，按未评级参与筛选

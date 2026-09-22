@@ -768,6 +768,8 @@ export function renderDashboard(
         `data-velocity="${escapeHtml(row.velocity24h ?? "")}"`,
         `data-notes="${escapeHtml(row.notes.join("；"))}"`,
         `data-risks="${escapeHtml(quality.penalties.join(","))}"`,
+        `data-presale="${row.presaleShare === null ? "" : row.presaleShare}"`,
+        `data-cap="${row.capPerWallet ?? ""}"`,
         `data-net24usd="${escapeHtml(row.nets["24"] ?? "")}"`,
         `data-net72usd="${escapeHtml(row.nets["72"] ?? "")}"`,
         `data-target="${escapeHtml(`${row.name ?? ""} ${row.contract} ${row.chain}`)}"`,
@@ -1168,6 +1170,22 @@ ${serveBar}
       <option value="unaudited">待复审</option>
     </select>
   </label>
+  <label>桶
+    <select id="bucketFilter">
+      <option value="">全部</option>
+      <option value="A">A 桶：有货可达</option>
+      <option value="B">B 桶：预计抢不到</option>
+      <option value="C">C 桶：无人要</option>
+    </select>
+  </label>
+  <label>价格
+    <select id="priceFilter">
+      <option value="">全部</option>
+      <option value="0">仅免费</option>
+      <option value="0.001">≤ 0.001 ETH</option>
+      <option value="0.01">≤ 0.01 ETH</option>
+    </select>
+  </label>
   <label>Q 分
     <select id="qFilter">
       <option value="">全部</option>
@@ -1180,9 +1198,12 @@ ${serveBar}
   <label><input type="checkbox" id="freeOnly"> 仅免费</label>
   <label><input type="checkbox" id="onlyPending"> 仅队列中</label>
   <label><input type="checkbox" id="onlyExecuted"> 仅已执行</label>
-  <label><input type="checkbox" id="excludeInstant"> 排除预计秒空</label>
+  <label><input type="checkbox" id="excludeInstant"> 排除秒空/批量</label>
+  <label><input type="checkbox" id="excludeFlip"> 排除改价</label>
   <label>搜索 <input id="search" type="search" placeholder="名称 / 合约 / 链"></label>
   <button id="presetFresh" class="primary">免费 · A/B · Q≥60 · 未开售</button>
+  <button id="presetBucketA">A 桶：有货可达</button>
+  <button id="presetCheap">低价 ≤0.001</button>
   <span id="hiddenCount" class="muted"></span>
   <span id="freeNote" class="muted"></span>
   <span id="count" class="muted"></span>
@@ -1236,6 +1257,27 @@ window.__QUEUE__ = ${JSON.stringify(opts.queue ?? { jobs: [], armed: { armed: fa
 
   var PHASE_ZH = { upcoming: "未开售", "live-fresh": "新开售", live: "在售", stale: "陈旧", "sold-out": "售罄", ended: "已结束", unaudited: "待复审" };
 
+  // The three buckets from the review, computed from fields the row carries:
+  // what is reachable (A), what will be swept (B), what nobody wants (C).
+  function weiOf(eth) { return BigInt(Math.round(Number(eth) * 1e6)) * 1000000000000n; }
+  function bucketOf(row) {
+    var risks = row.dataset.risks || "";
+    var presale = row.dataset.presale === "" ? null : Number(row.dataset.presale);
+    var mintedPct = row.dataset.mintedpct === "" ? null : Number(row.dataset.mintedpct);
+    var remainingPct = mintedPct === null ? null : 100 - mintedPct;
+    var minters = row.dataset.minters === "" ? null : Number(row.dataset.minters);
+    var q = row.dataset.q === "" ? null : Number(row.dataset.q);
+    var velocity = row.dataset.velocity === "" ? 0 : Number(row.dataset.velocity);
+
+    if (risks.indexOf("instant-sellout") >= 0) return "B";
+    if (presale !== null && presale >= 0.6) return "B";
+    if (remainingPct !== null && remainingPct <= 15) return "B";
+    if (row.dataset.cap === "1" && minters !== null && minters >= 1000) return "B";
+    if ((presale === null || presale === 0) && velocity === 0 && (minters === null || minters < 20)) return "C";
+    if (q !== null && q >= 50 && (remainingPct === null || remainingPct >= 30)) return "A";
+    return "";
+  }
+
   function apply() {
     var grade = document.getElementById("gradeFilter").value;
     var chain = chainFilter.value;
@@ -1243,6 +1285,9 @@ window.__QUEUE__ = ${JSON.stringify(opts.queue ?? { jobs: [], armed: { armed: fa
     var executed = document.getElementById("onlyExecuted").checked;
     var freeOnly = document.getElementById("freeOnly").checked;
     var excludeInstant = document.getElementById("excludeInstant").checked;
+    var excludeFlip = document.getElementById("excludeFlip").checked;
+    var bucket = document.getElementById("bucketFilter").value;
+    var priceCap = document.getElementById("priceFilter").value;
     var phaseFilter = document.getElementById("phaseFilter").value;
     var qMin = parseInt(document.getElementById("qFilter").value, 10) || 0;
     var q = document.getElementById("search").value.toLowerCase();
@@ -1254,7 +1299,12 @@ window.__QUEUE__ = ${JSON.stringify(opts.queue ?? { jobs: [], armed: { armed: fa
         && (!pending || r.dataset.pending === "1")
         && (!executed || r.dataset.executed === "1")
         && (!freeOnly || r.dataset.free === "1" || r.dataset.free === "")
-        && (!excludeInstant || r.dataset.instant !== "1")
+        && (!excludeInstant ||
+          (r.dataset.risks || "").indexOf("instant-sellout") < 0 &&
+          (r.dataset.risks || "").indexOf("batch-mint") < 0)
+        && (!excludeFlip || r.dataset.flip !== "1")
+        && (!priceCap || (r.dataset.mintprice !== "" && BigInt(r.dataset.mintprice) <= weiOf(priceCap)))
+        && (!bucket || bucketOf(r) === bucket)
         && (!qMin || (r.dataset.q !== "" && parseFloat(r.dataset.q) >= qMin))
         && (!q || r.dataset.target.toLowerCase().indexOf(q) >= 0);
       var phase = r.dataset.phase;
@@ -1289,6 +1339,22 @@ window.__QUEUE__ = ${JSON.stringify(opts.queue ?? { jobs: [], armed: { armed: fa
 
   ["gradeFilter", "chainFilter", "onlyPending", "onlyExecuted", "freeOnly", "excludeInstant", "phaseFilter", "qFilter"].forEach(function (id) {
     document.getElementById(id).addEventListener("change", apply);
+  });
+  document.getElementById("presetBucketA").addEventListener("click", function () {
+    document.getElementById("bucketFilter").value = "A";
+    document.getElementById("qFilter").value = "50";
+    document.getElementById("phaseFilter").value = "focus";
+    document.getElementById("excludeInstant").checked = true;
+    document.getElementById("excludeFlip").checked = true;
+    document.getElementById("freeOnly").checked = false;
+    apply();
+  });
+  document.getElementById("presetCheap").addEventListener("click", function () {
+    document.getElementById("priceFilter").value = "0.001";
+    document.getElementById("excludeInstant").checked = true;
+    document.getElementById("excludeFlip").checked = true;
+    document.getElementById("phaseFilter").value = "focus";
+    apply();
   });
   document.getElementById("presetFresh").addEventListener("click", function () {
     document.getElementById("gradeFilter").value = "AB";

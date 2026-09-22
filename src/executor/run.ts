@@ -238,7 +238,7 @@ export interface ExecutorOptions {
   host?: string;
   rotateArmToken?: boolean;
   claimBatch?: number; // jobs claimed per cycle (default CLAIM_BATCH or 8)
-  walletChain?: string; // which chain's RPC to read balances from (default robinhood)
+  walletChains?: string[]; // chains to read balances from (default SCAN_CHAINS)
   onProgress?: (message: string) => void;
 }
 
@@ -316,31 +316,64 @@ export async function runExecutor(options: ExecutorOptions = {}): Promise<void> 
   // it can see about its wallets: balance and nonce, refreshed with the
   // heartbeat. Reservations live inside a batch's coordinator and are not
   // published (the queue summary covers "how many jobs are about to fire").
-  let walletCache: { address: string; balanceWei: string; nonce: number }[] = [];
+  let walletCache: {
+    address: string;
+    balances: { chain: string; wei: string; symbol: string }[];
+    nonces: Record<string, number>;
+  }[] = [];
+  let reservationCache: Record<string, string> = {};
+
   const refreshWallets = async (): Promise<void> => {
     try {
       const keys = walletKeysFromEnv();
       if (keys.length === 0) return;
       const addresses = keys.map((key) => new Wallet(key).address);
-      const chain = options.walletChain ?? "robinhood";
-      const { urls } = resolveScanRpcs(chain);
-      const plan = await planRpcs(urls, resolveChain(chain)?.chainId ?? 0);
-      const rpc = plan.urls[0];
-      if (!rpc) return;
-      const provider = new JsonRpcProvider(rpc);
-      walletCache = await Promise.all(
-        addresses.map(async (address) => {
+      // Every chain the executor may mint on gets its own balance read: a USDC
+      // balance on Arc is not visible from a Robinhood RPC.
+      const chains: string[] = (options.walletChains ?? (process.env.SCAN_CHAINS ?? "robinhood,arc").split(","))
+        .map((chain) => String(chain).trim())
+        .filter((chain) => chain.length > 0 && resolveChain(chain) !== undefined);
+
+      const perChain = await Promise.all(
+        chains.map(async (chain) => {
           try {
-            const [balance, nonce] = await Promise.all([
-              provider.getBalance(address),
-              provider.getTransactionCount(address, "pending"),
-            ]);
-            return { address, balanceWei: balance.toString(), nonce };
+            const { urls } = resolveScanRpcs(chain);
+            const plan = await planRpcs(urls, resolveChain(chain)?.chainId ?? 0);
+            const rpc = plan.urls[0];
+            if (!rpc) return null;
+            const provider = new JsonRpcProvider(rpc);
+            const readings = await Promise.all(
+              addresses.map(async (address) => {
+                try {
+                  const [balance, nonce] = await Promise.all([
+                    provider.getBalance(address),
+                    provider.getTransactionCount(address, "pending"),
+                  ]);
+                  return { address, wei: balance.toString(), nonce };
+                } catch {
+                  return { address, wei: null, nonce: -1 };
+                }
+              })
+            );
+            return { chain, symbol: resolveChain(chain)!.nativeSymbol, readings };
           } catch {
-            return { address, balanceWei: "0", nonce: -1 };
+            return null;
           }
         })
       );
+
+      walletCache = addresses.map((address) => {
+        const balances: { chain: string; wei: string; symbol: string }[] = [];
+        const nonces: Record<string, number> = {};
+        for (const entry of perChain) {
+          if (!entry) continue;
+          const reading = entry.readings.find((item) => item.address === address);
+          if (!reading) continue;
+          if (reading.wei !== null) balances.push({ chain: entry.chain, wei: reading.wei, symbol: entry.symbol });
+          nonces[entry.chain] = reading.nonce;
+        }
+        return { address, balances, nonces };
+      });
     } catch {
       // the wallet view is a convenience; a heartbeat without it still counts
     }
@@ -350,7 +383,13 @@ export async function runExecutor(options: ExecutorOptions = {}): Promise<void> 
     try {
       fs.writeFileSync(
         path.join(queueDir, "_heartbeat.json"),
-        JSON.stringify({ at: new Date().toISOString(), host, pid: process.pid, wallets: walletCache })
+        JSON.stringify({
+          at: new Date().toISOString(),
+          host,
+          pid: process.pid,
+          wallets: walletCache,
+          reservations: reservationCache,
+        })
       );
     } catch {
       // a heartbeat is a convenience, never a reason to stop

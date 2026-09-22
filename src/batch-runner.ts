@@ -56,6 +56,7 @@ export interface BatchRunOptions {
   targetSource?: TargetSource; // tests and B5 inject one; default = config + watch files
   assumeYes?: boolean; // the executor is armed by hand, so it does not ask again
   shouldAbort?: (target: BatchTarget) => boolean; // the queue may have been cancelled while we waited
+  onLaneSnapshot?: (reservedByWallet: Record<string, string>) => void; // who is holding how much
 }
 
 function readConfig(file: string): RawConfig {
@@ -188,6 +189,9 @@ export async function runBatch(configPath: string, options: BatchRunOptions = {}
   // Worst-case spend per target, accumulated per job so a watched batch that
   // merges a third target sees what the first two already committed.
   const coordinator = new LaneCoordinator();
+  // Reserved amounts per wallet, as the operator wants to see them: balance - reserved.
+  const laneSnapshot = (): Record<string, string> =>
+    Object.fromEntries(coordinator.snapshot().map((lane) => [lane.wallet, lane.reservedWei.toString()]));
   const reservationFor = (target: BatchTarget): bigint =>
     planReservation({
       value: target.plan.value,
@@ -623,7 +627,11 @@ export async function runBatch(configPath: string, options: BatchRunOptions = {}
               throw new Error("the stage ended while waiting for the wallet lane");
             }
             setState("lane");
-            return () => lease.release();
+            options.onLaneSnapshot?.(laneSnapshot());
+            return () => {
+              lease.release();
+              options.onLaneSnapshot?.(laneSnapshot());
+            };
           },
         });
       } catch (err) {

@@ -31,7 +31,7 @@ export const FAVORITES_CLIENT = `
   }
 
   var tab = "all";
-  var FILTERS = ["gradeFilter", "phaseFilter", "chainFilter", "qFilter", "freeOnly", "onlyPending", "onlyExecuted", "excludeInstant", "search"];
+  var FILTERS = ["gradeFilter", "phaseFilter", "chainFilter", "qFilter", "bucketFilter", "priceFilter", "freeOnly", "onlyPending", "onlyExecuted", "excludeInstant", "excludeFlip", "search"];
   function el(id) { return document.getElementById(id); }
   function keyOf(chain, contract) { return String(chain).toLowerCase() + "|" + String(contract).toLowerCase(); }
 
@@ -307,10 +307,19 @@ export const FAVORITES_CLIENT = `
         var summary = data.summary || { dueSoon: 0, conflicts: 0 };
         var head = '<span class="muted">钱包：' + wallets.length + ' 个 · 未来 45 分钟 ' + summary.dueSoon + ' 个任务' +
           (summary.conflicts > 0 ? ' · <span class="warn-text">同窗口冲突 ' + summary.conflicts + ' 对</span>' : "") + "</span>";
+        var shorten = function (value) { return String(value).replace(/[&<>"]/g, ""); };
         var table = '<div style="display:flex;gap:12px;flex-wrap:wrap">' + wallets.map(function (wallet) {
-          var balance = (Number(BigInt(wallet.balanceWei)) / 1e18).toFixed(6);
-          return '<span class="mono">' + wallet.address.slice(0, 8) + "…" + wallet.address.slice(-4) + "</span>" +
-            '<span class="muted">' + balance + " ETH · nonce " + wallet.nonce + "</span>";
+          var address = shorten(wallet.address);
+          var lines = (wallet.balances || []).map(function (entry) {
+            var amount = (Number(BigInt(entry.wei)) / 1e18).toFixed(6);
+            var reserved = data.reservations && (data.reservations[wallet.address.toLowerCase()] || data.reservations[address.toLowerCase()]);
+            var reservedText = reserved && BigInt(reserved) > 0n ? "（预留 " + (Number(BigInt(reserved)) / 1e18).toFixed(6) + "）" : "";
+            var nonce = wallet.nonces && wallet.nonces[entry.chain] >= 0 ? wallet.nonces[entry.chain] : "—";
+            return amount + " " + shorten(entry.symbol) + " · nonce " + nonce + reservedText;
+          });
+          if (lines.length === 0) lines = ["（读取失败）"];
+          return '<span class="mono">' + address.slice(0, 8) + "…" + address.slice(-4) + "</span>" +
+            '<span class="muted">' + lines.join(" / ") + "</span>";
         }).join("") + "</div>";
         view.innerHTML = head + table;
       }
@@ -345,6 +354,8 @@ export const FAVORITES_CLIENT = `
         quantity: 1, maxPriceEth: "current",
         startAtMs: enqueue.dataset.start ? Number(enqueue.dataset.start) * 1000 : null,
         riskFlags: (enqueue.dataset.risks || "").split(",").filter(Boolean),
+        grade: enqueue.dataset.grade || null,
+        quality: enqueue.dataset.q === "" ? null : Number(enqueue.dataset.q),
         source: { kind: "row" },
       };
       // Ask what queueing would mean before doing it: quantity, worst-case cost,

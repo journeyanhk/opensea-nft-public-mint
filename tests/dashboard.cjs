@@ -691,3 +691,27 @@ test('the queue tab carries a wallet view container', () => {
   assert.ok(html.includes('id="walletView"'), 'the wallet table has a home');
   assert.ok(html.includes('window.__QUEUE__'), 'the snapshot (including wallets) reaches the client');
 });
+
+test('the review presets and the bucket/price filters exist and are wired', () => {
+  const now = Math.floor(Date.now() / 1000);
+  const state = {
+    version: 1, chains: {},
+    contracts: { arc: { '0xa': {
+      firstSeenBlock: 1, lastSeenBlock: 1, lastAuditedBlock: 1, lastAuditedAt: 't', lastGrade: 'A', soldOutAtBlock: null,
+      publicStart: now + 3600, pendingAudit: false, slug: 'a', name: 'A', endTime: now + 7200, maxSupply: '1000', totalMinted: '100',
+      owner: null, socialCheckedAt: 't', sources: [], calendar: null, codeHash: null, mintPriceWei: '0', capPerWallet: 2,
+      feeRecipient: null, factsAt: 't', mintPriceChangedAt: null, priceHistory: [],
+    } } },
+  };
+  const history = [{ at: new Date(now * 1000).toISOString(), chain: 'arc', contract: '0xa', grade: 'A', remaining: '900', projected: '0', start: now + 3600, minted: '100', maxSupply: '1000', uniqueMinters: 80, topMinterShare: 0.1, presaleStages: 1, capPerWallet: 2, recent1h: '5', mintPriceWei: '0' }];
+  const html = renderDashboard(loadDashboardRows(state, history, { version: 1, entries: {} }, () => null), { generatedAt: 'now', sources: [] });
+
+  assert.ok(html.includes('id="bucketFilter"') && html.includes('A 桶：有货可达'));
+  assert.ok(html.includes('id="priceFilter"') && html.includes('≤ 0.001 ETH'));
+  assert.ok(html.includes('id="excludeFlip"'));
+  assert.ok(html.includes('id="presetBucketA"') && html.includes('id="presetCheap"'));
+  assert.ok(html.includes('data-presale=') && html.includes('data-cap='));
+  assert.ok(html.includes('bucketOf(') && html.includes('instant-sellout'));
+  assert.ok(html.includes('excludeFlip !=') === false, 'the filter reads the checkbox');
+  assert.ok(html.includes('document.getElementById("excludeFlip").checked'));
+});
