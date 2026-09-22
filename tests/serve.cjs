@@ -315,3 +315,69 @@ test('queue api: enqueue, list, cancel and the arm second factor', async () => {
     server.close();
   }
 });
+
+test('queue preview: quantity, worst case, risks and conflicts before enqueueing', async () => {
+  const fs = require('fs');
+  const os = require('os');
+  const path = require('path');
+  const { saveState } = require('../dist/scan/state');
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'queue-preview-'));
+  const queueDir = path.join(dir, 'queue');
+  const statePath = path.join(dir, '.scan-state.json');
+  const contract = '0x65f001aa4109bb8d3bf70af66855aba1e5582625';
+  const startAt = Date.now() + 600_000;
+  saveState(
+    {
+      version: 1,
+      chains: {},
+      contracts: {
+        robinhood: {
+          [contract]: {
+            firstSeenBlock: 1, lastSeenBlock: 1, lastAuditedBlock: 1, lastAuditedAt: 't', lastGrade: 'A',
+            soldOutAtBlock: null, publicStart: Math.floor(startAt / 1000), pendingAudit: false, lastMintedTotal: null,
+            quietStreak: 0, slug: 'x', name: 'X', endTime: 0, maxSupply: '100', totalMinted: '0', owner: null,
+            imageUrl: null, twitter: null, discord: null, website: null, createdDate: null, safelist: null,
+            socialCheckedAt: 't', xFollowers: null, xCheckedAt: null, sources: [], calendar: null,
+            codeHash: '0x' + 'ab'.repeat(32), mintPriceWei: '0', capPerWallet: 2, feeRecipient: null,
+            factsAt: 't', mintPriceChangedAt: null, priceHistory: [],
+          },
+        },
+      },
+    },
+    statePath
+  );
+
+  const server = createServer({ scheduler: stubScheduler(), exportsDir: '/tmp/exports', queueDir, statePath });
+  const port = await listen(server);
+  const base = `http://127.0.0.1:${port}`;
+  try {
+    const preview = await (
+      await fetch(`${base}/api/queue/preview`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ chain: 'robinhood', contract, quantity: 1, startAtMs: startAt }),
+      })
+    ).json();
+    assert.equal(preview.ok, true);
+    assert.equal(preview.quantity, 2, 'the state says this free drop has a cap of 2');
+    assert.ok(BigInt(preview.worstCaseWei) > 0n);
+    assert.deepEqual(preview.conflicts, []);
+
+    // Queue a job at the same moment: the next preview must report the collision.
+    await fetch(`${base}/api/queue`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ chain: 'robinhood', contract, quantity: 1, startAtMs: startAt }),
+    });
+    const second = await (
+      await fetch(`${base}/api/queue/preview`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ chain: 'robinhood', contract, quantity: 1, startAtMs: startAt + 2_000 }),
+      })
+    ).json();
+    assert.equal(second.conflicts.length, 1, 'a queued job within five seconds is a conflict');
+  } finally {
+    server.close();
+  }
+});

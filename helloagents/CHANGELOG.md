@@ -7,6 +7,7 @@
 ## [Unreleased]
 
 ### 新增
+- P1.1 入队预览：`src/executor/preview.ts`（纯函数：数量策略/最坏花费/风险提示/同窗口冲突，含不适用拒绝）+ `POST /api/queue/preview`（从状态文件读价格与上限）+ 面板点击时先预览再入队
 - arm 可全 env 化：`ARM_TOKEN`（在 `.env.executor` 指定 token，不再依赖生成文件）、`AUTO_ARM=1`（启动即武装，无需面板操作）、`EXECUTOR_ARM_TTL_H=0`（武装永不过期，直到手动解除/轮换）
 ### 修复
 - 数量策略重建 calldata 后与旧计划比较，导致 `⚠ Drop changed: 0.0 → 0.0` 假告警：比较移到策略之前（只有价格/fee recipient 真变才提示）

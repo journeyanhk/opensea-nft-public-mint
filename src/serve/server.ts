@@ -14,6 +14,8 @@ import { renderDashboard } from "../scan/html";
 import { resolveChain } from "../chains";
 import fs from "fs";
 import { cancelJob, clearArmed, enqueueJob, isArmed, listJobs, setArmed } from "../executor/queue";
+import { previewJob } from "../executor/preview";
+import { DEFAULT_STATE_PATH, loadState } from "../scan/state";
 import {
   DEFAULT_FAVORITES_PATH,
   FavoriteSnapshot,
@@ -35,6 +37,7 @@ export interface ServerOptions {
   exportsDir: string;
   favoritesPath?: string;
   queueDir?: string;
+  statePath?: string;
 }
 
 function sendJson(res: http.ServerResponse, status: number, body: unknown): void {
@@ -89,6 +92,7 @@ export function createServer(options: ServerOptions): http.Server {
   const { scheduler } = options;
   const favoritesPath = options.favoritesPath ?? DEFAULT_FAVORITES_PATH;
   const queueDir = options.queueDir ?? path.resolve(process.cwd(), "queue");
+  const statePath = options.statePath ?? DEFAULT_STATE_PATH;
   let lastScanRequest = 0;
 
   return http.createServer(async (req, res) => {
@@ -127,6 +131,42 @@ export function createServer(options: ServerOptions): http.Server {
             clearArmed(queueDir);
             return sendJson(res, 200, { armed: { armed: false } });
           }
+          if (action === "preview") {
+            const chain = String(body.chain ?? "").toLowerCase();
+            const contract = String(body.contract ?? "").toLowerCase();
+            if (!resolveChain(chain)) return sendJson(res, 400, { error: `unsupported chain "${chain}"` });
+            if (!/^0x[0-9a-f]{40}$/i.test(contract)) return sendJson(res, 400, { error: "contract must be a 0x-prefixed 20-byte address" });
+            const { state } = loadState(statePath);
+            const entry = state.contracts[chain]?.[contract] ?? null;
+            const gasGwei = Number(process.env.MAX_FEE_PER_GAS ?? "2");
+            const result = previewJob({
+              chain,
+              contract,
+              quantity: Math.max(1, Math.floor(Number(body.quantity ?? 1)) || 1),
+              startAtMs: Number(body.startAtMs) > 0 ? Number(body.startAtMs) : null,
+              entry: entry
+                ? {
+                    mintPriceWei: entry.mintPriceWei,
+                    capPerWallet: entry.capPerWallet,
+                    codeHash: entry.codeHash,
+                    publicStart: entry.publicStart,
+                  }
+                : null,
+              existing: listJobs(queueDir, Date.now()).map((job) => ({
+                id: job.id,
+                chain: job.chain,
+                contract: job.contract,
+                startAtMs: job.startAtMs,
+                status: job.view,
+              })),
+              freeMaxQuantity: Number(process.env.FREE_MAX_QUANTITY ?? "10") || 10,
+              gasLimit: Number(process.env.GAS_LIMIT ?? "250000") || 250_000,
+              maxFeePerGasWei: String(Math.round((Number.isFinite(gasGwei) && gasGwei > 0 ? gasGwei : 2) * 1e9)),
+              riskFlags: Array.isArray(body.riskFlags) ? body.riskFlags.map(String).slice(0, 8) : [],
+            });
+            return sendJson(res, 200, result);
+          }
+
           if (action === "cancel") {
             const id = String(body.id ?? "");
             if (!id) return sendJson(res, 400, { error: "id is required" });
@@ -304,7 +344,7 @@ export async function runServe(config: ServeConfig): Promise<void> {
   const scheduler = new Scheduler(config);
   scheduler.start();
 
-  const server = createServer({ scheduler, exportsDir: config.exportsDir });
+  const server = createServer({ scheduler, exportsDir: config.exportsDir, statePath: config.statePath });
   await new Promise<void>((resolve, reject) => {
     server.once("error", reject);
     server.listen(config.port, config.host, () => resolve());

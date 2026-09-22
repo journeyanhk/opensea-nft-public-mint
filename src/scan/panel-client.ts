@@ -330,9 +330,26 @@ export const FAVORITES_CLIENT = `
         riskFlags: (enqueue.dataset.risks || "").split(",").filter(Boolean),
         source: { kind: "row" },
       };
-      fetch("/api/queue", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) })
-        .then(function (r) { return r.json().then(function (j) { if (!r.ok || j.ok === false) throw new Error(j.error || j.reason || String(r.status)); return j; }); })
-        .then(function () { if (el("queueNote")) el("queueNote").textContent = "已加入队列"; queueRefresh(); })
+      // Ask what queueing would mean before doing it: quantity, worst-case cost,
+      // risk labels and same-wallet collisions are all decided here.
+      fetch("/api/queue/preview", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) })
+        .then(function (r) { return r.json(); })
+        .then(function (preview) {
+          if (preview && preview.ok === false) {
+            throw new Error(preview.reason || "not applicable");
+          }
+          var notes = [];
+          if (preview) {
+            notes.push("预计 ×" + preview.quantity + "（" + preview.quantityReason + "）");
+            notes.push("最坏花费 " + (Number(BigInt(preview.worstCaseWei)) / 1e18).toFixed(6) + " ETH");
+            if (preview.conflicts && preview.conflicts.length) notes.push("与 " + preview.conflicts.length + " 个任务开售冲突");
+            if (preview.warnings && preview.warnings.length) notes.push(preview.warnings.join("；"));
+          }
+          if (el("queueNote")) el("queueNote").textContent = notes.join(" · ") || "加入中…";
+          return fetch("/api/queue", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) })
+            .then(function (r) { return r.json().then(function (j) { if (!r.ok || j.ok === false) throw new Error(j.error || j.reason || String(r.status)); return j; }); })
+            .then(function () { if (el("queueNote")) el("queueNote").textContent = notes.concat(["已加入队列"]).join(" · "); queueRefresh(); });
+        })
         .catch(function (e) { if (el("queueNote")) el("queueNote").textContent = "入队失败：" + e.message; });
       return;
     }
