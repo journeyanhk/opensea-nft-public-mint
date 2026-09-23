@@ -95,6 +95,8 @@ test('a chain becomes one parallel batch, and a cancel only stops its own job', 
   assert.equal(raw.chain, 'robinhood');
   assert.equal(raw.parallel, true, 'the batch runs in parallel');
   assert.equal(raw.targets.length, 2);
+  assert.deepEqual(raw.auditSkipGrades, [], 'a queued job was chosen by hand, so no grade skips it');
+  assert.equal(raw.auditBeforeMs, 0, 'the executor already audited at claim time; do not re-audit before the open');
   const targetA = raw.targets.find((target) => target.quantity === 2);
   assert.equal(targetA.codeHash, '0x' + 'ab'.repeat(32), 'gate 1 keeps its pinned hash');
   assert.deepEqual(targetA.riskFlags, ['instant-sellout'], 'per-job risk flags survive the merge');

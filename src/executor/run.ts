@@ -195,7 +195,11 @@ const sleep = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve,
 export function mergeJobConfigs(jobs: QueueJob[]): RawConfig {
   const chain = jobs[0].chain;
   const targets = jobs.flatMap((job) => jobToRawConfig(job).targets ?? []);
-  return { chain, parallel: true, targets } as RawConfig;
+  // A queued job was chosen by hand, so its grade must never veto it: the
+  // executor already audited at claim time (applicability + code hash), and a
+  // grade-C skip here silently overrode that decision. auditBeforeMs is 0 for
+  // the same reason — the audit would only repeat what claim time just saw.
+  return { chain, parallel: true, auditBeforeMs: 0, auditSkipGrades: [], targets } as RawConfig;
 }
 
 // A cancel must only stop its own job: the runner asks per target, so map the
